@@ -88,6 +88,7 @@ private final class AppWindows: @unchecked Sendable {
     private var hidden: Bool
     private var stopped = false
     private var pending: DispatchWorkItem?
+    private var settleGeneration: UInt64 = 0
 
     init(pid: pid_t, name: String, bundleId: String, hidden: Bool, generation: UUID,
          publish: @escaping @Sendable ([WindowRecord]) -> Void) {
@@ -105,9 +106,9 @@ private final class AppWindows: @unchecked Sendable {
         queue.async { [self] in
             AXUIElementSetMessagingTimeout(application, 0.05)
             var value: AXObserver?
-            let result = AXObserverCreate(pid, { _, _, _, context in
+            let result = AXObserverCreate(pid, { _, _, notification, context in
                 guard let context else { return }
-                Unmanaged<AppWindows>.fromOpaque(context).takeUnretainedValue().refresh()
+                Unmanaged<AppWindows>.fromOpaque(context).takeUnretainedValue().changed(notification as String)
             }, &value)
             if result == .success, let value {
                 observer = value
@@ -120,14 +121,20 @@ private final class AppWindows: @unchecked Sendable {
             }
             readSnapshot()
             // A launched app can expose AX only after its first AppKit turn.
-            for milliseconds in [50, 150, 300, 450] { settle(after: milliseconds) }
+            beginSettling()
         }
     }
 
-    func refresh(hidden: Bool? = nil) {
+    private func changed(_ notification: String) {
+        let needsSettling = [kAXWindowCreatedNotification, kAXSheetCreatedNotification, kAXMainWindowChangedNotification].contains(notification)
+        refresh(settle: needsSettling)
+    }
+
+    func refresh(hidden: Bool? = nil, settle: Bool = false) {
         queue.async { [self] in
             guard !stopped else { return }
             if let hidden { self.hidden = hidden }
+            if settle { beginSettling() }
             pending?.cancel()
             let item = DispatchWorkItem { [weak self] in self?.readSnapshot() }
             pending = item
@@ -151,8 +158,15 @@ private final class AppWindows: @unchecked Sendable {
         }
     }
 
-    private func settle(after milliseconds: Int) {
-        queue.asyncAfter(deadline: .now() + .milliseconds(milliseconds)) { [weak self] in self?.readSnapshot() }
+    private func beginSettling() {
+        settleGeneration += 1
+        let generation = settleGeneration
+        for milliseconds in [50, 150, 300, 450] {
+            queue.asyncAfter(deadline: .now() + .milliseconds(milliseconds)) { [weak self] in
+                guard let self, !self.stopped, self.settleGeneration == generation else { return }
+                self.readSnapshot()
+            }
+        }
     }
 
     private func readSnapshot() {
@@ -173,7 +187,7 @@ private final class AppWindows: @unchecked Sendable {
             updateWindowNotifications(elements)
             publish(facts.map { $0.record(app: name, bundleId: bundleId, hidden: hidden) })
             if !newIDs.subtracting(oldIDs).isEmpty {
-                for milliseconds in [100, 250, 450] { settle(after: milliseconds) }
+                beginSettling()
             }
         } catch {
             // A failed read is not a classification signal, nor proof of closure.
@@ -182,10 +196,10 @@ private final class AppWindows: @unchecked Sendable {
     }
 
     private func inspect(_ window: AXUIElement, into result: inout [WindowFacts], elements: inout [AXUIElement]) throws {
+        AXUIElementSetMessagingTimeout(window, 0.05)
         var id: CGWindowID = 0
         try check(axWindowID(window, &id))
         guard id != 0, !result.contains(where: { $0.id == id }) else { return }
-        AXUIElementSetMessagingTimeout(window, 0.05)
         let minimized = try value(window, kAXMinimizedAttribute) as? Bool ?? false
         let subrole = try value(window, kAXSubroleAttribute) as? String ?? "AXUnknown"
         var resizable = DarwinBoolean(false)
@@ -206,6 +220,7 @@ private final class AppWindows: @unchecked Sendable {
                         sheets: inout [AXUIElement], groups: inout [AXUIElement]) throws -> Int {
         guard depth < 5, visited < 64 else { return 0 }
         visited += 1
+        AXUIElementSetMessagingTimeout(element, 0.05)
         let role = try value(element, kAXRoleAttribute) as? String ?? ""
         if role == kAXTabGroupRole {
             groups.append(element)
@@ -225,7 +240,8 @@ private final class AppWindows: @unchecked Sendable {
         guard let observer else { return }
         for name in [kAXWindowCreatedNotification, kAXFocusedWindowChangedNotification, kAXMainWindowChangedNotification, kAXSheetCreatedNotification] {
             guard !appNotifications.contains(name) else { continue }
-            if AXObserverAddNotification(observer, application, name as CFString, Unmanaged.passUnretained(self).toOpaque()) == .success {
+            let result = AXObserverAddNotification(observer, application, name as CFString, Unmanaged.passUnretained(self).toOpaque())
+            if result == .success || result == .notificationAlreadyRegistered || result == .notificationUnsupported {
                 appNotifications.insert(name)
             }
         }

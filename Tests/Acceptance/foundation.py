@@ -436,10 +436,9 @@ class FoundationAcceptance(unittest.TestCase):
             print(f"\nE22 run {index + 1}/10: CPU {measurement['cpuNanoseconds'] / 1e6:.3f} ms, RSS {resident / 1e6:.2f} MB", flush=True)
             self.assertLess(resident, budget["residentBytes"])
             self.assertLess(after - before, 100_000_000 if CALIBRATE else budget["cpuNanoseconds"])
-        if CALIBRATE:
-            maximum = max(item["cpuNanoseconds"] for item in measurements)
-            result = {"measurements": measurements, "cpuNanoseconds": min(100_000_000, maximum * 3), "residentBytes": 50_000_000}
-            destination = ROOT / ".work/resource-calibration.json"
-            destination.parent.mkdir(exist_ok=True)
-            destination.write_text(json.dumps(result, indent=2) + "\n")
-            print(f"\nE22 calibration: {result['cpuNanoseconds']} ns (3 × maximum of ten CI runs)", flush=True)
+        maximum = max(item["cpuNanoseconds"] for item in measurements)
+        result = {"measurements": measurements, "cpuNanoseconds": min(100_000_000, maximum * 3), "residentBytes": 50_000_000}
+        destination = ROOT / ".work/resource-calibration.json"
+        destination.parent.mkdir(exist_ok=True)
+        destination.write_text(json.dumps(result, indent=2) + "\n")
+        print(f"\nE22 calibration: {result['cpuNanoseconds']} ns (3 × maximum of ten CI runs)", flush=True)

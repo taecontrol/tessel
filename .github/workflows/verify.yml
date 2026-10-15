@@ -17,8 +17,13 @@ concurrency:
   cancel-in-progress: true
 jobs:
   acceptance:
+    name: Acceptance (${{ matrix.suite }})
     runs-on: xcode-27
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [functional, resources]
     steps:
       - uses: actions/checkout@v4
       - name: Configure ephemeral certificate signing
@@ -28,12 +33,10 @@ jobs:
         run: scripts/build
       - name: Provision Accessibility on the disposable runner
         run: scripts/ci-accessibility
-      - name: Functional acceptance
-        run: scripts/verify --functional
-      - name: Idle resource budget (ten runs)
-        run: scripts/verify --resources ${{ inputs.calibrate && '--calibrate-resources' || '' }}
+      - name: Acceptance suite
+        run: scripts/verify --${{ matrix.suite }} ${{ inputs.calibrate && matrix.suite == 'resources' && '--calibrate-resources' || '' }}
       - uses: actions/upload-artifact@v4
-        if: inputs.calibrate && always()
+        if: matrix.suite == 'resources' && always()
         with:
           name: resource-calibration
           path: .work/resource-calibration.json

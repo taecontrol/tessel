@@ -17,6 +17,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
     var socketPath = ""
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
         NSWindow.allowsAutomaticWindowTabbing = false
         let menu = NSMenu()
         let appItem = NSMenuItem()
