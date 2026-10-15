@@ -372,12 +372,17 @@ class FoundationAcceptance(unittest.TestCase):
         replacement.write_text("['experiments'] # saved atomically\n")
         replacement.replace(self.config_file)
         self.assertTrue(eventually(lambda: self.status()["config"]["revision"] > before, 1))
+        before = self.status()["config"]["revision"]
+        self.config_file.write_text('["\\U00000065xperiments"]\r\n')
+        self.assertTrue(eventually(lambda: self.status()["config"]["state"] == "loaded" and self.status()["config"]["revision"] > before, 1))
 
     def test_E19_invalid_or_unknown_toml_keeps_last_valid_config_and_recovers(self):
         self.config_file.write_text("[experiments]\n")
         self.assertTrue(eventually(lambda: self.status().get("config", {}).get("state") == "loaded", 1))
         valid = self.status()["config"]
-        for text, line in [("# bad table\n[experiments\n", 2), ("[experiments]\nunknown = true\n", 2), ("[unknown]\n", 1)]:
+        for text, line in [("# bad table\n[experiments\n", 2), ("[experiments]\nunknown = true\n", 2),
+                           ("[unknown]\n", 1), ("[experiments]\r\nunknown = true\r\n", 2),
+                           ("\u00a0[experiments]\n", 1)]:
             with self.subTest(config=text):
                 self.config_file.write_text(text)
                 status = eventually(lambda: (s if s.get("config", {}).get("state") == "error" and s["config"]["error"]["line"] == line else None) if (s := self.status()) else None, 1)
@@ -388,6 +393,12 @@ class FoundationAcceptance(unittest.TestCase):
                 self.assertEqual(status["permission"], "granted")
                 self.assertTrue(process_ids(APP / "Contents/MacOS/TesselApp"))
         self.config_file.write_text("[experiments] # repaired\n")
+        self.assertTrue(eventually(lambda: self.status()["config"]["state"] == "loaded" and self.status()["config"]["error"] is None, 1))
+        self.config_file.chmod(0)
+        try:
+            self.assertTrue(eventually(lambda: self.status()["config"]["state"] == "error", 1))
+        finally:
+            self.config_file.chmod(0o600)
         self.assertTrue(eventually(lambda: self.status()["config"]["state"] == "loaded" and self.status()["config"]["error"] is None, 1))
 
     def test_E20_deleting_configuration_returns_to_defaults(self):
