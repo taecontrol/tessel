@@ -22,6 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Configure ephemeral certificate signing
+        timeout-minutes: 2
         run: scripts/ci-signing
       - name: Build signed bundles
         run: scripts/build

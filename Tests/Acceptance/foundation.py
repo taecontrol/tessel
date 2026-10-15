@@ -29,7 +29,7 @@ def eventually(predicate, timeout=0.5):
     while True:
         result = predicate()
         if result:
-            return result
+            return result if time.monotonic() <= deadline else None
         if time.monotonic() >= deadline:
             return None
         time.sleep(0.015)
@@ -380,7 +380,7 @@ class FoundationAcceptance(unittest.TestCase):
         for text, line in [("# bad table\n[experiments\n", 2), ("[experiments]\nunknown = true\n", 2), ("[unknown]\n", 1)]:
             with self.subTest(config=text):
                 self.config_file.write_text(text)
-                status = eventually(lambda: (s if s.get("config", {}).get("state") == "error" else None) if (s := self.status()) else None, 1)
+                status = eventually(lambda: (s if s.get("config", {}).get("state") == "error" and s["config"]["error"]["line"] == line else None) if (s := self.status()) else None, 1)
                 self.assertIsNotNone(status)
                 self.assertEqual(status["config"]["error"]["line"], line)
                 self.assertEqual(status["config"]["effective"], valid["effective"])

@@ -9,6 +9,7 @@ signing_dir=$(mktemp -d)
 trap 'rm -rf "$signing_dir"' EXIT
 signing_password=$(openssl rand -hex 24)
 keychain_path="$RUNNER_TEMP/tessel-ci.keychain-db"
+echo 'Create a short-lived code-signing certificate'
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
     -subj '/CN=tessel CI/' \
     -addext 'keyUsage=critical,digitalSignature' \
@@ -20,7 +21,9 @@ security create-keychain -p "$signing_password" "$keychain_path"
 security set-keychain-settings -lut 7200 "$keychain_path"
 security unlock-keychain -p "$signing_password" "$keychain_path"
 security import "$signing_dir/identity.p12" -k "$keychain_path" -P "$signing_password" -T /usr/bin/codesign >/dev/null
-security add-trusted-cert -d -r trustRoot -p codeSign -k "$keychain_path" "$signing_dir/cert.pem"
+echo 'Trust the certificate on this disposable runner'
+sudo security add-trusted-cert -d -r trustRoot -p codeSign -k "$keychain_path" "$signing_dir/cert.pem"
+echo 'Allow codesign to use the temporary keychain'
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$signing_password" "$keychain_path" >/dev/null
 security list-keychains -d user -s "$keychain_path" "$HOME/Library/Keychains/login.keychain-db"
 printf 'CODE_SIGN_IDENTITY = tessel CI\n' > Signing.local.xcconfig
