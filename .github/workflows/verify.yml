@@ -1,0 +1,42 @@
+name: Verify
+on:
+  push:
+    branches: [main, foundation]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      calibrate:
+        description: Record ten idle resource measurements
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  acceptance:
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure ephemeral certificate signing
+        run: scripts/ci-signing
+      - name: Build signed bundles
+        run: scripts/build
+      - name: Provision Accessibility on the disposable runner
+        run: scripts/ci-accessibility
+      - name: Functional acceptance
+        run: scripts/verify --functional
+      - name: Idle resource budget (ten runs)
+        run: scripts/verify --resources ${{ inputs.calibrate && '--calibrate-resources' || '' }}
+      - uses: actions/upload-artifact@v4
+        if: inputs.calibrate && always()
+        with:
+          name: resource-calibration
+          path: .work/resource-calibration.json
+          if-no-files-found: ignore
+      - name: Remove ephemeral keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/tessel-ci.keychain-db"

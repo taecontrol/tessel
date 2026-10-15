@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""Build registrable, signed development bundles. Never fall back to ad-hoc signing."""
+import argparse
+import datetime
+import os
+from pathlib import Path
+import plistlib
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--signing-config", type=Path, default=ROOT / "Signing.local.xcconfig")
+    parser.add_argument("--output-dir", type=Path, default=ROOT / ".build/apps")
+    parser.add_argument("--variant", choices=["dev", "daily"], default="dev")
+    args = parser.parse_args()
+    try:
+        config = args.signing_config.read_text()
+    except OSError:
+        config = ""
+    match = re.search(r"^\s*CODE_SIGN_IDENTITY\s*=\s*(.+?)\s*$", config, re.M)
+    identity = match[1].strip('"') if match else ""
+    if not identity or identity == "-" or identity.lower() in {"adhoc", "ad-hoc", "sign to run locally"}:
+        sys.exit("Configure CODE_SIGN_IDENTITY in Signing.local.xcconfig with a code-signing identity from your keychain. See docs/development.md. Ad-hoc signing is not allowed.")
+    identities = subprocess.run(["security", "find-identity", "-v", "-p", "codesigning"], capture_output=True, text=True, check=True).stdout
+    if not any(identity in line for line in identities.splitlines() if re.search(r"[0-9A-F]{40}", line)):
+        sys.exit("The configured code-signing identity is unavailable. See docs/development.md.")
+
+    os.chdir(ROOT)
+    staging_root = ROOT / ".build/staging"
+    staging_root.mkdir(parents=True, exist_ok=True)
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=staging_root) as directory:
+        stage = Path(directory)
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M%S%f")
+        (stage / "BuildInfo.swift").write_text(f'enum BuildInfo {{ static let version = "0.1.0+{stamp}" }}\n')
+        common = sorted((ROOT / "Sources/Shared").glob("*.swift"))
+
+        def compile_binary(folder, output, extra=()):
+            sources = sorted((ROOT / folder).glob("*.swift"))
+            command = ["xcrun", "swiftc", "-parse-as-library", "-swift-version", "6", "-O", "-target", "arm64-apple-macos27.0", "-o", str(output)]
+            subprocess.run(command + [str(p) for p in (*common, *sources, *extra)], check=True)
+
+        def sign(path, identifier=None):
+            command = ["codesign", "--force", "--sign", identity, "--timestamp=none"]
+            if identifier:
+                command += ["--identifier", identifier]
+            result = subprocess.run(command + [str(path)], capture_output=True, text=True)
+            if result.returncode:
+                sys.exit("Code signing failed; no unsigned bundle was installed. Check the local identity and keychain access.")
+
+        suffix = ".dev" if args.variant == "dev" else ""
+        name = "Tessel Dev" if suffix else "Tessel"
+        bundle_id = "com.taecontrol.tessel" + suffix
+        for app_name, identifier, folder, executable, extras in [
+            (name, bundle_id, "Sources/App", "TesselApp", [stage / "BuildInfo.swift"]),
+            ("Tessel Fixture", "com.taecontrol.tessel.fixture", "Tests/Fixture", "TesselFixture", []),
+        ]:
+            bundle = stage / (app_name + ".app")
+            macos = bundle / "Contents/MacOS"
+            macos.mkdir(parents=True)
+            compile_binary(folder, macos / executable, extras)
+            if executable == "TesselApp":
+                compile_binary("Sources/CLI", macos / "tessel")
+            info = {"CFBundleIdentifier": identifier, "CFBundleExecutable": executable,
+                    "CFBundleName": app_name, "CFBundlePackageType": "APPL",
+                    "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": stamp,
+                    "LSMinimumSystemVersion": "27.0", "LSUIElement": executable == "TesselApp",
+                    "NSHighResolutionCapable": True}
+            (bundle / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
+            if executable == "TesselApp":
+                sign(macos / "tessel", identifier + ".cli")
+            sign(bundle)
+            verified = subprocess.run(["codesign", "--verify", "--strict", str(bundle)], capture_output=True, text=True)
+            if verified.returncode:
+                sys.exit("Signature verification failed: " + verified.stderr.replace(identity, "<local identity>"))
+            destination = args.output_dir / bundle.name
+            if destination.exists():
+                shutil.rmtree(destination)
+            shutil.move(str(bundle), destination)
+        print(f"Signed bundles: {args.output_dir}")
+
+
+if __name__ == "__main__":
+    main()

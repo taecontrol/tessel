@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+if [[ ${CI:-} != true || ${GITHUB_ACTIONS:-} != true ]]; then
+    echo 'This script creates an ephemeral signing identity only on a disposable GitHub runner.' >&2
+    exit 1
+fi
+signing_dir=$(mktemp -d)
+trap 'rm -rf "$signing_dir"' EXIT
+signing_password=$(openssl rand -hex 24)
+keychain_path="$RUNNER_TEMP/tessel-ci.keychain-db"
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+    -subj '/CN=tessel CI/' \
+    -addext 'keyUsage=critical,digitalSignature' \
+    -addext 'extendedKeyUsage=critical,codeSigning' \
+    -keyout "$signing_dir/key.pem" -out "$signing_dir/cert.pem" >/dev/null 2>&1
+openssl pkcs12 -export -legacy -inkey "$signing_dir/key.pem" -in "$signing_dir/cert.pem" \
+    -out "$signing_dir/identity.p12" -passout "pass:$signing_password"
+security create-keychain -p "$signing_password" "$keychain_path"
+security set-keychain-settings -lut 7200 "$keychain_path"
+security unlock-keychain -p "$signing_password" "$keychain_path"
+security import "$signing_dir/identity.p12" -k "$keychain_path" -P "$signing_password" -T /usr/bin/codesign >/dev/null
+security add-trusted-cert -d -r trustRoot -p codeSign -k "$keychain_path" "$signing_dir/cert.pem"
+security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$signing_password" "$keychain_path" >/dev/null
+security list-keychains -d user -s "$keychain_path" "$HOME/Library/Keychains/login.keychain-db"
+printf 'CODE_SIGN_IDENTITY = tessel CI\n' > Signing.local.xcconfig
+chmod 600 Signing.local.xcconfig

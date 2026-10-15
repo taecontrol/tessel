@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+"""Drive the signed app through its CLI and isolated AppKit fixtures."""
+import argparse
+import importlib.util
+from pathlib import Path
+import sys
+import unittest
+
+root = Path(__file__).resolve().parent.parent
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--functional", action="store_true", help="Run E1–E21 (excluding the manual captures)")
+parser.add_argument("--resources", action="store_true", help="Run E22: ten idle runs of 60 seconds")
+parser.add_argument("--calibrate-resources", action="store_true", help="Write the ten CI measurements; keep enforcing the 100 ms cap")
+parser.add_argument("--red", action="store_true", help="Run the acceptance contract against the initial scaffold")
+parser.add_argument("tests", nargs="*", help="Optional unittest method names")
+args = parser.parse_args()
+spec = importlib.util.spec_from_file_location("acceptance", root / "Tests/Acceptance/foundation.py")
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+module.CALIBRATE = args.calibrate_resources
+suite = unittest.TestSuite()
+if args.tests:
+    for name in args.tests:
+        suite.addTest(module.FoundationAcceptance(name))
+else:
+    for name in unittest.defaultTestLoader.getTestCaseNames(module.FoundationAcceptance):
+        resource = name.startswith("test_E22")
+        if args.resources and not resource:
+            continue
+        if args.functional and resource:
+            continue
+        suite.addTest(module.FoundationAcceptance(name))
+result = unittest.TextTestRunner(verbosity=2).run(suite)
+sys.exit(0 if result.wasSuccessful() else 1)

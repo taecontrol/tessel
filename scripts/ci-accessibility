@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""Grant AX only on the disposable, SIP-disabled GitHub runner."""
+import os
+import subprocess
+import sys
+
+if os.environ.get("CI") != "true" or os.environ.get("GITHUB_ACTIONS") != "true":
+    sys.exit("Accessibility database provisioning is only allowed on the disposable GitHub runner.")
+database = "/Library/Application Support/com.apple.TCC/TCC.db"
+for bundle_id in ("com.taecontrol.tessel.dev", "com.taecontrol.tessel.fixture"):
+    sql = "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags, last_modified) VALUES ('kTCCServiceAccessibility','" + bundle_id + "',0,2,4,1,0,strftime('%s','now'));"
+    subprocess.run(["sudo", "sqlite3", database, sql], check=True)
+print("Accessibility provisioned for the development app and fixture.")
