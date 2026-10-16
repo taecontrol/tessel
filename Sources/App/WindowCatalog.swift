@@ -325,7 +325,8 @@ private final class AppWindows: @unchecked Sendable {
             }
         } catch {
             // A failed read is not a classification signal, nor proof of closure.
-            if !facts.isEmpty { publishSnapshot() }
+            // Keep the published snapshot and pending change. Republishing it
+            // would query the same busy app for focus and frontmost state again.
             // A busy app can time out the only read after its last event. Back off
             // a few times, then wait for the next event so a hung app costs nothing.
             if failedReads < 4 {
