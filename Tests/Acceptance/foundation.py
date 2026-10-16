@@ -6,7 +6,9 @@ import ctypes
 import json
 import os
 from pathlib import Path
+import plistlib
 import re
+import shutil
 import signal
 import socket
 import stat
@@ -469,6 +471,46 @@ class FoundationAcceptance(unittest.TestCase):
         elapsed = time.process_time_ns() - clock
         self.assertGreater(after - before, elapsed * 0.75)
         self.assertLess(after - before, elapsed * 1.25)
+
+    def test_native_notification_retries_and_symlinked_bundle_namespaces(self):
+        # This command-line probe has no tessel bundle ID and never queries AX.
+        # It exercises native CF identity and Foundation's bundle resolution.
+        executable = self.directory / "NativeContracts"
+        sources = [*sorted((ROOT / "Sources/Shared").glob("*.swift")),
+                   ROOT / "Sources/App/AXSubscriptions.swift", ROOT / "Tests/Contracts/Main.swift"]
+        compiled = subprocess.run(["xcrun", "swiftc", "-parse-as-library", "-swift-version", "6", "-O",
+                                   "-target", "arm64-apple-macos27.0", *map(str, sources), "-o", str(executable)],
+                                  capture_output=True, text=True, timeout=60)
+        self.assertEqual(compiled.returncode, 0, compiled.stderr)
+        with self.subTest(contract="transient AX registrations"):
+            result = subprocess.run([str(executable)], capture_output=True, text=True, timeout=2)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+        def endpoint(command, env=self.env):
+            result = subprocess.run([str(command), "namespace"], env=env, capture_output=True, text=True, timeout=2)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout.strip()
+
+        namespaces = []
+        for index in range(2):
+            bundle = self.directory / ("Generic Contract " + str(index) + ".app")
+            macos = bundle / "Contents/MacOS"
+            macos.mkdir(parents=True)
+            (bundle / "Contents/Info.plist").write_bytes(plistlib.dumps({
+                "CFBundleIdentifier": "org.example.foundation-contract." + str(index),
+                "CFBundleExecutable": "Primary", "CFBundlePackageType": "APPL"}))
+            shutil.copy2(executable, macos / "Primary")
+            secondary = macos / "Secondary"
+            shutil.copy2(executable, secondary)
+            alias = self.directory / ("contract-link-" + str(index))
+            alias.symlink_to(secondary)
+            direct = endpoint(secondary)
+            namespaces.append(direct)
+            with self.subTest(contract="symlink preserves namespace", bundle=index):
+                self.assertEqual(endpoint(alias), direct)
+        self.assertNotEqual(*namespaces, "different bundles must have separate endpoints")
+        alternate = {**self.env, "XDG_CONFIG_HOME": str(self.directory / "alternate-config")}
+        self.assertNotEqual(endpoint(secondary, alternate), namespaces[-1], "different configs must have separate endpoints")
 
     def test_E12_status_reports_permission_config_path_error_line_and_version(self):
         status = self.status()
