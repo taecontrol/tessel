@@ -4,6 +4,7 @@ import Foundation
 /// Parse the experiment's bounded TOML schema before replacing any live state.
 enum ConfigParser {
     private static let horizontalWhitespace = CharacterSet(charactersIn: " \t")
+    private static let bareKeyCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
 
     static func parse(_ data: Data) throws -> Configuration {
         guard data.count <= 65_536, let text = String(data: data, encoding: .utf8) else {
@@ -72,7 +73,7 @@ enum ConfigParser {
     }
 
     private static func keyName(_ value: String) -> String? {
-        if !value.isEmpty, value.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-").contains($0) }) { return value }
+        if !value.isEmpty, value.unicodeScalars.allSatisfy({ bareKeyCharacters.contains($0) }) { return value }
         return string(value)
     }
 
