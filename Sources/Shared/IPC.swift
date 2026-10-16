@@ -12,8 +12,12 @@ struct Endpoint {
 
     init() {
         directory = "/tmp/tessel-\(getuid())"
-        // The CLI and app share a bundle; symlinking the bundled CLI keeps this identity.
-        let bundle = Bundle.main.bundleIdentifier ?? "com.taecontrol.tessel.dev"
+        // Foundation loses the containing bundle when a secondary executable is
+        // reached through a symlink. Resolve the real Contents/MacOS location.
+        let bundleURL = Bundle.main.executableURL?.resolvingSymlinksInPath()
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let bundle = Bundle.main.bundleIdentifier ?? bundleURL.flatMap { Bundle(url: $0)?.bundleIdentifier }
+            ?? "com.taecontrol.tessel.dev"
         let namespace = bundle.hasSuffix(".cli") ? String(bundle.dropLast(4)) : bundle
         let key = namespace + ":" + ConfigLocation.file.path
         let hash = SHA256.hash(data: Data(key.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
