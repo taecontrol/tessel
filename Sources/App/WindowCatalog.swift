@@ -82,7 +82,10 @@ private final class AppWindows: @unchecked Sendable {
     // All mutable state below belongs to queue, including AX handles.
     private let application: AXUIElement
     private var observer: AXObserver?
-    private var observed: [AXUIElement] = []
+    private var windowSubscriptions = AXSubscriptions([
+        kAXUIElementDestroyedNotification, kAXWindowMiniaturizedNotification, kAXWindowDeminiaturizedNotification,
+        kAXWindowResizedNotification, kAXLayoutChangedNotification, kAXValueChangedNotification
+    ])
     private var appNotifications: Set<String> = []
     private var facts: [WindowFacts] = []
     private var hidden: Bool
@@ -154,7 +157,7 @@ private final class AppWindows: @unchecked Sendable {
                 }
             }
             observer = nil
-            observed.removeAll()
+            windowSubscriptions.removeAll()
         }
     }
 
@@ -251,15 +254,12 @@ private final class AppWindows: @unchecked Sendable {
 
     private func updateWindowNotifications(_ elements: [AXUIElement]) {
         guard let observer else { return }
-        let names = [kAXUIElementDestroyedNotification, kAXWindowMiniaturizedNotification, kAXWindowDeminiaturizedNotification,
-                     kAXWindowResizedNotification, kAXLayoutChangedNotification, kAXValueChangedNotification]
-        for old in observed where !elements.contains(where: { CFEqual(old, $0) }) {
-            for name in names { AXObserverRemoveNotification(observer, old, name as CFString) }
-        }
-        for element in elements where !observed.contains(where: { CFEqual(element, $0) }) {
-            for name in names { AXObserverAddNotification(observer, element, name as CFString, Unmanaged.passUnretained(self).toOpaque()) }
-        }
-        observed = elements
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        windowSubscriptions.update(elements, add: { element, name in
+            AXObserverAddNotification(observer, element, name as CFString, context)
+        }, remove: { element, name in
+            AXObserverRemoveNotification(observer, element, name as CFString)
+        })
     }
 
     private func value(_ element: AXUIElement, _ attribute: String) throws -> CFTypeRef? {
