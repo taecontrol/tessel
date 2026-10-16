@@ -232,8 +232,15 @@ private final class AppWindows: @unchecked Sendable {
         AXUIElementSetMessagingTimeout(element, 0.05)
         let role = try value(element, kAXRoleAttribute) as? String ?? ""
         if role == kAXTabGroupRole {
+            let tabs = try value(element, kAXTabsAttribute) as? [AXUIElement] ?? []
+            guard !tabs.isEmpty else { return 0 }
+            let contents = try value(element, kAXContentsAttribute) as? [AXUIElement] ?? []
+            // AppKit's native tab bar includes its tab buttons in AXContents.
+            // NSTabView instead publishes the selected page's content there.
+            // A native New Tab button may also occur, so count only AXTabs.
+            guard tabs.allSatisfy({ tab in contents.contains { CFEqual(tab, $0) } }) else { return 0 }
             groups.append(element)
-            return (try value(element, kAXTabsAttribute) as? [AXUIElement])?.count ?? 0
+            return tabs.count
         }
         if depth > 0, role == kAXSheetRole { sheets.append(element); return 0 }
         guard !["AXWebArea", "AXScrollArea", "AXTextArea", "AXTextField", "AXTable", "AXOutline"].contains(role) else { return 0 }

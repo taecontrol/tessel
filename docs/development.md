@@ -78,6 +78,16 @@ group's tab count. Tessel lists those minimized entries as reported; it does not
 guess which windows belong together. Restoring the group returns to one entry.
 Keeping one entry while minimized needs further investigation beyond #1.
 
+`AXTabGroup` alone also describes content controls. On macOS 27, AppKit's native
+tab bar publishes its `AXTabs` buttons within `AXContents`; an `NSTabView`
+publishes the selected page's content instead. Tessel uses that identity
+relationship and counts only `AXTabs`, excluding an optional New Tab button.
+Fixtures cover empty and populated content tabs, segmented controls, native
+tabs without close buttons, and native windows containing more content tabs.
+Their independent native-count oracle is `NSWindow.tabGroup.windows`.
+This relationship follows the installed AppKit implementation, rather than a
+public guarantee about future OS versions or custom Accessibility publishers.
+
 CI runs the same commands on `xcode-27` (macOS 27). Its short-lived certificate
 is created in a temporary keychain; no signing material is stored in GitHub.
 Only the disposable runner provisions its Accessibility database. Local
