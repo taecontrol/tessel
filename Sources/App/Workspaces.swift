@@ -61,7 +61,7 @@ final class Workspaces {
             enablingFront = NSWorkspace.shared.frontmostApplication?.processIdentifier
             for id in entries.keys.sorted() { assign(id, to: 1) }
             if let front = enablingFront, let current = appFocus[front], available(current) {
-                remember(current)
+                rememberInitialFocus(current)
             }
             installKeys()
             if !entries.isEmpty { render(focusing: focused ?? preferred(in: 1), relayout: true) }
@@ -206,7 +206,8 @@ final class Workspaces {
             } else if firstSnapshot && !frontmost && pid != enablingFront && focused == nil {
                 render(focusing: nil, relayout: false, activateDesktop: false, layoutWindows: Set(newWindows))
             } else {
-                remember(selection)
+                if firstSnapshot && frontmost { rememberInitialFocus(selection) }
+                else { remember(selection) }
                 render(focusing: selection, relayout: false, layoutWindows: Set(newWindows))
             }
         } else if needsRender {
@@ -404,6 +405,19 @@ final class Workspaces {
         closeted.remove(id)
     }
 
+    private func rememberInitialFocus(_ id: UInt32) {
+        // A focused dialog leaves its existing tile underneath. At startup no
+        // focus history exists yet, so seed it from the visible stacking order.
+        if entries[id]?.observation.record.state == .floats, let workspace = entries[id]?.workspace,
+           let tile = Self.onScreenOrder().first(where: {
+               entries[$0]?.workspace == workspace && entries[$0]?.observation.record.state == .tiled
+                   && entries[$0]?.observation.parent == nil
+           }) {
+            remember(tile)
+        }
+        remember(id)
+    }
+
     private func remember(_ id: UInt32) {
         clock += 1
         entries[id]?.recent = clock
@@ -433,12 +447,14 @@ final class Workspaces {
                       width: width, height: height)
     }
 
-    private static func onScreen() -> Set<UInt32> {
+    private static func onScreen() -> Set<UInt32> { Set(onScreenOrder()) }
+
+    private static func onScreenOrder() -> [UInt32] {
         // Only IDs survive this query. Drain Objective-C bridge temporaries
         // without waiting for AppKit's next input event on the main thread.
         autoreleasepool {
-            Set((CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? [])
-                .compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
+            (CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? [])
+                .compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value }
         }
     }
 
