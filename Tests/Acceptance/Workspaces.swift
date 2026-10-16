@@ -183,13 +183,28 @@ extension Acceptance {
             #expect(try harness.status().workspaces?.active == 1)
         }
 
-        @Test func e03ExistingDialogStaysAboveTheTiledWindowAtItsOriginalFrame() throws {
+        @Test(arguments: [false, true])
+        func e03ExistingDialogStaysAboveTheTiledWindowAtItsOriginalFrame(startup: Bool) throws {
+            if startup { harness.stopApp() }
             let c = try fixture.open(key: "c")
+            _ = try fixture.open(key: "a")
+            _ = try fixture.open(key: "b")
+            try activate(key: "c")
             let dialog = try fixture.open(kind: "dialog", key: "dialog")
             try activate(key: "dialog")
             let frame = try #require(try window(dialog)).frame
-            try enable()
-            try expectShown(dialog, floating: true)
+            if !startup {
+                try #require(try converges { $0.count == 4 && $0.contains { $0.id == dialog } })
+            }
+            let start = monotonicSeconds()
+            if startup {
+                try writeConfig(enabled)
+                try harness.startApp(fixtureReady: false)
+            } else { try enable() }
+            try #require(try eventually(within: max(0, 1 - (monotonicSeconds() - start))) {
+                try harness.row(dialog)?.workspace == 1
+            })
+            try expectShown(dialog, since: start, within: 1, floating: true)
             #expect(try visible(c))
             #expect(try #require(try window(dialog)).order < #require(try window(c)).order)
             #expect(try window(dialog)?.frame == frame)
