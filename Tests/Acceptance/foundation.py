@@ -11,6 +11,7 @@ import signal
 import socket
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -100,24 +101,43 @@ class FoundationAcceptance(unittest.TestCase):
         if process_ids(APP / "Contents/MacOS/TesselApp"):
             raise RuntimeError("This worktree's development app is already running; stop it before verification")
         cls.temporary = tempfile.TemporaryDirectory(prefix="tessel-verify-")
+        cls.addClassCleanup(cls.temporary.cleanup)
         cls.directory = Path(cls.temporary.name)
         cls.config_home = cls.directory / "config"
         cls.config_file = cls.config_home / "tessel/tessel.toml"
         cls.config_file.parent.mkdir(parents=True)
         cls.env = {**os.environ, "XDG_CONFIG_HOME": str(cls.config_home)}
         cls.fixture = FixtureSession(cls.directory, 0)
+        cls.addClassCleanup(lambda: cls.fixture.stop())
+        cls.addClassCleanup(cls.stop_app)
         cls.other_fixtures = []
         cls.start_app()
 
     @classmethod
-    def start_app(cls):
+    def start_app(cls, fixture_ready=True):
         subprocess.run(["open", "-n", "-g", "--stdout", "/dev/null", "--stderr", "/dev/null", "--env", "XDG_CONFIG_HOME=" + str(cls.config_home), str(APP)], check=True)
         pids = eventually(lambda: process_ids(APP / "Contents/MacOS/TesselApp"), 5)
         if not pids:
             raise RuntimeError("signed development app did not launch")
         cls.app_pid = pids[0]
         # Launch readiness is separate from the 500 ms event deadlines.
-        eventually(lambda: cls.invoke("status", "--json").returncode == 0, 5)
+        if not eventually(lambda: cls.invoke("status", "--json").returncode == 0, 5):
+            raise RuntimeError("signed development app did not expose its status endpoint")
+        if fixture_ready:
+            # Socket readiness does not prove that startup AX subscriptions exist.
+            # Exercise one generic window before starting event-specific deadlines.
+            health = cls.fixture.command("open", kind="standard", key="startupHealth")["windows"]["startupHealth"]
+            def health_is_listed():
+                result = cls.invoke("windows", "--json")
+                if result.returncode:
+                    return None
+                return any(row.get("bundleId") == FIXTURE_ID and row.get("id") == health
+                           for row in json.loads(result.stdout))
+            if not eventually(health_is_listed, 5):
+                raise RuntimeError("signed development app did not observe the fixture startup window")
+            cls.fixture.command("close", key="startupHealth")
+            if not eventually(lambda: health_is_listed() is False, 1):
+                raise RuntimeError("signed development app did not retire the fixture startup window")
 
     @classmethod
     def stop_app(cls):
@@ -130,11 +150,8 @@ class FoundationAcceptance(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.stop_app()
-        cls.fixture.stop()
         for fixture in cls.other_fixtures:
             fixture.stop()
-        cls.temporary.cleanup()
 
     @classmethod
     def invoke(cls, *arguments):
@@ -189,7 +206,7 @@ class FoundationAcceptance(unittest.TestCase):
     def setUp(self):
         self.fixture.command("reset")
         self.config_file.unlink(missing_ok=True)
-        eventually(lambda: self.status().get("config", {}).get("state") == "defaults", 1)
+        self.assertTrue(eventually(lambda: self.status().get("config", {}).get("state") == "defaults", 1))
 
     def test_E01_standard_resizable_window_tiles_with_reason(self):
         window = self.open_window()
@@ -221,6 +238,9 @@ class FoundationAcceptance(unittest.TestCase):
                 subrole = next(item["subrole"] for item in flattened if item["id"] == window)
                 self.assertNotEqual(subrole, "AXStandardWindow")
                 self.assert_state(window, "floats", subrole)
+                fixture_ids = set(self.fixture.command("ping")["windows"].values())
+                self.assertTrue(eventually(lambda: len(rows := self.rows()) == len(fixture_ids) and
+                                           {row["id"] for row in rows} == fixture_ids))
 
     def test_E05_native_tabs_keep_one_front_entry_and_expose_minimized_ax_entries(self):
         reply = self.fixture.command("open", kind="tabs", key="tabs", count=3)
@@ -264,6 +284,12 @@ class FoundationAcceptance(unittest.TestCase):
             self.fixture.command("close", key=key)
         self.assertTrue(eventually(lambda: not self.rows()))
 
+    def test_E05_content_tabs_do_not_count_as_native_window_tabs(self):
+        window = self.open_window("contentTabs")
+        row = self.assert_state(window, "tiled", "standard window")
+        self.assertEqual(row["tabs"], 1)
+        self.assertNotIn("native tabs", row["reason"])
+
     def test_E06_minimized_and_hidden_take_precedence_and_restore(self):
         ids = {}
         for kind in ("standard", "noFullscreen", "fixed", "dialog", "panel"):
@@ -278,20 +304,38 @@ class FoundationAcceptance(unittest.TestCase):
         self.fixture.command("hide")
         self.assertTrue(eventually(lambda: len(rows := self.rows()) == len(ids) and all(row["state"] == "hidden" for row in rows)))
         self.fixture.command("show")
-        self.assertTrue(eventually(lambda: len(rows := self.rows()) == len(ids) and all(row["state"] not in ("hidden", "minimized") for row in rows)))
+        restored = {window_id: "tiled" if key in ("standard", "noFullscreen") else "floats"
+                    for key, window_id in ids.items()}
+        self.assertTrue(eventually(lambda: {row["id"]: row["state"] for row in self.rows()} == restored))
+        self.fixture.command("minimize", key="fixed")
+        self.assert_state(ids["fixed"], "minimized")
+        self.fixture.command("hide")
+        hidden = {window_id: "hidden" for key, window_id in ids.items() if key != "fixed"}
+        def hidden_snapshot():
+            rows = self.rows()
+            return rows if {row["id"]: row["state"] for row in rows if row["id"] != ids["fixed"]} == hidden else None
+        rows = eventually(hidden_snapshot)
+        self.assertIsNotNone(rows, "fixture did not reach the hidden state within 500 ms")
+        self.assertEqual({row["id"]: row["state"] for row in rows}, {**hidden, ids["fixed"]: "minimized"})
+        self.fixture.command("show")
+        self.fixture.command("restore", key="fixed")
+        self.assert_state(ids["fixed"], "floats", "fixed size")
 
     def test_E07_new_window_converges_within_500ms_and_stays_classified(self):
-        window = self.open_window("noFullscreen")
+        self.assert_state(self.open_window(key="anchor"), "tiled")
+        time.sleep(0.55)  # Earlier settling must not observe the new window.
+        window = self.open_window("noFullscreen", key="background", background=True)
         expected = self.assert_state(window, "tiled")
         time.sleep(0.5)
         for _ in range(20):
             self.assertEqual(self.row(window), expected)
 
     def test_E08_closed_windows_and_terminated_apps_disappear_within_500ms(self):
-        window = self.open_window()
+        self.assert_state(self.open_window(key="anchor"), "tiled")
+        window = self.open_window(key="background", background=True)
         self.assert_state(window, "tiled")
-        time.sleep(0.55)  # A settling read must not stand in for a close notification.
-        self.fixture.command("close")
+        time.sleep(0.55)  # A settling or focus event must not replace destruction.
+        self.fixture.command("close", key="background")
         self.assertTrue(eventually(lambda: self.row(window) is None))
         other = FixtureSession(self.directory, 1)
         self.other_fixtures.append(other)
@@ -308,27 +352,42 @@ class FoundationAcceptance(unittest.TestCase):
             for kind in ("standard", "noFullscreen", "fixed", "dialog", "panel", "sheet"):
                 window = self.open_window(kind, key=kind)
                 expected[window] = "tiled" if kind in ("standard", "noFullscreen") else "floats"
+                if kind == "sheet":
+                    expected[self.fixture.command("ping")["windows"]["sheetParent"]] = "tiled"
             reply = self.fixture.command("open", kind="tabs", key="existingTabs", count=3)
             expected[reply["windows"]["existingTabs0"]] = "tiled"
-            self.start_app()
+            self.start_app(fixture_ready=False)
             for window, state in expected.items():
                 self.assert_state(window, state)
             self.assertEqual(sum(row["tabs"] == 3 for row in self.rows()), 1)
             before = self.rows()
             self.stop_app()
-            self.start_app()
+            self.start_app(fixture_ready=False)
             self.assertTrue(eventually(lambda: self.rows() == before))
+            self.stop_app()
+            self.fixture.command("minimize", key="fixed")
+            self.fixture.command("minimize", key="existingTabs0")
+            self.fixture.command("hide")
+            self.start_app(fixture_ready=False)
+            minimized = {self.fixture.command("ping")["windows"]["fixed"]}
+            tab_ids = {reply["windows"]["existingTabs" + str(index)] for index in range(3)}
+            minimized.update(tab_ids)
+            states = {row["id"]: "hidden" for row in before}
+            states.update({window_id: "minimized" for window_id in minimized})
+            self.assertTrue(eventually(lambda: {row["id"]: row["state"] for row in self.rows()} == states))
+            self.assertEqual(sorted(row["tabs"] for row in self.rows() if row["id"] in tab_ids), [1, 1, 3])
         finally:
             if not process_ids(APP / "Contents/MacOS/TesselApp"):
-                self.start_app()
+                self.start_app(fixture_ready=False)
 
     def test_E10_neither_cli_format_exposes_window_titles(self):
         window = self.open_window(title="Fixture secret 1234")
         self.assert_state(window, "tiled")
         for flags in ((), ("--json",)):
-            result = self.invoke("windows", *flags)
-            self.assertEqual(result.returncode, 0)
-            self.assertFalse("Fixture secret 1234" in result.stdout + result.stderr, "CLI leaked a fixture window title")
+            with self.subTest(format="json" if flags else "text"):
+                result = self.invoke("windows", *flags)
+                self.assertEqual(result.returncode, 0)
+                self.assertFalse("Fixture secret 1234" in result.stdout + result.stderr, "CLI leaked a fixture window title")
         row = self.row(window)
         self.assertEqual(set(row), {"id", "app", "bundleId", "state", "reason", "tabs"})
 
@@ -351,6 +410,13 @@ class FoundationAcceptance(unittest.TestCase):
         finally:
             self.start_app()
 
+    def test_cli_rejects_unsupported_commands_and_arguments(self):
+        for arguments in ((), ("move",), ("windows", "--titles"), ("status", "--json", "extra")):
+            with self.subTest(arguments=arguments):
+                result = self.invoke(*arguments)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("Usage: tessel", result.stderr)
+
     def test_transport_is_private_to_the_current_user(self):
         result = subprocess.run(["/usr/sbin/lsof", "-a", "-p", str(self.app_pid), "-U", "-Fn"], capture_output=True, text=True, check=True)
         paths = [Path(line[1:]) for line in result.stdout.splitlines() if line.startswith("n/") and line.endswith(".sock")]
@@ -361,9 +427,29 @@ class FoundationAcceptance(unittest.TestCase):
         self.assertEqual(endpoint.parent.stat().st_uid, os.getuid())
         self.assertEqual(stat.S_IMODE(endpoint.parent.stat().st_mode), 0o700)
         if os.environ.get("GITHUB_ACTIONS") == "true":
-            attempt = "import socket,sys\ns=socket.socket(socket.AF_UNIX)\ntry:\n s.connect(sys.argv[1])\nexcept PermissionError:\n sys.exit(0)\nexcept OSError:\n sys.exit(2)\nsys.exit(1)\n"
-            denied = subprocess.run(["sudo", "-n", "-u", "nobody", "/usr/bin/python3", "-c", attempt, str(endpoint)], capture_output=True, timeout=2)
+            attempt = "import socket,sys\ns=socket.socket(socket.AF_UNIX)\ns.settimeout(0.75)\ntry:\n s.connect(sys.argv[1])\nexcept PermissionError:\n sys.exit(0)\nexcept OSError:\n sys.exit(2)\nsys.exit(1)\n"
+            denied = subprocess.run(["sudo", "-n", "-u", "nobody", sys.executable, "-c", attempt, str(endpoint)], capture_output=True, timeout=2)
             self.assertEqual(denied.returncode, 0, "a different Unix user must be denied access")
+
+    def test_transport_rejects_mutations_and_stalled_clients_do_not_block_queries(self):
+        result = subprocess.run(["/usr/sbin/lsof", "-a", "-p", str(self.app_pid), "-U", "-Fn"], capture_output=True, text=True, check=True)
+        paths = [line[1:] for line in result.stdout.splitlines() if line.startswith("n/") and line.endswith(".sock")]
+        self.assertEqual(len(paths), 1)
+        with self.subTest(command="move"), socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(0.9)
+            client.connect(paths[0])
+            client.sendall(b"move\n")
+            response = json.loads(client.makefile("rb").readline(4096))
+            self.assertIn("read-only", response.get("error", ""))
+        for payload in (b"", b"x" * 33, b"x" * 33 + b"\n", b"\xff\n"):
+            with self.subTest(payloadLength=len(payload)), socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.settimeout(0.9)
+                client.connect(paths[0])
+                client.sendall(payload)
+                started = time.monotonic()
+                self.assertEqual(self.status()["permission"], "granted")
+                self.assertLess(time.monotonic() - started, 1)
+                self.assertEqual(client.recv(1), b"", "a malformed or stalled client must be disconnected")
 
     def test_resource_cpu_measurement_matches_the_process_cpu_clock(self):
         before, _ = resources(os.getpid())
@@ -377,10 +463,14 @@ class FoundationAcceptance(unittest.TestCase):
 
     def test_E12_status_reports_permission_config_path_error_line_and_version(self):
         status = self.status()
-        self.assertEqual(status.get("permission"), "granted")
-        self.assertEqual(status.get("config", {}).get("path"), str(self.config_file))
-        self.assertEqual(status["config"]["state"], "defaults")
-        self.assertRegex(status.get("version", ""), r"^0\.1\.0")
+        with self.subTest(field="permission"):
+            self.assertEqual(status.get("permission"), "granted")
+        with self.subTest(field="config.path"):
+            self.assertEqual(status.get("config", {}).get("path"), str(self.config_file))
+        with self.subTest(field="config.state"):
+            self.assertEqual(status["config"]["state"], "defaults")
+        with self.subTest(field="version"):
+            self.assertRegex(status.get("version", ""), r"^0\.1\.0")
         self.config_file.write_text("[experiments]\nunknown = true\n")
         status = eventually(lambda: (s if s.get("config", {}).get("state") == "error" else None) if (s := self.status()) else None, 1)
         self.assertIsNotNone(status)
@@ -403,16 +493,18 @@ class FoundationAcceptance(unittest.TestCase):
                 self.start_app()
 
     def test_E16_missing_or_adhoc_signing_configuration_cannot_produce_a_bundle(self):
-        for value in (None, "-", "Sign to run locally"):
+        for index, value in enumerate((None, "", "-", "adhoc", "Ad-Hoc", "Sign to run locally", "Unavailable fixture signing identity")):
             with self.subTest(identity=value):
                 config = self.directory / "NoIdentity.local.xcconfig"
                 config.unlink(missing_ok=True)
                 if value is not None:
                     config.write_text("CODE_SIGN_IDENTITY = " + value + "\n")
-                output = self.directory / "unsigned-output"
+                output = self.directory / ("unsigned-output-" + str(index))
                 result = subprocess.run([str(ROOT / "scripts/build"), "--signing-config", str(config), "--output-dir", str(output)], capture_output=True, text=True, timeout=2)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("Signing.local.xcconfig", result.stderr)
+                self.assertIn("docs/development.md", result.stderr)
+                if value != "Unavailable fixture signing identity":
+                    self.assertIn("Signing.local.xcconfig", result.stderr)
                 self.assertFalse(output.exists())
 
     def test_E17_missing_configuration_uses_defaults_without_an_error(self):
@@ -448,9 +540,21 @@ class FoundationAcceptance(unittest.TestCase):
         valid = self.status()["config"]
         for text, line in [("# bad table\n[experiments\n", 2), ("[experiments]\nunknown = true\n", 2),
                            ("[unknown]\n", 1), ("[experiments]\r\nunknown = true\r\n", 2),
-                           ("\u00a0[experiments]\n", 1)]:
-            with self.subTest(config=text):
-                self.config_file.write_text(text)
+                           ("\u00a0[experiments]\n", 1), ("[experiments]\n[experiments]\n", 2),
+                           ("# comment\n# bad\x00comment\n", 2), ("# comment\n# bad\x7fcomment\n", 2),
+                           ('["\\qexperiments"]\n', 1), ('["\\uD800"]\n', 1),
+                           ('["\\U00110000"]\n', 1), ('["experiments"" ]\n', 1),
+                           ("[[experiments]]\n", 1), ("#" * 65_537, 1), (b"\xff", 1)]:
+            with self.subTest(config=text[:80], line=line):
+                revision = self.status()["config"]["revision"]
+                self.config_file.write_text("[experiments] # before malformed input " + str(revision) + "\n")
+                self.assertTrue(eventually(lambda: (config := self.status()["config"])["state"] == "loaded" and
+                                           config["error"] is None and config["revision"] > revision, 1))
+                valid = self.status()["config"]
+                if isinstance(text, bytes):
+                    self.config_file.write_bytes(text)
+                else:
+                    self.config_file.write_text(text)
                 status = eventually(lambda: (s if s.get("config", {}).get("state") == "error" and s["config"]["error"]["line"] == line else None) if (s := self.status()) else None, 1)
                 self.assertIsNotNone(status)
                 self.assertEqual(status["config"]["error"]["line"], line)
@@ -476,7 +580,14 @@ class FoundationAcceptance(unittest.TestCase):
 
     def test_E21_a_blocked_app_keeps_last_classification_without_blocking_other_apps(self):
         window = self.open_window()
-        expected = self.assert_state(window, "tiled")
+        self.assert_state(window, "tiled")
+        for kind in ("noFullscreen", "fixed", "dialog", "panel", "sheet"):
+            created = self.open_window(kind, key=kind)
+            self.assert_state(created, "tiled" if kind == "noFullscreen" else "floats")
+        self.fixture.command("open", kind="tabs", key="hungTabs", count=3)
+        self.assertTrue(eventually(lambda: any(row["tabs"] == 3 for row in self.rows())))
+        time.sleep(0.55)
+        expected = {row["id"]: row for row in self.rows()}
         self.fixture.command("hang")
         other = FixtureSession(self.directory, 2)
         self.other_fixtures.append(other)
@@ -486,7 +597,8 @@ class FoundationAcceptance(unittest.TestCase):
                 new_id = other.command("open", kind="standard", key=key)["windows"][key]
                 self.assert_state(new_id, "tiled")
                 started = time.monotonic()
-                self.assertEqual(self.row(window), expected)
+                observed = {row["id"]: row for row in self.rows() if row["id"] in expected}
+                self.assertEqual(observed, expected)
                 self.assertLess(time.monotonic() - started, 1)
                 other.command("close", key=key)
                 self.assertTrue(eventually(lambda: self.row(new_id) is None))

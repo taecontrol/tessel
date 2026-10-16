@@ -129,7 +129,9 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 let sheet = makeWindow(key: key, kind: "dialog", show: false)
                 parent.beginSheet(sheet)
             } else {
-                _ = makeWindow(key: key, kind: kind, title: command["title"] as? String)
+                let background = command["background"] as? Bool ?? false
+                let window = makeWindow(key: key, kind: kind, title: command["title"] as? String, show: !background)
+                if background { window.orderBack(nil) }
             }
         case "tab": windows[key]?.makeKeyAndOrderFront(nil)
         case "addTab":
@@ -148,7 +150,10 @@ final class Fixture: NSObject, NSApplicationDelegate {
         case "restore": windows[key]?.deminiaturize(nil)
         case "hide": NSApp.hide(nil)
         case "show": NSApp.unhide(nil)
-        case "hang": break
+        case "hang":
+            // A genuine resize notification is delivered just before AppKit blocks.
+            // This makes tessel attempt a refresh against the hung application.
+            windows["window"]?.setContentSize(NSSize(width: 500, height: 320))
         default: return ["error": "unknown fixture command"]
         }
         return snapshot
@@ -179,6 +184,15 @@ final class Fixture: NSObject, NSApplicationDelegate {
         let label = NSTextField(labelWithString: "Generic fixture window")
         label.frame = NSRect(x: 30, y: 100, width: 350, height: 30)
         window.contentView?.addSubview(label)
+        if kind == "contentTabs" {
+            let tabs = NSTabView(frame: NSRect(x: 20, y: 20, width: 420, height: 220))
+            for index in 1...3 {
+                let item = NSTabViewItem(identifier: index)
+                item.label = "Fixture page " + String(index)
+                tabs.addTabViewItem(item)
+            }
+            window.contentView?.addSubview(tabs)
+        }
         windows[key] = window
         if show { window.makeKeyAndOrderFront(nil) }
         return window
