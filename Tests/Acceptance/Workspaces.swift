@@ -312,6 +312,45 @@ extension Acceptance {
             }
         }
 
+        @Test(arguments: [false, true])
+        func e12ReplacingANativeTabFrontPreservesArrivalOrderAndWorkspace(inserting: Bool) throws {
+            let b = try fixture.open(key: "b")
+            try activate(key: "b")
+            try enable()
+            try expectShown(b)
+            let group = try fixture.command("open", ["kind": "tabs", "key": "tabs", "count": 3])
+            let first = try #require(group.windows["tabs0"])
+            try expectShown(first)
+            try #require(try converges { $0.count == 2 && $0.contains { $0.id == first && $0.tabs == 3 } })
+            let c = try fixture.open(key: "c")
+            try expectShown(c)
+            try expectShown(first, since: post(40))
+
+            func replaceFront(key: String) throws -> UInt32 {
+                let reply = inserting
+                    ? try fixture.command("addTab", ["key": key, "reference": "tabs0"])
+                    : try fixture.command("tab", ["key": key])
+                return try #require(reply.windows[key])
+            }
+            let replacement = try replaceFront(key: inserting ? "inserted" : "tabs1")
+            try #require(try converges { $0.count == 3 && $0.contains { $0.id == replacement && $0.workspace == 1 && $0.tabs == (inserting ? 4 : 3) } })
+            try expectShown(replacement)
+            // The group arrived between B and C; a different front is not an arrival.
+            try expectShown(c, since: post(38))
+            try expectShown(replacement, since: post(40))
+            try expectShown(replacement, since: key(3, send: true))
+            try expectShown(c, since: key(1))
+            #expect(try !visible(replacement))
+
+            // Selecting a hidden group's next front keeps its original workspace.
+            let hiddenReplacement = try replaceFront(key: inserting ? "insertedAgain" : "tabs2")
+            try #require(try converges { $0.count == 3 && $0.contains { $0.id == hiddenReplacement && $0.workspace == 3 } })
+            try expectShown(hiddenReplacement)
+            #expect(try harness.status().workspaces?.active == 3)
+            try expectShown(c, since: key(1))
+            #expect(try !visible(hiddenReplacement))
+        }
+
         @Test func e14NewWindowJoinsTheActiveWorkspaceAndTheEndOfTheCycle() throws {
             let (a,b) = try split()
             try expectShown(b, since: key(2))
