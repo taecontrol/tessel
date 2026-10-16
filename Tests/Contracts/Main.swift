@@ -9,6 +9,10 @@ struct NativeContracts {
             print(Endpoint().path)
             return
         }
+        // Another Unix user runs this to show the endpoint refuses it: 0 means denied.
+        if CommandLine.arguments.dropFirst().first == "connect", CommandLine.arguments.count == 3 {
+            exit(connection(to: CommandLine.arguments[2]))
+        }
 
         // These handles are never queried. Only their local CF identity matters.
         let first = AXUIElementCreateApplication(getpid())
@@ -46,6 +50,20 @@ struct NativeContracts {
         subscriptions.update([first], add: add, remove: remove)
         check(attempts["created"] == 2, "A returning AX element was not registered again")
         print("Native subscription contracts passed")
+    }
+
+    private static func connection(to path: String) -> Int32 {
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let bytes = Array(path.utf8CString)
+        guard bytes.count <= MemoryLayout.size(ofValue: address.sun_path) else { return 2 }
+        withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: bytes.map { UInt8(bitPattern: $0) }) }
+        let client = socket(AF_UNIX, SOCK_STREAM, 0)
+        let result = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(client, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        if result == 0 { return 1 }
+        return errno == EACCES || errno == EPERM ? 0 : 2
     }
 
     private static func check(_ condition: Bool, _ message: String) {

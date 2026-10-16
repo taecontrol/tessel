@@ -14,7 +14,3 @@ Local.xcconfig
 
 # Local work files
 .work/
-
-# Python verification harness
-__pycache__/
-*.pyc
