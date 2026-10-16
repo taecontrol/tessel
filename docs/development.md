@@ -50,6 +50,10 @@ E1–E12 and E15–E21; E13/E14 require visual evidence of the permission journe
 The resource suite covers E22 with 20 fixture windows and ten 60-second idle
 measurements. CPU time comes from `proc_pid_rusage`, not elapsed wall time;
 resident memory must stay under 50 MB. Resource calibration runs only on CI.
+Mach ticks are converted with `mach_timebase_info`. The committed CPU budget is
+41.319498 ms per idle minute: three times the maximum of ten CI measurements
+(13.773166 ms). The largest resident measurement was 47.071232 MB. The budget
+file records the measurements and the source run; later CI runs enforce it.
 
 For minimize and restore, the 500 ms observation deadline begins at AppKit's
 completion notification, after the Dock animation. macOS sends the AX event
