@@ -73,7 +73,7 @@ final class WindowCatalog: NSObject {
     func cancelPresentations() { apps.values.forEach { $0.cancelPresentation() } }
 }
 
-private enum AXReadError: Error { case unresponsive, gone }
+private enum AXReadError: Error { case unresponsive, gone, changed }
 
 /// Retain the callback's immutable handle while handing it to its app's queue.
 private struct AXNotificationElement: @unchecked Sendable { let value: AXUIElement }
@@ -253,6 +253,7 @@ private final class AppWindows: @unchecked Sendable {
         do {
             guard let windows = try value(application, kAXWindowsAttribute) as? [AXUIElement] else { return }
             var next: [WindowFacts] = []
+            var handles = elementsByID
             var elements = windows
             // Subscribe even if an animation makes this snapshot incomplete.
             // Otherwise a newly created window can finish minimizing unseen.
@@ -262,7 +263,7 @@ private final class AppWindows: @unchecked Sendable {
             hidden = try value(application, kAXHiddenAttribute) as? Bool ?? hiddenHint
             for window in windows {
                 do {
-                    try inspect(window, into: &next, elements: &elements)
+                    try inspect(window, into: &next, elements: &elements, handles: &handles)
                 } catch AXReadError.gone { continue }
             }
             // AppKit can omit live windows during Space moves, fullscreen and
@@ -284,8 +285,16 @@ private final class AppWindows: @unchecked Sendable {
                 let isFocused = focusedElement.map { CFEqual($0, window) } == true
                 if cached?.minimized == true && !hidden && !isFocused { continue }
                 do {
-                    try inspect(window, into: &next, elements: &elements, parent: cached?.parent)
+                    try inspect(window, into: &next, elements: &elements, handles: &handles, parent: cached?.parent)
                 } catch AXReadError.gone { continue }
+            }
+            // Tab selection and insertion can replace AXWindows while the
+            // focused window is being inspected. Never commit a mixed read:
+            // its intermediate tab root would look like an ordinary window.
+            guard let confirmed = try value(application, kAXWindowsAttribute) as? [AXUIElement],
+                  windows.count == confirmed.count,
+                  windows.allSatisfy({ window in confirmed.contains { CFEqual(window, $0) } }) else {
+                throw AXReadError.changed
             }
             // AXWindows may still include the former tab root before the
             // focused replacement is read. Retire it using the previous bar
@@ -301,7 +310,7 @@ private final class AppWindows: @unchecked Sendable {
             let oldIDs = Set(facts.map(\.id))
             let newIDs = Set(next.map(\.id))
             facts = next
-            elementsByID = elementsByID.filter { newIDs.contains($0.key) }
+            elementsByID = handles.filter { newIDs.contains($0.key) }
             constrained.formIntersection(newIDs)
             validations = validations.filter { newIDs.contains($0.key) }
             failedReads = 0
@@ -321,7 +330,8 @@ private final class AppWindows: @unchecked Sendable {
         }
     }
 
-    private func inspect(_ window: AXUIElement, into result: inout [WindowFacts], elements: inout [AXUIElement], parent: UInt32? = nil) throws {
+    private func inspect(_ window: AXUIElement, into result: inout [WindowFacts], elements: inout [AXUIElement],
+                         handles: inout [UInt32: AXUIElement], parent: UInt32? = nil) throws {
         if !elements.contains(where: { CFEqual($0, window) }) { elements.append(window) }
         AXUIElementSetMessagingTimeout(window, 0.05)
         var id: CGWindowID = 0
@@ -337,11 +347,11 @@ private final class AppWindows: @unchecked Sendable {
         var visited = 0
         let tabs = try chrome(window, depth: 0, visited: &visited, sheets: &sheets, groups: &tabGroups)
         let frame = try frame(window)
-        elementsByID[id] = window
+        handles[id] = window
         result.append(WindowFacts(id: id, minimized: minimized, fullscreen: fullscreen, subrole: subrole,
                                   resizable: resizable.boolValue, tabs: max(1, tabs), frame: frame, parent: parent, nativeTabGroups: tabGroups))
         elements.append(contentsOf: tabGroups)
-        for sheet in sheets { try inspect(sheet, into: &result, elements: &elements, parent: id) }
+        for sheet in sheets { try inspect(sheet, into: &result, elements: &elements, handles: &handles, parent: id) }
     }
 
     /// Read roles and tab counts in the window chrome, never text or titles.
