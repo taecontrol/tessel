@@ -9,6 +9,10 @@ final class DialogWindow: NSWindow {
     override func accessibilitySubrole() -> NSAccessibility.Subrole? { .dialog }
 }
 
+final class NewTabWindow: NSWindow {
+    override func newWindowForTab(_ sender: Any?) {}
+}
+
 @MainActor
 final class Fixture: NSObject, NSApplicationDelegate {
     var windows: [String: NSWindow] = [:]
@@ -113,11 +117,13 @@ final class Fixture: NSObject, NSApplicationDelegate {
             let kind = command["kind"] as? String ?? "standard"
             let count = command["count"] as? Int ?? 3
             if kind == "tabs" {
-                let first = makeWindow(key: key + "0", kind: "standard")
+                let windowKind = command["windowKind"] as? String ?? "standard"
+                let closable = command["closable"] as? Bool ?? true
+                let first = makeWindow(key: key + "0", kind: windowKind, closable: closable)
                 first.tabbingMode = .preferred
                 first.tabbingIdentifier = key
                 for index in 1..<max(1, count) {
-                    let window = makeWindow(key: key + String(index), kind: "standard")
+                    let window = makeWindow(key: key + String(index), kind: windowKind, closable: closable)
                     window.tabbingMode = .preferred
                     window.tabbingIdentifier = key
                     first.addTabbedWindow(window, ordered: .above)
@@ -159,11 +165,20 @@ final class Fixture: NSObject, NSApplicationDelegate {
         return snapshot
     }
 
-    var snapshot: [String: Any] { ["pid": getpid(), "windows": windows.mapValues { $0.windowNumber }] }
+    var snapshot: [String: Any] {
+        ["pid": getpid(), "windows": windows.mapValues { $0.windowNumber },
+         "nativeTabs": windows.mapValues { $0.tabGroup?.windows.count ?? 1 },
+         "closable": windows.mapValues { $0.styleMask.contains(.closable) },
+         "contentPages": windows.mapValues { window in
+             if let controller = window.contentViewController as? NSTabViewController { return controller.tabViewItems.count }
+             return window.contentView?.subviews.compactMap { ($0 as? NSTabView)?.numberOfTabViewItems }.max() ?? 0
+         }]
+    }
 
     @discardableResult
-    func makeWindow(key: String, kind: String, title: String? = nil, show: Bool = true) -> NSWindow {
+    func makeWindow(key: String, kind: String, title: String? = nil, show: Bool = true, closable: Bool = true) -> NSWindow {
         var style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable]
+        if !closable { style.remove(.closable) }
         if kind != "fixed" { style.insert(.resizable) }
         let rect = NSRect(x: 100, y: 120, width: 480, height: 300)
         let window: NSWindow
@@ -173,6 +188,8 @@ final class Fixture: NSObject, NSApplicationDelegate {
             (window as? NSPanel)?.hidesOnDeactivate = false
         } else if kind == "dialog" {
             window = DialogWindow(contentRect: rect, styleMask: style, backing: .buffered, defer: false)
+        } else if kind == "newTabButton" {
+            window = NewTabWindow(contentRect: rect, styleMask: style, backing: .buffered, defer: false)
         } else {
             window = NSWindow(contentRect: rect, styleMask: style, backing: .buffered, defer: false)
         }
@@ -184,14 +201,34 @@ final class Fixture: NSObject, NSApplicationDelegate {
         let label = NSTextField(labelWithString: "Generic fixture window")
         label.frame = NSRect(x: 30, y: 100, width: 350, height: 30)
         window.contentView?.addSubview(label)
-        if kind == "contentTabs" {
+        if ["contentTabs", "emptyContentTabs", "manyContentTabs"].contains(kind) {
             let tabs = NSTabView(frame: NSRect(x: 20, y: 20, width: 420, height: 220))
-            for index in 1...3 {
+            for index in 1...(kind == "manyContentTabs" ? 5 : 3) {
                 let item = NSTabViewItem(identifier: index)
                 item.label = "Fixture page " + String(index)
+                if kind != "emptyContentTabs" {
+                    let page = NSView(frame: tabs.bounds)
+                    let content = NSTextField(labelWithString: "Invented page content")
+                    content.frame = NSRect(x: 20, y: 30, width: 250, height: 30)
+                    page.addSubview(content)
+                    item.view = page
+                }
                 tabs.addTabViewItem(item)
             }
             window.contentView?.addSubview(tabs)
+        }
+        if kind == "segmentedTabs" {
+            let controller = NSTabViewController()
+            controller.tabStyle = .segmentedControlOnTop
+            for index in 1...3 {
+                let page = NSViewController()
+                page.view = NSView(frame: NSRect(x: 0, y: 0, width: 480, height: 300))
+                page.view.addSubview(NSTextField(labelWithString: "Invented segmented page content"))
+                let item = NSTabViewItem(viewController: page)
+                item.label = "Fixture section " + String(index)
+                controller.addTabViewItem(item)
+            }
+            window.contentViewController = controller
         }
         windows[key] = window
         if show { window.makeKeyAndOrderFront(nil) }
@@ -207,12 +244,12 @@ enum FixtureProbe {
         return result
     }
 
-    static func tabs(_ element: AXUIElement, depth: Int = 0) -> Int {
-        guard depth < 5 else { return 0 }
+    static func tabGroups(_ element: AXUIElement, depth: Int = 0) -> [AXUIElement] {
+        guard depth < 5 else { return [] }
         if value(element, kAXRoleAttribute) as? String == kAXTabGroupRole {
-            return (value(element, kAXTabsAttribute) as? [AXUIElement])?.count ?? 0
+            return [element]
         }
-        return (value(element, kAXChildrenAttribute) as? [AXUIElement] ?? []).prefix(40).map { tabs($0, depth: depth + 1) }.max() ?? 0
+        return (value(element, kAXChildrenAttribute) as? [AXUIElement] ?? []).prefix(40).flatMap { tabGroups($0, depth: depth + 1) }
     }
 
     @MainActor static func run(pid: pid_t, resizeID: Int?) {
@@ -231,9 +268,16 @@ enum FixtureProbe {
             let fullscreen = value(window, kAXFullScreenButtonAttribute).map { value in
                 (self.value(value as! AXUIElement, kAXEnabledAttribute) as? Bool ?? false) ? "enabled" : "disabled"
             } ?? "none"
+            let groups = tabGroups(window)
+            let tabItems = groups.map { value($0, kAXTabsAttribute) as? [AXUIElement] ?? [] }
+            let extraButtons = groups.flatMap { value($0, kAXChildrenAttribute) as? [AXUIElement] ?? [] }
+                .filter { value($0, kAXRoleAttribute) as? String == kAXButtonRole }.count
+            let perTabButtons = tabItems.flatMap { $0 }.flatMap { value($0, kAXChildrenAttribute) as? [AXUIElement] ?? [] }
+                .filter { value($0, kAXRoleAttribute) as? String == kAXButtonRole }.count
             var result: [String: Any] = ["id": id, "subrole": value(window, kAXSubroleAttribute) as? String ?? "missing",
                 "role": value(window, kAXRoleAttribute) as? String ?? "missing", "sizeSettable": settable.boolValue,
-                "fullscreen": fullscreen, "tabs": tabs(window)]
+                "fullscreen": fullscreen, "tabs": tabItems.map(\.count).max() ?? 0,
+                "extraTabButtons": extraButtons, "perTabButtons": perTabButtons]
             if resizeID == Int(id) {
                 var size = CGSize(width: 650, height: 400)
                 let axSize = AXValueCreate(.cgSize, &size)!

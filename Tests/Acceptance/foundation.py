@@ -296,10 +296,51 @@ class FoundationAcceptance(unittest.TestCase):
         self.assertTrue(eventually(lambda: not self.rows()))
 
     def test_E05_content_tabs_do_not_count_as_native_window_tabs(self):
-        window = self.open_window("contentTabs")
-        row = self.assert_state(window, "tiled", "standard window")
-        self.assertEqual(row["tabs"], 1)
-        self.assertNotIn("native tabs", row["reason"])
+        for kind in ("emptyContentTabs", "contentTabs", "segmentedTabs"):
+            with self.subTest(kind=kind):
+                self.fixture.command("reset")
+                reply = self.fixture.command("open", kind=kind, key="content")
+                self.assertEqual(reply["nativeTabs"]["content"], 1)
+                self.assertEqual(reply["contentPages"]["content"], 3)
+                window = reply["windows"]["content"]
+                row = self.assert_state(window, "tiled", "standard window")
+                self.assertEqual(row["tabs"], 1)
+                self.assertNotIn("native tabs", row["reason"])
+                if kind != "segmentedTabs":
+                    self.assertEqual(next(item for item in self.probe() if item["id"] == window)["tabs"], 3)
+
+    def test_E05_native_tab_count_ignores_content_and_extra_controls(self):
+        cases = (("mixed", {"windowKind": "manyContentTabs"}),
+                 ("plus", {"windowKind": "newTabButton"}),
+                 ("nonclosable-startup", {"closable": False}))
+        for name, options in cases:
+            with self.subTest(case=name):
+                self.fixture.command("reset")
+                startup = options.get("closable") is False
+                if startup:
+                    self.stop_app()
+                try:
+                    reply = self.fixture.command("open", kind="tabs", key="group", count=3, **options)
+                    self.assertEqual(set(reply["nativeTabs"].values()), {3})
+                    if name == "mixed":
+                        self.assertEqual(set(reply["contentPages"].values()), {5})
+                    if startup:
+                        self.start_app(fixture_ready=False)
+                    self.assertTrue(eventually(lambda: len(rows := self.rows()) == 1 and rows[0]["tabs"] == 3))
+                    self.assertIn("3 native tabs", self.rows()[0]["reason"])
+                    observed = self.probe()
+                    self.assertEqual(len(observed), 1)
+                    if name == "plus":
+                        self.assertEqual(observed[0]["extraTabButtons"], 1)
+                    if startup:
+                        self.assertEqual(set(reply["closable"].values()), {False})
+                        self.assertEqual(observed[0]["perTabButtons"], 0)
+                    self.fixture.command("tab", key="group1")
+                    second = reply["windows"]["group1"]
+                    self.assertTrue(eventually(lambda: len(rows := self.rows()) == 1 and rows[0]["id"] == second and rows[0]["tabs"] == 3))
+                finally:
+                    if startup and not process_ids(APP / "Contents/MacOS/TesselApp"):
+                        self.start_app()
 
     def test_E06_minimized_and_hidden_take_precedence_and_restore(self):
         ids = {}
