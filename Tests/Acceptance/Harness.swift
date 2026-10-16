@@ -97,6 +97,7 @@ struct ProbeWindow: Decodable {
 @MainActor
 final class FixtureSession {
     private(set) var pid: pid_t = 0
+    private(set) var windowIDs = Set<UInt32>()
     private let path: String
     private let clientPath: String
     private let socket: Int32
@@ -164,7 +165,9 @@ final class FixtureSession {
         if let object = try JSONSerialization.jsonObject(with: reply) as? [String: Any], let error = object["error"] as? String {
             throw HarnessError(error)
         }
-        return try JSONDecoder().decode(FixtureReply.self, from: reply)
+        let decoded = try JSONDecoder().decode(FixtureReply.self, from: reply)
+        windowIDs = Set(decoded.windows.values)
+        return decoded
     }
 
     func open(kind: String = "standard", key: String = "window", _ options: [String: Any] = [:]) throws -> UInt32 {

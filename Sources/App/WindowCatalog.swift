@@ -286,6 +286,13 @@ private final class AppWindows: @unchecked Sendable {
                     try inspect(window, into: &next, elements: &elements, parent: cached?.parent)
                 } catch AXReadError.gone { continue }
             }
+            // AXWindows may still include the former tab root before the
+            // focused replacement is read. Retire it using the previous bar
+            // identity, before the new snapshot loses that relationship.
+            let retired = Set(facts.filter { cached in
+                next.contains { $0.id != cached.id && !$0.minimized && $0.sharesNativeTabs(with: cached) }
+            }.map(\.id))
+            next.removeAll { retired.contains($0.id) }
             let oldIDs = Set(facts.map(\.id))
             let newIDs = Set(next.map(\.id))
             facts = next

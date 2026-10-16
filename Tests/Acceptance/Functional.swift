@@ -124,6 +124,20 @@ extension Acceptance {
             #expect(try converges { $0.isEmpty })
         }
 
+        @Test func e05ReplacingNativeTabFrontDuringInsertionKeepsOneEntry() throws {
+            try fixture.command("open", ["kind": "tabs", "key": "tabs", "count": 3])
+            try #require(try converges { $0.count == 1 && $0[0].tabs == 3 })
+            // Insertion can briefly leave AXWindows pointing at the old front
+            // while AXFocusedWindow already identifies its replacement.
+            for index in 0..<20 {
+                try fixture.command("tab", ["key": "tabs\(index % 3)"])
+                try fixture.command("addTab", ["key": "inserted", "reference": "tabs\(index % 3)"])
+                try #require(try converges { $0.count == 1 && $0[0].tabs == 4 })
+                try fixture.command("close", ["key": "inserted"])
+                try #require(try converges { $0.count == 1 && $0[0].tabs == 3 })
+            }
+        }
+
         @Test(arguments: ["emptyContentTabs", "contentTabs", "segmentedTabs"])
         func e05ContentTabsDoNotCountAsNativeWindowTabs(kind: String) throws {
             let reply = try fixture.command("open", ["kind": kind, "key": "content"])

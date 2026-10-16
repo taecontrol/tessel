@@ -86,12 +86,17 @@ extension Acceptance {
             try yieldActivation(to: session)
             try session.command("activate", ["key": key])
             var arguments: [String: Any] = ["pid": session.pid]
-            if let id = try session.command("ping").windows[key] { arguments["id"] = id }
+            let target = try session.command("ping").windows[key]
+            if let target { arguments["id"] = target }
             try harness.observer.command("activateFixture", arguments)
             let hasWindows = try !session.command("ping").windows.isEmpty
             let active = try eventually {
                 let observation = try observe()
                 guard observation.activeFixturePID == session.pid else { return false }
+                if let target {
+                    guard let window = observation.windows.first(where: { $0.id == target }),
+                          window.frame[2] > 0, window.frame[3] > 0 else { return false }
+                }
                 if hasWindows { return observation.frontmostFixturePID == session.pid }
                 return try session.command("ping").active == true
             }
@@ -128,6 +133,7 @@ extension Acceptance {
         }
 
         func expectEmpty(since start: Double) throws {
+            let managed = Set(([fixture] + harness.otherFixtures).flatMap(\.windowIDs))
             let verifyFinder: Bool
             if ProcessInfo.processInfo.environment["CI"] == "true" {
                 verifyFinder = true
@@ -139,7 +145,7 @@ extension Acceptance {
             }
             let empty = try eventually(within: max(0, budget - (monotonicSeconds() - start))) {
                 let observation = try observe(finder: verifyFinder, focusedOnly: true)
-                return observation.visibleIDs.isEmpty && (!verifyFinder || observation.finderDesktop)
+                return managed.isDisjoint(with: observation.visibleIDs) && (!verifyFinder || observation.finderDesktop)
             }
             try #require(empty, "an empty workspace must hide managed windows and, when safe, focus Finder's desktop")
         }
