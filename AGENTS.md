@@ -7,14 +7,18 @@ Apple silicon. It is driven entirely from the keyboard. When a window is moved
 with the mouse, tessel adapts to it, but it offers no mouse or trackpad
 interaction of its own.
 
-AeroSpace is a reference, not a target. Do not aim for parity with it or copy
-a behavior only because it has it.
+Existing window managers are references, not limits. Before adopting how
+another tool solves a problem, list other ways, including ones no tool uses
+yet, test the promising ones on the real system, and choose by evidence.
 
 The `tessel` CLI is mainly for agents: it lets them observe and test tessel,
 and later operate it on the user's behalf.
 
 ## How to decide
 
+- tessel works well without a config file. Every setting has a default that
+  suits most people; the config changes a default, it never completes the
+  setup. An experiment's flag is the only setting a feature may require.
 - Add only what the roadmap (the open issues) asks for. A new feature starts
   as an experiment behind a config flag, and its issue records whether it is
   kept. A kept feature loses its flag. A rejected one loses its code.
