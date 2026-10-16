@@ -1,4 +1,5 @@
 import Carbon
+import CoreGraphics
 import Darwin
 import Foundation
 import Testing
@@ -33,11 +34,21 @@ extension Acceptance {
                          "the accepted workspaces configuration must enable the experiment")
         }
 
-        func observe(_ sessions: [FixtureSession]? = nil) throws -> Observation {
-            try #require(try harness.observer.command("observe", ["pids": (sessions ?? [fixture] + harness.otherFixtures).map(\.pid)]).observation)
+        func observe(_ sessions: [FixtureSession]? = nil, finder: Bool = false, focusedOnly: Bool = false) throws -> Observation {
+            try #require(try harness.observer.command("observe", ["pids": (sessions ?? [fixture] + harness.otherFixtures).map(\.pid),
+                "finder": finder, "focusedOnly": focusedOnly]).observation)
         }
 
         func window(_ id: UInt32) throws -> Observation.Window? { try observe().windows.first { $0.id == id } }
+
+        func visible(_ id: UInt32) throws -> Bool { try observe(focusedOnly: true).visibleIDs.contains(id) }
+
+        /// Observe the active number without including CLI startup in a switch.
+        /// The suffix distinguishes workspace 1 from workspace 10.
+        func statusItemShows(_ workspace: Int) throws -> Bool {
+            try harness.observer.command("menu", ["pid": harness.appPID, "open": false,
+                "expected": "Workspace \(workspace)", "suffix": true]).menuContains == true
+        }
 
         func filled(_ window: Observation.Window, area: [Double], gap: Double = 10) -> Bool {
             let expected = [area[0] + gap, area[1] + gap, area[2] - gap * 2, area[3] - gap * 2]
@@ -45,7 +56,7 @@ extension Acceptance {
         }
 
         func shown(_ id: UInt32, gap: Double = 10, floating: Bool = false) throws -> Bool {
-            let observation = try observe()
+            let observation = try observe(focusedOnly: true)
             guard let window = observation.windows.first(where: { $0.id == id }) else { return false }
             let focused = window.focused || observation.windows.contains { $0.parent == id && $0.focused }
             return window.visible && window.main && focused && (floating || filled(window, area: observation.area, gap: gap))
@@ -117,15 +128,18 @@ extension Acceptance {
         }
 
         func expectEmpty(since start: Double) throws {
-            let verifyFinder = try observe().finderHasNoOrdinaryWindows
+            let verifyFinder: Bool
             if ProcessInfo.processInfo.environment["CI"] == "true" {
-                try #require(verifyFinder, "CI must have a successful Finder AXWindows read without ordinary windows to exercise the full E7 desktop assertion")
-            } else if !verifyFinder {
+                verifyFinder = true
+            } else {
+                verifyFinder = try observe(finder: true).finderHasNoOrdinaryWindows == true
+            }
+            if !verifyFinder {
                 print("Skipping Finder-frontmost assertion: Finder has ordinary or unknown AX entries, or its AXWindows read failed; managed-window visibility is still checked.")
             }
             let empty = try eventually(within: max(0, budget - (monotonicSeconds() - start))) {
-                let observation = try observe()
-                return observation.windows.allSatisfy { !$0.visible } && (!verifyFinder || observation.finderDesktop)
+                let observation = try observe(finder: verifyFinder, focusedOnly: true)
+                return observation.visibleIDs.isEmpty && (!verifyFinder || observation.finderDesktop)
             }
             try #require(empty, "an empty workspace must hide managed windows and, when safe, focus Finder's desktop")
         }
@@ -146,7 +160,9 @@ extension Acceptance {
         @Test(arguments: [false, true])
         func e02EnablingOrStartingAssignsExistingWindowsAndKeepsTheFocusedOne(startup: Bool) throws {
             if startup { harness.stopApp() }
-            let a = try fixture.open(key: "a"), b = try fixture.open(key: "b"), c = try fixture.open(key: "c")
+            // Focus must win over arrival order in both startup paths.
+            let c = try fixture.open(key: "c")
+            let a = try fixture.open(key: "a"), b = try fixture.open(key: "b")
             try activate(key: "c")
             let start = monotonicSeconds()
             if startup {
@@ -156,8 +172,8 @@ extension Acceptance {
             try expectShown(c, since: start, within: 1)
             let assigned = try harness.rows().filter { [a,b,c].contains($0.id) }
             #expect(assigned.count == 3 && assigned.allSatisfy { $0.workspace == 1 })
-            #expect(try window(a)?.visible == false)
-            #expect(try window(b)?.visible == false)
+            #expect(try !visible(a))
+            #expect(try !visible(b))
             #expect(try harness.status().workspaces?.active == 1)
         }
 
@@ -168,7 +184,7 @@ extension Acceptance {
             let frame = try #require(try window(dialog)).frame
             try enable()
             try expectShown(dialog, floating: true)
-            #expect(try window(c)?.visible == true)
+            #expect(try visible(c))
             #expect(try #require(try window(dialog)).order < #require(try window(c)).order)
             #expect(try window(dialog)?.frame == frame)
             #expect(try harness.row(dialog)?.workspace == 1)
@@ -177,9 +193,9 @@ extension Acceptance {
         @Test func e04WorkspaceShortcutsHideFillAndFocusBothDirections() throws {
             let (a,b) = try split()
             try expectShown(b, since: key(2))
-            #expect(try window(a)?.visible == false)
+            #expect(try !visible(a))
             try expectShown(a, since: key(1))
-            #expect(try window(b)?.visible == false)
+            #expect(try !visible(b))
         }
 
         @Test func e05OptionZeroSelectsWorkspaceTen() throws {
@@ -215,8 +231,8 @@ extension Acceptance {
             try enable()
             try expectEmpty(since: key(8))
             #expect(try harness.status().workspaces?.active == 8)
-            let observation = try observe()
-            if !observation.finderHasNoOrdinaryWindows {
+            let observation = try observe(finder: true)
+            if ProcessInfo.processInfo.environment["CI"] != "true", observation.finderHasNoOrdinaryWindows == false {
                 #expect(observation.frontmostFixture, "fixture-only empty-workspace hotkeys must leave focus with the fixture when Finder activation is unsafe")
             }
         }
@@ -297,7 +313,7 @@ extension Acceptance {
             let c = try fixture.open(key: "c")
             try expectShown(c, since: start, within: 0.5)
             #expect(try harness.row(c)?.workspace == 2)
-            #expect(try window(a)?.visible == false)
+            #expect(try !visible(a))
             try expectShown(b, since: post(38))
             try expectShown(c, since: post(38))
         }
@@ -365,8 +381,9 @@ extension Acceptance {
             let start = monotonicSeconds()
             try x.command("activate", ["key": "activationOnly"])
             try #require(try eventually(within: max(0, budget - (monotonicSeconds() - start))) {
-                try shown(parent) && window(sheet)?.visible == true && harness.status().workspaces?.active == 3
+                try shown(parent) && visible(sheet) && statusItemShows(3)
             }, "activating a focused sheet must show its parent workspace")
+            #expect(try harness.status().workspaces?.active == 3)
         }
 
         @Test func e17ActivatingAnAppWhoseFocusedWindowIsHereKeepsTheWorkspace() throws {
@@ -377,8 +394,9 @@ extension Acceptance {
             let start = monotonicSeconds()
             try fixture.command("activate", ["key": "activationOnly"])
             try #require(try eventually(within: max(0, budget - (monotonicSeconds() - start))) {
-                try shown(a) && harness.status().workspaces?.active == 1
+                try shown(a) && statusItemShows(1)
             })
+            #expect(try harness.status().workspaces?.active == 1)
         }
 
         @Test func e18ActivatingAnAppWithoutWindowsDoesNotSwitchWorkspace() throws {
@@ -415,7 +433,7 @@ extension Acceptance {
             let row = try expectState(a, "floats", "cannot fill the screen")
             #expect(row.workspace == 1)
             func centered() throws -> Bool {
-                let observation = try observe()
+                let observation = try observe(focusedOnly: true)
                 let window = try #require(observation.windows.first { $0.id == a })
                 return abs(window.frame[0] + window.frame[2] / 2 - (observation.area[0] + observation.area[2] / 2)) <= 1
                     && abs(window.frame[1] + window.frame[3] / 2 - (observation.area[1] + observation.area[3] / 2)) <= 1
@@ -425,8 +443,9 @@ extension Acceptance {
             for target in [2,1] {
                 let start = try key(target, send: true)
                 #expect(try eventually(within: max(0, budget - (monotonicSeconds() - start))) {
-                    try harness.status().workspaces?.active == target && shown(a, floating: true) && centered()
+                    try statusItemShows(target) && shown(a, floating: true) && centered()
                 })
+                #expect(try harness.status().workspaces?.active == target)
                 #expect(try harness.row(a)?.state == "floats")
                 #expect(try harness.row(a)?.reason == "cannot fill the screen")
             }
@@ -466,24 +485,32 @@ extension Acceptance {
             let start = monotonicSeconds()
             try fixture.command("tab", ["key": "d"])
             try #require(try eventually(within: max(0, budget - (monotonicSeconds() - start))) {
-                try shown(d) && harness.status().workspaces?.active == 3
+                try shown(d) && statusItemShows(3)
             })
+            #expect(try harness.status().workspaces?.active == 3)
         }
 
         @Test func e29RecoveryWaitsForTheFirstSuccessfulAXEnumeration() throws {
             let (a,b) = try split()
+            try #require(try eventually { try !visible(b) })
             kill(harness.appPID, SIGKILL)
             try #require(eventually { !harness.appIsRunning })
             try writeConfig("")
-            let start = monotonicSeconds()
             kill(fixture.pid, SIGSTOP)
             do {
                 defer { kill(fixture.pid, SIGCONT) }
                 try harness.startApp(fixtureReady: false)
                 sleep(seconds: 0.5)
+                guard let listed = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] else {
+                    throw HarnessError("cannot read on-screen visibility during the blocked AX read")
+                }
+                let orphanVisible = listed.contains { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == b }
+                #expect(!orphanVisible, "recovery must wait for a successful AX enumeration")
             }
-            try #require(try eventually(within: max(0, 1 - (monotonicSeconds() - start))) {
-                try harness.row(b) != nil && window(a)?.visible == true && window(b)?.visible == true
+            // The ordinary crash test enforces the one-second restart deadline.
+            // This failure-path test deliberately suspends AX; time from resume.
+            try #require(try eventually(within: 1) {
+                try harness.row(b) != nil && visible(a) && visible(b)
             })
         }
 
@@ -516,7 +543,7 @@ extension Acceptance {
             let limited = try fixture.open(kind: "maxWidth", key: "limited")
             try expectShown(limited, floating: true)
             _ = try expectState(limited, "floats", "cannot fill the screen")
-            #expect(try eventually { try window(tile)?.visible == true })
+            #expect(try eventually { try visible(tile) })
             #expect(try #require(try window(limited)).order < #require(try window(tile)).order)
         }
 
@@ -538,7 +565,7 @@ extension Acceptance {
             let frame = try #require(try window(d)).frame
             #expect(try harness.row(d)?.workspace == 2)
             try key(1)
-            try #require(try eventually(within: budget) { try window(d)?.visible == false })
+            try #require(try eventually(within: budget) { try !visible(d) })
             try expectShown(d, since: key(2), floating: true)
             #expect(try window(d)?.frame == frame)
         }
@@ -548,20 +575,20 @@ extension Acceptance {
             let parent = try #require(try fixture.command("ping").windows["sheetParent"])
             try activate(key: "sheetParent")
             try enable()
-            try #require(try eventually { try window(sheet)?.visible == true })
+            try #require(try eventually { try visible(sheet) })
             let b = try fixture.open(key: "b")
             try expectShown(b)
             try expectShown(b, since: key(2, send: true))
-            #expect(try window(sheet)?.visible == false)
-            #expect(try window(parent)?.visible == false)
+            #expect(try !visible(sheet))
+            #expect(try !visible(parent))
             try key(1)
-            try #require(try eventually(within: budget) { try window(parent)?.visible == true && window(sheet)?.visible == true })
+            try #require(try eventually(within: budget) { try visible(parent) && visible(sheet) })
             #expect(try harness.row(sheet)?.workspace == harness.row(parent)?.workspace)
             try #require(try eventually { try window(sheet)?.focused == true })
             let sent = try key(3, send: true)
             try #require(try eventually(within: max(0, budget - (monotonicSeconds() - sent))) {
                 try harness.row(parent)?.workspace == 3 && harness.row(sheet)?.workspace == 3
-                    && shown(parent) && window(sheet)?.visible == true
+                    && shown(parent) && visible(sheet)
             }, "sending while a sheet is focused must move its parent and sheet together")
         }
 
@@ -591,13 +618,15 @@ extension Acceptance {
             try activate(key: "c")
             try expectShown(c)
             let sent = try key(1, send: true)
-            try #require(try eventually(within: budget - (monotonicSeconds() - sent)) { try harness.status().workspaces?.active == 1 })
+            try #require(try eventually(within: budget - (monotonicSeconds() - sent)) { try statusItemShows(1) })
+            #expect(try harness.status().workspaces?.active == 1)
             try fixture.command("restore", ["key": "b"])
             try #require(try eventually(within: budget) {
-                try shown(b) && harness.status().workspaces?.active == 2
+                try shown(b) && statusItemShows(2)
             })
+            #expect(try harness.status().workspaces?.active == 2)
             #expect(try harness.row(b)?.workspace == 2)
-            #expect(try window(a)?.visible == false)
+            #expect(try !visible(a))
         }
 
         @Test(arguments: [false, true])
@@ -631,7 +660,7 @@ extension Acceptance {
             let frame = try #require(try window(a)).frame
             sleep(seconds: budget)
             #expect(try window(a)?.frame == frame)
-            #expect(try window(a)?.visible == true)
+            #expect(try visible(a))
             try fixture.command("fullscreen")
             try expectShown(a)
             #expect(try harness.row(a)?.workspace == 1)
@@ -648,7 +677,7 @@ extension Acceptance {
             }
             _ = try expectState(a, "fullscreen")
             try #require(try eventually { try window(a).map { $0.visible && $0.focused } == true })
-            #expect(try window(b)?.visible == false)
+            #expect(try !visible(b))
             try key(2, send: true)
             sleep(seconds: budget)
             #expect(try harness.status().workspaces?.active == 1)
@@ -680,9 +709,10 @@ extension Acceptance {
             let start = monotonicSeconds()
             try x.command("activate", ["key": "activationOnly"])
             try #require(try eventually(within: max(0, budget - (monotonicSeconds() - start))) {
-                try shown(a) && harness.status().workspaces?.active == 1
+                try shown(a) && statusItemShows(1)
             })
-            #expect(try window(b)?.visible == false)
+            #expect(try harness.status().workspaces?.active == 1)
+            #expect(try !visible(b))
             #expect(try harness.row(b)?.workspace == 3)
         }
 
@@ -712,7 +742,7 @@ extension Acceptance {
             let start = monotonicSeconds()
             if quit { harness.stopApp() } else { try writeConfig("[experiments]\nworkspaces = false\n") }
             try #require(try eventually(within: max(0, 1 - (monotonicSeconds() - start))) {
-                try window(a)?.visible == true && window(b)?.visible == true
+                try visible(a) && visible(b)
             })
             try activate(key: "a")
             let count = try fixture.command("ping").keyCount ?? 0
@@ -743,7 +773,7 @@ extension Acceptance {
                 try expectShown(current == a ? b : a, since: post(38))
             } else {
                 #expect(try eventually(within: max(0, 1 - (monotonicSeconds() - start))) {
-                    try window(a)?.visible == true && window(b)?.visible == true
+                    try visible(a) && visible(b)
                 })
             }
         }
@@ -786,14 +816,17 @@ extension Acceptance {
                 try expectShown(window)
                 let start = try key(number, send: true)
                 try #require(try eventually(within: max(0, budget - (monotonicSeconds() - start))) {
-                    try shown(window) && harness.status().workspaces?.active == number && harness.row(window)?.workspace == number
+                    try shown(window) && statusItemShows(number)
                 })
+                #expect(try harness.status().workspaces?.active == number)
+                #expect(try harness.row(window)?.workspace == number)
             }
             for number in 1...10 {
                 let start = try key(number)
                 try #require(try eventually(within: max(0, budget - (monotonicSeconds() - start))) {
-                    try shown(windows[number - 1]) && harness.status().workspaces?.active == number
+                    try shown(windows[number - 1]) && statusItemShows(number)
                 })
+                #expect(try harness.status().workspaces?.active == number)
             }
         }
 
@@ -873,7 +906,7 @@ extension Acceptance {
             #expect(!status.enabled)
             #expect(status.reason.lowercased().contains("skylight"))
             #expect(try window(a)?.frame == frame)
-            #expect(try window(a)?.visible == true)
+            #expect(try visible(a))
             let count = try fixture.command("ping").keyCount ?? 0
             try key(1)
             #expect(try eventually { try fixture.command("ping").keyCount == count + 1 })
@@ -896,7 +929,7 @@ extension Acceptance {
             try #require(try eventually(within: max(0, 1 - (monotonicSeconds() - start))) {
                 try harness.status().workspaces?.enabled == false
                     && harness.status().workspaces?.reason == "SkyLight could not hide a window"
-                    && window(a)?.visible == true && window(b)?.visible == true
+                    && visible(a) && visible(b)
             })
             try activate(key: "b")
             let count = try fixture.command("ping").keyCount ?? 0

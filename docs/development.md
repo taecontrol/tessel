@@ -175,6 +175,20 @@ With the experiment disabled, tessel observes without managing ordinary windows.
 `Tests/Acceptance/Workspaces.swift` covers issue #2 E1–E35 at the CLI and
 independent AX/CG boundary. The trusted fixture posts the real Carbon shortcuts
 as CGEvents only after confirming a fixture window is frontmost and on screen.
+Transient safety refusals are retried before posting, for at most one second;
+transport failures and posted events are never retried. Switch timing still
+starts at the actual event post. CI checks Finder desktop focus throughout the
+existing switch deadline rather than requiring its first AX sample to succeed.
+Only empty-workspace observations inspect Finder, so unrelated AX reads do not
+consume the fixture's timed visibility, frame, and focus checks.
+Timed checks read `AXFocusedWindow` directly, including a focused sheet's parent:
+`AXWindows` can temporarily omit a live window during a Space move. CG membership
+supplies fixture visibility independently, including the empty-workspace check.
+The active number is observed through the signed app's status-item AX label
+inside the switch deadline; CLI fields are checked afterward so process startup
+does not consume that deadline. The blocked-initial-AX regression deliberately
+suspends the fixture, checks that its orphan stays hidden, and times recovery from
+resume. The ordinary crash-recovery test retains its one-second restart deadline.
 The fixture includes AppKit and SwiftUI width constraints, dialogs, sheets,
 native fullscreen, and separate instances for activation and hung-app checks.
 `--test-missing-skylight` (requiring fixture-only development mode) tests safe

@@ -228,7 +228,8 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 return ["error": "the observer accepts fixture processes only"]
             }
             var reply = snapshot
-            reply["observation"] = observe(pids)
+            reply["observation"] = observe(pids, inspectFinder: command["finder"] as? Bool == true,
+                                           focusedOnly: command["focusedOnly"] as? Bool == true)
             return reply
         case "menu":
             guard let pid = command["pid"] as? Int32,
@@ -253,7 +254,8 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 let role = FixtureProbe.value(element, kAXRoleAttribute) as? String
                 let attribute = role == kAXMenuItemRole ? kAXTitleAttribute : kAXDescriptionAttribute
                 if (open ? role == kAXMenuItemRole : role == kAXMenuBarItemRole),
-                   let text = FixtureProbe.value(element, attribute) as? String, text.contains(expected) { found = true }
+                   let text = FixtureProbe.value(element, attribute) as? String,
+                   (command["suffix"] as? Bool == true ? text.hasSuffix(expected) : text.contains(expected)) { found = true }
                 for child in FixtureProbe.value(element, kAXChildrenAttribute) as? [AXUIElement] ?? [] { inspect(child, depth: depth + 1) }
             }
             inspect(item, depth: 0)
@@ -376,25 +378,34 @@ final class Fixture: NSObject, NSApplicationDelegate {
     }
 
     /// An independent AX/CG client; all returned window data belongs to fixtures.
-    func observe(_ pids: [pid_t]) -> [String: Any] {
+    func observe(_ pids: [pid_t], inspectFinder: Bool, focusedOnly: Bool) -> [String: Any] {
         let front = FixtureProbe.frontmostPID()
         let listed = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
         let visible = Set(listed.compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
+        let visibleIDs = listed.compactMap { item -> UInt32? in
+            guard let owner = item[kCGWindowOwnerPID as String] as? NSNumber, pids.contains(owner.int32Value) else { return nil }
+            return (item[kCGWindowNumber as String] as? NSNumber)?.uint32Value
+        }
         let order = Dictionary(uniqueKeysWithValues: listed.enumerated().compactMap { index, item -> (UInt32, Int)? in
             (item[kCGWindowNumber as String] as? NSNumber).map { ($0.uint32Value, index) }
         })
         var result: [[String: Any]] = []
         for pid in pids {
+            if focusedOnly && front != pid { continue }
             let application = AXUIElementCreateApplication(pid)
             AXUIElementSetMessagingTimeout(application, 0.02)
             var focusedID: UInt32 = 0
+            var focusedElement: AXUIElement?
             if let focused = FixtureProbe.value(application, kAXFocusedWindowAttribute), CFGetTypeID(focused) == AXUIElementGetTypeID() {
-                _ = fixtureWindowID(focused as! AXUIElement, &focusedID)
+                let element = focused as! AXUIElement
+                focusedElement = element
+                _ = fixtureWindowID(element, &focusedID)
             }
             func describe(_ window: AXUIElement, parent: UInt32? = nil) {
                 AXUIElementSetMessagingTimeout(window, 0.02)
                 var id: CGWindowID = 0
                 _ = fixtureWindowID(window, &id)
+                guard id != 0 else { return }
                 var position = CGPoint.zero, size = CGSize.zero
                 if let value = FixtureProbe.value(window, kAXPositionAttribute), CFGetTypeID(value) == AXValueGetTypeID() {
                     _ = AXValueGetValue(value as! AXValue, .cgPoint, &position)
@@ -412,19 +423,47 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 for child in FixtureProbe.value(window, kAXChildrenAttribute) as? [AXUIElement] ?? []
                     where FixtureProbe.value(child, kAXRoleAttribute) as? String == kAXSheetRole { describe(child, parent: id) }
             }
-            for window in FixtureProbe.value(application, kAXWindowsAttribute) as? [AXUIElement] ?? [] { describe(window) }
+            let focusedSheet = focusedElement.map { FixtureProbe.value($0, kAXRoleAttribute) as? String == kAXSheetRole } ?? false
+            if !focusedOnly || focusedSheet {
+                for window in FixtureProbe.value(application, kAXWindowsAttribute) as? [AXUIElement] ?? [] { describe(window) }
+            }
+            // A Space move can temporarily omit even the focused AX window.
+            // Read its live handle directly, including a focused sheet's parent.
+            if let focusedElement, focusedID != 0, !result.contains(where: { $0["id"] as? UInt32 == focusedID }) {
+                var parentID: UInt32?
+                if focusedSheet, let parent = FixtureProbe.value(focusedElement, kAXParentAttribute),
+                   CFGetTypeID(parent) == AXUIElementGetTypeID() {
+                    var id: UInt32 = 0
+                    _ = fixtureWindowID(parent as! AXUIElement, &id)
+                    if id != 0 {
+                        parentID = id
+                        if !result.contains(where: { $0["id"] as? UInt32 == id }) { describe(parent as! AXUIElement) }
+                    }
+                }
+                if !result.contains(where: { $0["id"] as? UInt32 == focusedID }) { describe(focusedElement, parent: parentID) }
+            }
         }
         let screen = NSScreen.screens.first!
         let area = screen.visibleFrame
         var desktop = false
-        var finderHasNoOrdinaryWindows = false
-        if let finder = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first {
+        var finderHasNoOrdinaryWindows: Bool?
+        if inspectFinder, let finder = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first {
             let application = AXUIElementCreateApplication(finder.processIdentifier)
             AXUIElementSetMessagingTimeout(application, 0.02)
             if let windows = FixtureProbe.value(application, kAXWindowsAttribute) as? [AXUIElement] {
-                finderHasNoOrdinaryWindows = windows.allSatisfy { FixtureProbe.value($0, kAXRoleAttribute) as? String == kAXScrollAreaRole }
+                finderHasNoOrdinaryWindows = true
+                for window in windows {
+                    guard let role = FixtureProbe.value(window, kAXRoleAttribute) as? String else {
+                        finderHasNoOrdinaryWindows = nil
+                        break
+                    }
+                    if role != kAXScrollAreaRole {
+                        finderHasNoOrdinaryWindows = false
+                        break
+                    }
+                }
             }
-            if finderHasNoOrdinaryWindows, front == finder.processIdentifier,
+            if finderHasNoOrdinaryWindows == true, front == finder.processIdentifier,
                FixtureProbe.hasSignature(finder.processIdentifier, identifier: "com.apple.finder"),
                let focused = FixtureProbe.value(application, kAXFocusedWindowAttribute), CFGetTypeID(focused) == AXUIElementGetTypeID() {
                 desktop = FixtureProbe.value(focused as! AXUIElement, kAXSubroleAttribute) == nil
@@ -432,10 +471,10 @@ final class Fixture: NSObject, NSApplicationDelegate {
         }
         let frontmostFixture = front.map { pids.contains($0) } ?? false
         let workspaceFront = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        return ["windows": result, "frontmostFixture": frontmostFixture,
+        return ["windows": result, "visibleIDs": visibleIDs, "frontmostFixture": frontmostFixture,
                 "frontmostFixturePID": frontmostFixture ? front! : 0,
                 "activeFixturePID": workspaceFront.flatMap { pids.contains($0) ? $0 : nil } ?? 0,
-                "finderDesktop": desktop, "finderHasNoOrdinaryWindows": finderHasNoOrdinaryWindows,
+                "finderDesktop": desktop, "finderHasNoOrdinaryWindows": finderHasNoOrdinaryWindows.map { $0 as Any } ?? NSNull(),
                 "area": [area.minX, screen.frame.height - area.maxY, area.width, area.height]]
     }
 }

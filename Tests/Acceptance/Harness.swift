@@ -70,11 +70,12 @@ struct Observation: Decodable {
         let parent: UInt32?
     }
     let windows: [Window]
+    let visibleIDs: [UInt32]
     let frontmostFixture: Bool
     let frontmostFixturePID: Int32
     let activeFixturePID: Int32
     let finderDesktop: Bool
-    let finderHasNoOrdinaryWindows: Bool
+    let finderHasNoOrdinaryWindows: Bool?
     let area: [Double]
 }
 
@@ -128,6 +129,20 @@ final class FixtureSession {
 
     @discardableResult
     func command(_ action: String, _ arguments: [String: Any] = [:]) throws -> FixtureReply {
+        let deadline = monotonicSeconds() + 1
+        while true {
+            do {
+                return try request(action, arguments)
+            } catch let error as HarnessError where action == "hotkey"
+                && error.description.hasPrefix("refusing synthetic hotkey:") && monotonicSeconds() < deadline {
+                // These replies precede event posting. Never retry a transport
+                // error or a posted event, and keep timing from actual posting.
+                usleep(15_000)
+            }
+        }
+    }
+
+    private func request(_ action: String, _ arguments: [String: Any]) throws -> FixtureReply {
         var request = arguments
         request["action"] = action
         let data = try JSONSerialization.data(withJSONObject: request)
