@@ -51,6 +51,12 @@ The resource suite covers E22 with 20 fixture windows and ten 60-second idle
 measurements. CPU time comes from `proc_pid_rusage`, not elapsed wall time;
 resident memory must stay under 50 MB. Resource calibration runs only on CI.
 
+For minimize and restore, the 500 ms observation deadline begins at AppKit's
+completion notification, after the Dock animation. macOS sends the AX event
+at that point; the animation itself can take longer than 500 ms. The fixture
+acknowledges those commands on completion, without changing the assertion's
+deadline. Other window operations use the ordinary command acknowledgement.
+
 CI runs the same commands on `xcode-27` (macOS 27). Its short-lived certificate
 is created in a temporary keychain; no signing material is stored in GitHub.
 Only the disposable runner provisions its Accessibility database. Local
