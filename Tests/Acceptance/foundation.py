@@ -100,6 +100,15 @@ class FoundationAcceptance(unittest.TestCase):
             raise RuntimeError("Run scripts/build first; signed app and fixture bundles are required")
         if process_ids(APP / "Contents/MacOS/TesselApp"):
             raise RuntimeError("This worktree's development app is already running; stop it before verification")
+        if subprocess.run([str(FIXTURE_BIN), "--check-session"], capture_output=True, timeout=2).returncode:
+            raise RuntimeError("Wake and unlock the Mac before running GUI verification")
+        power = subprocess.Popen(["/usr/bin/caffeinate", "-d", "-i", "-w", str(os.getpid())],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        def release_power_assertion():
+            if power.poll() is None:
+                power.terminate()
+            power.wait(timeout=1)
+        cls.addClassCleanup(release_power_assertion)
         cls.temporary = tempfile.TemporaryDirectory(prefix="tessel-verify-")
         cls.addClassCleanup(cls.temporary.cleanup)
         cls.directory = Path(cls.temporary.name)

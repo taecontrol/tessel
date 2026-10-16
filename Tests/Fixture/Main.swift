@@ -252,6 +252,11 @@ enum FixtureProbe {
 struct Main {
     @MainActor static func main() {
         let args = CommandLine.arguments
+        if args.dropFirst().first == "--check-session" {
+            let session = CGSessionCopyCurrentDictionary() as? [String: Any]
+            let locked = session?["CGSSessionScreenIsLocked"] as? Bool ?? false
+            exit(CGDisplayIsAsleep(CGMainDisplayID()) == 0 && !locked ? 0 : 5)
+        }
         if args.count > 2, args[1] == "--probe", let pid = Int32(args[2]) {
             FixtureProbe.run(pid: pid, resizeID: args.count > 3 ? Int(args[3]) : nil)
             return

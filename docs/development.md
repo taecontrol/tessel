@@ -16,10 +16,17 @@ in `.build/apps`. It refuses missing, unavailable, or ad-hoc signing identities
 before building a bundle. Every rebuild changes the app binary's build version,
 so the permission-preservation test exercises a real signature change.
 
-Open `.build/apps/Tessel Dev.app`, grant Accessibility in System Settings, and
-use `.build/apps/Tessel Dev.app/Contents/MacOS/tessel status --json` to observe it.
+Open the development bundle and grant Accessibility in System Settings:
+
+```sh
+open ".build/apps/Tessel Dev.app"
+".build/apps/Tessel Dev.app/Contents/MacOS/tessel" status --json
+```
+
 The CLI accepts `windows [--json]` and `status [--json]`.
 You can symlink this bundled CLI into a directory on your `PATH`.
+With a custom `XDG_CONFIG_HOME`, pass the same value to `open --env` and the CLI.
+The bundle ID and config path select the instance the CLI observes.
 
 Development uses `com.taecontrol.tessel.dev`; `scripts/build --variant daily`
 uses `com.taecontrol.tessel`. Keep the signing identity stable across rebuilds.
@@ -36,6 +43,10 @@ scripts/build
 scripts/verify --functional
 scripts/verify --resources
 ```
+
+Use an awake, unlocked macOS desktop. The harness checks that precondition and
+holds a temporary `caffeinate` assertion until its processes are cleaned up.
+AX can expose incomplete application elements when the display sleeps.
 
 The harness launches the signed development bundle with `open`, an isolated
 temporary `XDG_CONFIG_HOME`, and real AppKit fixture processes. It drives those
