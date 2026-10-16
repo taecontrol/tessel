@@ -1,18 +1,20 @@
-#!/usr/bin/env python3
-"""Grant AX only on the disposable, SIP-disabled GitHub runner."""
-import os
-import subprocess
-import sys
-
-deny = sys.argv[1:] == ["--deny-development"]
-if sys.argv[1:] and not deny:
-    sys.exit("Usage: ci-accessibility [--deny-development]")
-
-if os.environ.get("CI") != "true" or os.environ.get("GITHUB_ACTIONS") != "true":
-    sys.exit("Accessibility database provisioning is only allowed on the disposable GitHub runner.")
-database = "/Library/Application Support/com.apple.TCC/TCC.db"
-for bundle_id in ("com.taecontrol.tessel.dev", "com.taecontrol.tessel.fixture"):
-    auth = 0 if deny and bundle_id.endswith(".dev") else 2
-    sql = "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags, last_modified) VALUES ('kTCCServiceAccessibility','" + bundle_id + "',0," + str(auth) + ",4,1,0,strftime('%s','now'));"
-    subprocess.run(["sudo", "sqlite3", database, sql], check=True)
-print("Accessibility permission test state provisioned on the disposable runner.")
+#!/bin/bash
+# Grant Accessibility only on the disposable, SIP-disabled GitHub runner.
+set -euo pipefail
+if [[ $# -gt 1 || ( $# -eq 1 && $1 != --deny-development ) ]]; then
+    echo 'Usage: ci-accessibility [--deny-development]' >&2
+    exit 1
+fi
+if [[ ${CI:-} != true || ${GITHUB_ACTIONS:-} != true ]]; then
+    echo 'Accessibility database provisioning is only allowed on the disposable GitHub runner.' >&2
+    exit 1
+fi
+database='/Library/Application Support/com.apple.TCC/TCC.db'
+for bundle_id in com.taecontrol.tessel.dev com.taecontrol.tessel.fixture; do
+    auth=2
+    if [[ $# -eq 1 && $bundle_id == *.dev ]]; then
+        auth=0
+    fi
+    sudo sqlite3 "$database" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags, last_modified) VALUES ('kTCCServiceAccessibility','$bundle_id',0,$auth,4,1,0,strftime('%s','now'));"
+done
+echo 'Accessibility permission test state provisioned on the disposable runner.'

@@ -1,8 +1,10 @@
 # Development
 
 Use macOS 27 or later on Apple silicon, with Xcode 27 selected by `xcode-select`.
-The build and acceptance harness use Swift, AppKit, and Python's standard library;
-there are no package dependencies.
+The app, its build tool, and the acceptance harness are Swift with Apple's
+frameworks; there are no package dependencies. `Package.swift` describes only
+the development tools ([ADR 0001](adr/0001-swift-for-build-and-verification-tooling.md)).
+Never launch one of its products as the app.
 
 ## Signing and launching
 
@@ -11,8 +13,8 @@ Create `Signing.local.xcconfig` in this worktree, containing
 code-signing identity from your keychain. Use your Apple Development identity.
 The file is ignored; never commit its contents, a certificate, or a team ID.
 
-Run `scripts/build`. It compiles optimized binaries and installs signed bundles
-in `.build/apps`. It refuses missing, unavailable, or ad-hoc signing identities
+Run `scripts/build`. It builds the `tessel-build` tool from `Tools/Build`, which
+compiles optimized binaries and installs signed bundles in `.build/apps`. It refuses missing, unavailable, or ad-hoc signing identities
 before building a bundle. Every rebuild changes the app binary's build version,
 so the permission-preservation test exercises a real signature change.
 
@@ -55,9 +57,10 @@ CLI, and cleans up its processes and data. No real user window is an assertion
 target. Full window listings, real window titles, and personal configs are never
 printed or saved. The independent fixture AX probe refuses any other bundle ID.
 
-`scripts/verify` runs both suites. Individual functional tests can be selected
-by method name from `Tests/Acceptance/foundation.py`. The functional suite covers
-E1–E12 and E15–E21; E13/E14 require visual evidence of the permission journey.
+`scripts/verify` runs both suites with Swift Testing. To select tests, pass part
+of a test name from `Tests/Acceptance`, such as `scripts/verify e08`. The
+functional suite covers E1–E12 and E15–E21; E13/E14 require visual evidence of
+the permission journey.
 The resource suite covers E22 with 20 fixture windows and ten 60-second idle
 measurements. CPU time comes from `proc_pid_rusage`, not elapsed wall time;
 resident memory must stay under 50 MB. Resource calibration runs only on CI.
@@ -90,8 +93,10 @@ public guarantee about future OS versions or custom Accessibility publishers.
 
 CI runs the same commands on `xcode-27` (macOS 27). Its short-lived certificate
 is created in a temporary keychain; no signing material is stored in GitHub.
-Only the disposable runner provisions its Accessibility database. Local
-verification uses the permission granted to the signed development bundle.
+Only the disposable runner provisions its Accessibility database, for the
+denial and restart checks in `scripts/verify --permission`; elsewhere that
+suite is skipped. Local verification uses the permission granted to the signed
+development bundle.
 
 ## Configuration and observation
 

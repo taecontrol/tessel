@@ -30,7 +30,7 @@ jobs:
       - name: Build signed bundles
         run: scripts/build
       - name: Verify permission denial and automatic restart
-        run: scripts/verify-permission
+        run: scripts/verify --permission
       - name: Acceptance suite
         run: scripts/verify --${{ matrix.suite }} ${{ inputs.calibrate && matrix.suite == 'resources' && '--calibrate-resources' || '' }}
       - uses: actions/upload-artifact@v4
