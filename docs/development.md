@@ -25,7 +25,7 @@ open ".build/apps/Tessel Dev.app"
 ".build/apps/Tessel Dev.app/Contents/MacOS/tessel" status --json
 ```
 
-The CLI accepts `windows [--json]` and `status [--json]`.
+The read-only CLI accepts `windows [--json]` and `status [--json]`.
 You can symlink this bundled CLI into a directory on your `PATH`.
 With a custom `XDG_CONFIG_HOME`, pass the same value to `open --env` and the CLI.
 The bundle ID and config path select the instance the CLI observes.
@@ -53,15 +53,30 @@ AX can expose incomplete application elements when the display sleeps.
 The harness launches the signed development bundle with `open`, an isolated
 temporary `XDG_CONFIG_HOME`, and real AppKit fixture processes. It drives those
 processes through a test-only local socket, observes tessel through its bundled
-CLI, and cleans up its processes and data. No real user window is an assertion
-target. Full window listings, real window titles, and personal configs are never
-printed or saved. The independent fixture AX probe refuses any other bundle ID.
+CLI, and cleans up its processes and data. The harness always passes
+`--test-fixture-only`: only fixture processes are observed or managed, including
+startup crash recovery. This argument exists only in the signed `.dev` build and
+is rejected by the daily build. Before activating Finder for an empty workspace
+in fixture-only mode, tessel requires a successful AXWindows read without
+ordinary windows. Finder's desktop scroll area is allowed; unknown entries and
+failed reads block activation. Tessel inspects no window content. Local tests
+still check that managed windows disappear and report
+when the Finder desktop assertion is skipped. CI requires the full assertion.
+Full window listings, real window titles, and personal configs are never
+printed or saved. The independent AX probe verifies the running code's signed
+fixture identifier before reading a window or posting a key. It reads the
+frontmost application through AX; cached LaunchServices metadata can be absent
+briefly during activation. Fixtures cooperate with AppKit's activation handoff
+without ordering a window during the external-activation assertions.
+The fixture protocol reserves 64 KiB per-socket reply buffers: twenty-window AX
+observations exceed macOS's default 2 KiB datagram limit. It changes no system
+socket settings.
 
 `scripts/verify` runs both suites with Swift Testing. To select tests, pass part
 of a test name from `Tests/Acceptance`, such as `scripts/verify e08`. The
-functional suite covers E1–E12 and E15–E21; E13/E14 require visual evidence of
+functional suite covers foundation E1–E12 and E15–E21; foundation E13/E14 require visual evidence of
 the permission journey.
-The resource suite covers E22 with 20 fixture windows and ten 60-second idle
+The resource suite covers foundation E22 with 20 fixture windows and ten 60-second idle
 measurements. CPU time comes from `proc_pid_rusage`, not elapsed wall time;
 resident memory must stay under 50 MB. Resource calibration runs only on CI.
 Mach ticks are converted with `mach_timebase_info`. The committed CPU budget is
@@ -101,15 +116,86 @@ development bundle.
 ## Configuration and observation
 
 The config is `$XDG_CONFIG_HOME/tessel/tessel.toml`, defaulting to
-`~/.config/tessel/tessel.toml`. Foundation accepts an empty document or an empty
-`[experiments]` table. There are no experiment keys in #1. Unknown keys and invalid
+`~/.config/tessel/tessel.toml`. An absent file or an empty document disables all
+experiments. Unknown keys and invalid
 TOML produce a line-numbered error; the last valid configuration stays active.
 Saving, replacing, or deleting the file reloads it automatically. `status --json`
 reports the effective config, its revision, its source state, and any error.
 
-Window records contain only an ID, app name, bundle ID, state, reason, and native
-tab count. Titles are never queried. The foundation only observes; it does not
-move, hide, or resize other apps' windows.
+```toml
+[experiments]
+workspaces = true
+
+[gaps]
+outer = 10
+
+[keys]
+alt-1 = "workspace 1"
+alt-shift-1 = "send 1"
+alt-j = "focus next"
+alt-k = "focus previous"
+```
+
+The workspace experiment manages the primary display only. It shows one tiled
+window per workspace, filling `visibleFrame` minus the outer gap. Dialogs float
+at their original frames and belong to their workspace; sheets follow their
+parents. Size-constrained windows float centered with the reason
+`cannot fill the screen`. Native fullscreen windows have no workspace. Stage
+Manager is assumed off, and external monitors are outside the experiment.
+
+Default shortcuts are Option+1…0 for workspaces 1…10, Option+Shift+1…0 to send
+the focused window and follow it, and Option+J/K to cycle in arrival order.
+`[keys]` overrides merge with defaults; an empty command disables that binding.
+Keys are lowercase ANSI letters and digits, with optional `alt`, `shift`, `ctrl`,
+and `cmd` modifiers. Commands are `workspace N`, `send N` (N = 1…10),
+`focus next`, and `focus previous`. `outer` is a nonnegative number of points.
+Keys and gaps are validated even with the flag off. Invalid edits preserve the
+last valid configuration and registrations. Carbon cannot detect a shortcut
+registered by another process; resolve a noticed conflict with `[keys]`.
+
+Inactive windows live in one invisible Space, returned to the current desktop
+when shown. Disabling the flag or quitting returns all managed windows. Startup
+also recovers orphaned windows after a crash, even when the flag is off; no
+workspace membership is persisted. See [ADR 0002](adr/0002-hide-inactive-windows-in-a-skylight-space.md)
+for the private system dependency and its tradeoffs.
+
+Window records contain an ID, app name, bundle ID, state, reason, native tab
+count, `workspace` (1…10 or null), and `visible` (CG on-screen membership).
+`state` includes `fullscreen`. Titles are never queried. `status --json` adds
+`workspaces.enabled`, `reason`, `active`, `gaps`, and the effective `keys`.
+With the experiment disabled, tessel observes without managing ordinary windows.
+
+`Tests/Acceptance/Workspaces.swift` covers issue #2 E1–E35 at the CLI and
+independent AX/CG boundary. The trusted fixture posts the real Carbon shortcuts
+as CGEvents only after confirming a fixture window is frontmost and on screen.
+The fixture includes AppKit and SwiftUI width constraints, dialogs, sheets,
+native fullscreen, and separate instances for activation and hung-app checks.
+`--test-missing-skylight` (requiring fixture-only development mode) tests safe
+disablement. `--test-failed-hide`, with the same restrictions, verifies cleanup
+when an asynchronous hide fails. Capture E37 for owner review with:
+
+```sh
+TESSEL_CAPTURE_WORKSPACES=1 scripts/verify captureWorkspaceMenu
+```
+
+The harness adds `--test-capture-ui`, accepted only together with fixture-only
+development mode. The running app exports its own rendered AppKit status button
+and menu views into the isolated config directory; the harness copies them to
+`.work/captures`. This requires no Screen Recording permission and captures no
+desktop or other app windows. Review the two workspace numbers and the disabled
+reason in those images. The capture facility is absent from the daily build.
+CI runs this capture separately from the timed functional suite and publishes
+the three images in its `workspace-menu-evidence` artifact for owner review.
+
+Switch completion means visible, filled, and focused, measured from posting the
+event. The functional suite records 20 switches in `.work/switch-calibration.json`.
+`Tests/Acceptance/switch-budget.json` enforces three times the maximum of the
+delivery's 20 CI measurements, capped at 200 ms. Recalibrate on `xcode-27`, retain
+its run ID and measurements in that file, and rerun against the resulting budget.
+The delivery calibration recorded a 114.393042 ms maximum in run 38947144837,
+giving the 200 ms cap. Missing or inconsistent calibration data fails verification.
+Workspace E36 uses 20 windows across ten workspaces for 60 idle seconds and
+enforces the existing foundation CPU and 50 MB memory budgets.
 
 Before the first public release (#6), revisit the bundle IDs, config schema,
 and read-only CLI contract. A command that changes state or exposes titles needs

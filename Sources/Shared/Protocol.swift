@@ -1,16 +1,30 @@
 import Foundation
 
 enum WindowState: String, Codable, Sendable {
-    case tiled, floats, minimized, hidden
+    case tiled, floats, minimized, hidden, fullscreen
 }
 
 struct WindowRecord: Codable, Sendable {
     let id: UInt32
     let app: String
     let bundleId: String
-    let state: WindowState
-    let reason: String
+    var state: WindowState
+    var reason: String
     let tabs: Int
+    var workspace: Int? = nil
+    var visible: Bool = false
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(app, forKey: .app)
+        try container.encode(bundleId, forKey: .bundleId)
+        try container.encode(state, forKey: .state)
+        try container.encode(reason, forKey: .reason)
+        try container.encode(tabs, forKey: .tabs)
+        try container.encode(workspace, forKey: .workspace)
+        try container.encode(visible, forKey: .visible)
+    }
 }
 
 struct ConfigError: Error, Codable, Sendable {
@@ -20,6 +34,20 @@ struct ConfigError: Error, Codable, Sendable {
 
 struct Configuration: Codable, Sendable, Equatable {
     var experiments: [String: Bool] = [:]
+    var keys = KeyChord.defaults
+    var gaps = Gaps()
+}
+
+struct Gaps: Codable, Sendable, Equatable {
+    var outer: Double = 10
+}
+
+struct WorkspaceStatus: Codable, Sendable, Equatable {
+    var enabled = false
+    var reason = "experiment off"
+    var active = 1
+    var gaps = Gaps()
+    var keys = KeyChord.defaults
 }
 
 struct ConfigStatus: Codable, Sendable {
@@ -45,6 +73,7 @@ struct AppStatus: Codable, Sendable {
     let config: ConfigStatus
     let version: String
     let pid: Int32
+    var workspaces = WorkspaceStatus()
 }
 
 struct Reply: Codable, Sendable {

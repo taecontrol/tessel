@@ -1,0 +1,990 @@
+import Carbon
+import Darwin
+import Foundation
+import Testing
+
+/// Issue #2's accepted examples. Shortcuts cross Carbon; frames and focus come
+/// from an independent AX client and visibility from CG, never tessel's claims.
+extension Acceptance {
+    @Suite(AppSession())
+    @MainActor
+    struct FunctionalWorkspaces: AppSessionTest {
+        init() throws {
+            try Harness.shared.reset()
+            struct Budget: Decodable { let nanoseconds: UInt64; let measurements: [UInt64]; let sourceRun: String }
+            let recorded = try JSONDecoder().decode(Budget.self, from: Data(contentsOf: root.appending(path: "Tests/Acceptance/switch-budget.json")))
+            let maximum = recorded.measurements.max() ?? 0
+            try #require(recorded.measurements.count == 20 && recorded.measurements.allSatisfy { $0 > 0 && $0 <= 200_000_000 }
+                         && UInt64(recorded.sourceRun) != nil && recorded.nanoseconds == min(200_000_000, maximum * 3),
+                         "the switch budget must retain twenty CI measurements and their capped calibration")
+            budget = Double(recorded.nanoseconds) / 1e9
+        }
+        let enabled = "[experiments]\nworkspaces = true\n"
+
+        let budget: Double
+
+        func enable(_ extra: String = "") throws {
+            let revision = try harness.status().config.revision
+            try writeConfig(enabled + extra)
+            try #require(try eventually(within: 1) {
+                let status = try harness.status()
+                return status.workspaces?.enabled == true && status.config.revision > revision
+            },
+                         "the accepted workspaces configuration must enable the experiment")
+        }
+
+        func observe(_ sessions: [FixtureSession]? = nil) throws -> Observation {
+            try #require(try harness.observer.command("observe", ["pids": (sessions ?? [fixture] + harness.otherFixtures).map(\.pid)]).observation)
+        }
+
+        func window(_ id: UInt32) throws -> Observation.Window? { try observe().windows.first { $0.id == id } }
+
+        func filled(_ window: Observation.Window, area: [Double], gap: Double = 10) -> Bool {
+            let expected = [area[0] + gap, area[1] + gap, area[2] - gap * 2, area[3] - gap * 2]
+            return zip(window.frame, expected).allSatisfy { abs($0 - $1) <= 1 }
+        }
+
+        func shown(_ id: UInt32, gap: Double = 10, floating: Bool = false) throws -> Bool {
+            let observation = try observe()
+            guard let window = observation.windows.first(where: { $0.id == id }) else { return false }
+            let focused = window.focused || observation.windows.contains { $0.parent == id && $0.focused }
+            return window.visible && window.main && focused && (floating || filled(window, area: observation.area, gap: gap))
+        }
+
+        func expectShown(_ id: UInt32, since start: Double? = nil, within timeout: Double? = nil,
+                         gap: Double = 10, floating: Bool = false, sourceLocation: SourceLocation = #_sourceLocation) throws {
+            let remaining = max(0, (timeout ?? (start == nil ? 1 : budget)) - (start.map { monotonicSeconds() - $0 } ?? 0))
+            let success = try eventually(within: remaining) { try shown(id, gap: gap, floating: floating) }
+            try #require(success,
+                         "fixture \(id) must be visible, focused, and correctly sized before the deadline", sourceLocation: sourceLocation)
+        }
+
+        @discardableResult
+        func key(_ number: Int, send: Bool = false) throws -> Double {
+            let codes = [1: 18, 2: 19, 3: 20, 4: 21, 5: 23, 6: 22, 7: 26, 8: 28, 9: 25, 10: 29]
+            return try post(codes[number]!, shift: send)
+        }
+
+        @discardableResult
+        func post(_ code: Int, shift: Bool = false) throws -> Double {
+            try #require(try harness.observer.command("hotkey", ["code": code, "shift": shift]).postedAt)
+        }
+
+        func activate(_ session: FixtureSession? = nil, key: String = "window", sourceLocation: SourceLocation = #_sourceLocation) throws {
+            let session = session ?? fixture
+            try yieldActivation(to: session)
+            try session.command("activate", ["key": key])
+            var arguments: [String: Any] = ["pid": session.pid]
+            if let id = try session.command("ping").windows[key] { arguments["id"] = id }
+            try harness.observer.command("activateFixture", arguments)
+            let hasWindows = try !session.command("ping").windows.isEmpty
+            let active = try eventually {
+                let observation = try observe()
+                guard observation.activeFixturePID == session.pid else { return false }
+                if hasWindows { return observation.frontmostFixturePID == session.pid }
+                return try session.command("ping").active == true
+            }
+            try #require(active, "the target fixture must be frontmost", sourceLocation: sourceLocation)
+        }
+
+        func yieldActivation(to session: FixtureSession) throws {
+            let observation = try observe()
+            let front = observation.activeFixturePID != 0 ? observation.activeFixturePID : observation.frontmostFixturePID
+            if front != session.pid, let source = ([fixture] + harness.otherFixtures).first(where: { $0.pid == front }) {
+                try source.command("yieldActivation")
+            }
+        }
+
+        func other(swiftUI: Bool = false) throws -> FixtureSession {
+            let session = try FixtureSession(directory: harness.directory, number: harness.otherFixtures.count + 1, swiftUI: swiftUI)
+            harness.otherFixtures.append(session)
+            try #require(try eventually(within: 3) {
+                try harness.observer.command("fixtureReady", ["pid": session.pid]).ready == true
+            }, "LaunchServices must identify the fixture before it is activated or observed")
+            return session
+        }
+
+        /// A stays in 1 and B is sent to 2, then A is shown again.
+        func split() throws -> (UInt32, UInt32) {
+            let a = try fixture.open(key: "a")
+            let b = try fixture.open(key: "b")
+            try activate(key: "b")
+            try enable()
+            try expectShown(b)
+            try expectShown(b, since: key(2, send: true))
+            try expectShown(a, since: key(1))
+            return (a, b)
+        }
+
+        func expectEmpty(since start: Double) throws {
+            let verifyFinder = try observe().finderHasNoOrdinaryWindows
+            if ProcessInfo.processInfo.environment["CI"] == "true" {
+                try #require(verifyFinder, "CI must have a successful Finder AXWindows read without ordinary windows to exercise the full E7 desktop assertion")
+            } else if !verifyFinder {
+                print("Skipping Finder-frontmost assertion: Finder has ordinary or unknown AX entries, or its AXWindows read failed; managed-window visibility is still checked.")
+            }
+            let empty = try eventually(within: max(0, budget - (monotonicSeconds() - start))) {
+                let observation = try observe()
+                return observation.windows.allSatisfy { !$0.visible } && (!verifyFinder || observation.finderDesktop)
+            }
+            try #require(empty, "an empty workspace must hide managed windows and, when safe, focus Finder's desktop")
+        }
+
+        @Test func e01ExperimentOffLeavesFramesAndOrdinaryKeysAlone() throws {
+            let a = try fixture.open()
+            try activate()
+            let before = try #require(try window(a)).frame
+            let count = try fixture.command("ping").keyCount
+            try post(18)
+            #expect(try eventually { try fixture.command("ping").keyCount == (count ?? 0) + 1 })
+            #expect(try window(a)?.frame == before)
+            let status = try #require(try harness.status().workspaces)
+            #expect(!status.enabled)
+            #expect(status.reason == "experiment off")
+        }
+
+        @Test(arguments: [false, true])
+        func e02EnablingOrStartingAssignsExistingWindowsAndKeepsTheFocusedOne(startup: Bool) throws {
+            if startup { harness.stopApp() }
+            let a = try fixture.open(key: "a"), b = try fixture.open(key: "b"), c = try fixture.open(key: "c")
+            try activate(key: "c")
+            let start = monotonicSeconds()
+            if startup {
+                try writeConfig(enabled)
+                try harness.startApp(fixtureReady: false)
+            } else { try enable() }
+            try expectShown(c, since: start, within: 1)
+            let assigned = try harness.rows().filter { [a,b,c].contains($0.id) }
+            #expect(assigned.count == 3 && assigned.allSatisfy { $0.workspace == 1 })
+            #expect(try window(a)?.visible == false)
+            #expect(try window(b)?.visible == false)
+            #expect(try harness.status().workspaces?.active == 1)
+        }
+
+        @Test func e03ExistingDialogStaysAboveTheTiledWindowAtItsOriginalFrame() throws {
+            let c = try fixture.open(key: "c")
+            let dialog = try fixture.open(kind: "dialog", key: "dialog")
+            try activate(key: "dialog")
+            let frame = try #require(try window(dialog)).frame
+            try enable()
+            try expectShown(dialog, floating: true)
+            #expect(try window(c)?.visible == true)
+            #expect(try #require(try window(dialog)).order < #require(try window(c)).order)
+            #expect(try window(dialog)?.frame == frame)
+            #expect(try harness.row(dialog)?.workspace == 1)
+        }
+
+        @Test func e04WorkspaceShortcutsHideFillAndFocusBothDirections() throws {
+            let (a,b) = try split()
+            try expectShown(b, since: key(2))
+            #expect(try window(a)?.visible == false)
+            try expectShown(a, since: key(1))
+            #expect(try window(b)?.visible == false)
+        }
+
+        @Test func e05OptionZeroSelectsWorkspaceTen() throws {
+            let b = try fixture.open(key: "b")
+            let a = try fixture.open()
+            try activate()
+            try enable()
+            try expectShown(a)
+            try expectShown(a, since: key(10, send: true))
+            try expectShown(b, since: key(1))
+            try expectShown(a, since: key(10))
+            #expect(try harness.row(a)?.workspace == 10)
+            #expect(try harness.status().workspaces?.active == 10)
+        }
+
+        @Test(arguments: [false, true])
+        func e06e09SelectingOrSendingToTheCurrentWorkspaceDoesNotMoveAWindow(send: Bool) throws {
+            let a = try fixture.open()
+            try activate()
+            try enable()
+            try expectShown(a)
+            sleep(seconds: 0.15)
+            try fixture.command("move", ["frame": [110.0, 130.0, 420.0, 280.0]])
+            let frame = try #require(try window(a)).frame
+            try key(1, send: send)
+            sleep(seconds: budget)
+            #expect(try window(a)?.frame == frame)
+        }
+
+        @Test func e07EmptyWorkspaceFocusesFinderDesktop() throws {
+            _ = try fixture.open()
+            try activate()
+            try enable()
+            try expectEmpty(since: key(8))
+            #expect(try harness.status().workspaces?.active == 8)
+            let observation = try observe()
+            if !observation.finderHasNoOrdinaryWindows {
+                #expect(observation.frontmostFixture, "fixture-only empty-workspace hotkeys must leave focus with the fixture when Finder activation is unsafe")
+            }
+        }
+
+        @Test func e08SendingFollowsTheWindowAndLeavesThePreviousOneAvailable() throws {
+            let b = try fixture.open(key: "b"), a = try fixture.open(key: "a")
+            try activate(key: "a")
+            try enable()
+            try expectShown(a)
+            try expectShown(a, since: key(3, send: true))
+            #expect(try harness.row(a)?.workspace == 3)
+            #expect(try harness.status().workspaces?.active == 3)
+            try expectShown(b, since: key(1))
+        }
+
+        @Test func e10SendingADialogPreservesItsFrame() throws {
+            _ = try fixture.open(key: "a")
+            let dialog = try fixture.open(kind: "dialog", key: "dialog")
+            try activate(key: "dialog")
+            let frame = try #require(try window(dialog)).frame
+            try enable()
+            try expectShown(dialog, floating: true)
+            try expectShown(dialog, since: key(4, send: true), floating: true)
+            #expect(try window(dialog)?.frame == frame)
+            #expect(try harness.row(dialog)?.workspace == 4)
+        }
+
+        @Test func e11SendingTheLastWindowLeavesAnEmptyWorkspace() throws {
+            let a = try fixture.open()
+            try activate()
+            try enable()
+            try expectShown(a)
+            try expectShown(a, since: key(3, send: true))
+            try expectEmpty(since: key(1))
+        }
+
+        @Test func e12CyclingUsesArrivalOrderAndWrapsInBothDirections() throws {
+            let a = try fixture.open(key: "a"), b = try fixture.open(key: "b"), c = try fixture.open(key: "c")
+            try activate(key: "c")
+            try enable()
+            try expectShown(c)
+            try expectShown(a, since: post(38))
+            for expected in [b,c,a] { try expectShown(expected, since: post(38)) }
+            for expected in [c,b,a] { try expectShown(expected, since: post(40)) }
+        }
+
+        @Test func e13CycleIncludesFloatsButSkipsMinimizedHiddenAndSheets() throws {
+            let hidden = try other()
+            let h = try hidden.open()
+            try hidden.command("hide")
+            let a = try fixture.open(key: "a")
+            let m = try fixture.open(key: "minimized")
+            try fixture.command("minimize", ["key": "minimized"])
+            let d = try fixture.open(kind: "dialog", key: "dialog")
+            let frame = try #require(try window(d)).frame
+            try activate(key: "dialog")
+            try enable()
+            try expectShown(d, floating: true)
+            try expectShown(a, since: post(38))
+            try expectShown(d, since: post(38), floating: true)
+            #expect(try window(d)?.frame == frame)
+            #expect(try harness.row(m)?.state == "minimized")
+            #expect(try harness.row(h)?.state == "hidden")
+            // E24 independently exercises a real attached sheet; it cannot be cycled away from its parent.
+            let sheet = try fixture.open(kind: "sheet", key: "sheet")
+            let parent = try #require(try fixture.command("ping").windows["sheetParent"])
+            try #require(try eventually { try harness.row(parent)?.workspace == 1 })
+            for expected in [a,d,parent,a] {
+                try expectShown(expected, since: post(38), floating: expected == d)
+                #expect(try window(sheet)?.main != true)
+            }
+        }
+
+        @Test func e14NewWindowJoinsTheActiveWorkspaceAndTheEndOfTheCycle() throws {
+            let (a,b) = try split()
+            try expectShown(b, since: key(2))
+            let start = monotonicSeconds()
+            let c = try fixture.open(key: "c")
+            try expectShown(c, since: start, within: 0.5)
+            #expect(try harness.row(c)?.workspace == 2)
+            #expect(try window(a)?.visible == false)
+            try expectShown(b, since: post(38))
+            try expectShown(c, since: post(38))
+        }
+
+        @Test(arguments: [false, true])
+        func e15ClosingCannotFollowMacOSFocusToAnotherWorkspace(last: Bool) throws {
+            let a = try fixture.open(key: "a")
+            let b = last ? nil : try fixture.open(key: "b")
+            let d = try fixture.open(key: "d")
+            try activate(key: "d")
+            try enable()
+            try expectShown(d)
+            try expectShown(d, since: key(3, send: true))
+            if let b { try expectShown(b, since: key(1)); try expectShown(a, since: post(40)) }
+            else { try expectShown(a, since: key(1)) }
+            let start = monotonicSeconds()
+            try fixture.command("close", ["key": "a"])
+            if let b { try expectShown(b, since: start) } else { try expectEmpty(since: start) }
+            for _ in 0..<10 {
+                #expect(try harness.status().workspaces?.active == 1)
+                sleep(seconds: 0.02)
+            }
+        }
+
+        @Test func e16ExternalActivationRescuesAnInvisibleFocusedFixtureWindow() throws {
+            let a = try fixture.open(key: "a")
+            let x = try other(), d = try x.open()
+            try activate(x)
+            try enable()
+            try expectShown(d)
+            try expectShown(d, since: key(3, send: true))
+            try expectShown(a, since: key(1))
+            // Validate the stand-in: without tessel running, plain activation really
+            // leaves the app frontmost with a main window that is still invisible.
+            kill(harness.appPID, SIGSTOP)
+            do {
+                defer { kill(harness.appPID, SIGCONT) }
+                try yieldActivation(to: x)
+                try x.command("activate", ["key": "activationOnly"])
+                try #require(try eventually { try observe().frontmostFixturePID == x.pid }, "the fixture must activate itself with all windows in the closet")
+                try #require(try eventually { try window(d).map { $0.focused && !$0.visible } == true })
+            }
+            try expectShown(d)
+            try expectShown(a, since: key(1))
+            try yieldActivation(to: x)
+            let start = monotonicSeconds()
+            try x.command("activate", ["key": "activationOnly"])
+            try expectShown(d, since: start)
+            #expect(try harness.status().workspaces?.active == 3)
+        }
+
+        @Test func e16ActivatingAnInvisibleFocusedSheetRescuesItsParentsWorkspace() throws {
+            let a = try fixture.open(key: "a")
+            try activate(key: "a")
+            try enable()
+            let x = try other()
+            try activate(x)
+            let sheet = try x.open(kind: "sheet", key: "sheet")
+            let parent = try #require(try x.command("ping").windows["sheetParent"])
+            try expectShown(parent)
+            try #require(try eventually { try window(sheet)?.focused == true })
+            try expectShown(parent, since: key(3, send: true))
+            try expectShown(a, since: key(1))
+            try yieldActivation(to: x)
+            let start = monotonicSeconds()
+            try x.command("activate", ["key": "activationOnly"])
+            try #require(try eventually(within: max(0, budget - (monotonicSeconds() - start))) {
+                try shown(parent) && window(sheet)?.visible == true && harness.status().workspaces?.active == 3
+            }, "activating a focused sheet must show its parent workspace")
+        }
+
+        @Test func e17ActivatingAnAppWhoseFocusedWindowIsHereKeepsTheWorkspace() throws {
+            let (a,_) = try split()
+            let empty = try other()
+            try activate(empty)
+            try yieldActivation(to: fixture)
+            let start = monotonicSeconds()
+            try fixture.command("activate", ["key": "activationOnly"])
+            try #require(try eventually(within: max(0, budget - (monotonicSeconds() - start))) {
+                try shown(a) && harness.status().workspaces?.active == 1
+            })
+        }
+
+        @Test func e18ActivatingAnAppWithoutWindowsDoesNotSwitchWorkspace() throws {
+            _ = try split()
+            let empty = try other()
+            try activate(empty)
+            sleep(seconds: budget)
+            #expect(try harness.status().workspaces?.active == 1)
+        }
+
+        @Test(arguments: [0.0, 10.0])
+        func e19TilesFillVisibleFrameWithConfiguredGapAndOnePointTolerance(gap: Double) throws {
+            let a = try fixture.open()
+            try activate()
+            try enable("[gaps]\nouter = \(Int(gap))\n")
+            try expectShown(a, gap: gap)
+            #expect(try harness.row(a)?.state == "tiled")
+            #expect(try harness.row(a)?.reason.contains("cannot fill") == false)
+        }
+
+        @Test(arguments: [false, true])
+        func e20AppKitAndSwiftUIWidthLimitsFloatCenteredOnEveryShow(swiftUI: Bool) throws {
+            let session = swiftUI ? try other(swiftUI: true) : fixture
+            let a: UInt32
+            if swiftUI {
+                a = try #require(try eventualValue(within: 3) { try session.command("ping").windows["window"] })
+            } else { a = try session.open(kind: "maxWidth") }
+            try activate(session)
+            let immediate = try #require(try harness.probe(resizing: a, session: session).first { $0.id == a })
+            #expect(immediate.resizeError == 0)
+            #expect(try #require(immediate.acceptedSize).first! < 550)
+            try enable()
+            try expectShown(a, floating: true)
+            let row = try expectState(a, "floats", "cannot fill the screen")
+            #expect(row.workspace == 1)
+            func centered() throws -> Bool {
+                let observation = try observe()
+                let window = try #require(observation.windows.first { $0.id == a })
+                return abs(window.frame[0] + window.frame[2] / 2 - (observation.area[0] + observation.area[2] / 2)) <= 1
+                    && abs(window.frame[1] + window.frame[3] / 2 - (observation.area[1] + observation.area[3] / 2)) <= 1
+                    && window.frame[2] < observation.area[2] - 100
+            }
+            #expect(try centered())
+            for target in [2,1] {
+                let start = try key(target, send: true)
+                #expect(try eventually(within: max(0, budget - (monotonicSeconds() - start))) {
+                    try harness.status().workspaces?.active == target && shown(a, floating: true) && centered()
+                })
+                #expect(try harness.row(a)?.state == "floats")
+                #expect(try harness.row(a)?.reason == "cannot fill the screen")
+            }
+        }
+
+        @Test func e21ManualMoveIsLeftAloneUntilTheWindowIsShownAgain() throws {
+            let (a,b) = try split()
+            sleep(seconds: 0.15)
+            try fixture.command("move", ["key": "a", "frame": [120.0, 130.0, 430.0, 290.0]])
+            let frame = try #require(try window(a)).frame
+            let empty = try other()
+            empty.stop()
+            harness.otherFixtures.removeAll { $0 === empty }
+            sleep(seconds: 0.15)
+            let after = try window(a)?.frame
+            #expect(after == frame)
+            let dialog = try fixture.open(kind: "dialog", key: "dialog")
+            try expectShown(dialog, floating: true)
+            #expect(try window(a)?.frame == frame)
+            try fixture.command("close", ["key": "dialog"])
+            try #require(try eventually { try window(dialog) == nil })
+            #expect(try window(a)?.frame == frame)
+            try expectShown(b, since: key(2))
+            try expectShown(a, since: key(1))
+        }
+
+        @Test func e15DeliberateSelectionAfterCloseStillFollowsExternalFocus() throws {
+            let a = try fixture.open(key: "a"), b = try fixture.open(key: "b"), d = try fixture.open(key: "d")
+            try activate(key: "d")
+            try enable()
+            try expectShown(d)
+            try expectShown(d, since: key(3, send: true))
+            try expectShown(b, since: key(1))
+            try expectShown(a, since: post(40))
+            try fixture.command("close", ["key": "a"])
+            try expectShown(b)
+            let start = monotonicSeconds()
+            try fixture.command("tab", ["key": "d"])
+            try #require(try eventually(within: max(0, budget - (monotonicSeconds() - start))) {
+                try shown(d) && harness.status().workspaces?.active == 3
+            })
+        }
+
+        @Test func e29RecoveryWaitsForTheFirstSuccessfulAXEnumeration() throws {
+            let (a,b) = try split()
+            kill(harness.appPID, SIGKILL)
+            try #require(eventually { !harness.appIsRunning })
+            try writeConfig("")
+            let start = monotonicSeconds()
+            kill(fixture.pid, SIGSTOP)
+            do {
+                defer { kill(fixture.pid, SIGCONT) }
+                try harness.startApp(fixtureReady: false)
+                sleep(seconds: 0.5)
+            }
+            try #require(try eventually(within: max(0, 1 - (monotonicSeconds() - start))) {
+                try harness.row(b) != nil && window(a)?.visible == true && window(b)?.visible == true
+            })
+        }
+
+        @Test func e19OnePointShortReadbackRemainsTiled() throws {
+            let a = try fixture.open()
+            try activate()
+            let area = try observe().area
+            try fixture.command("limitHeight", ["height": area[3] - 21])
+            try enable()
+            try expectShown(a)
+            #expect(try harness.row(a)?.state == "tiled")
+            #expect(abs(try #require(try window(a)).frame[3] - (area[3] - 21)) <= 0.5)
+        }
+
+        @Test func e22OversizedGapKeepsTheConstrainedWindowCenteredOnDisplay() throws {
+            let a = try fixture.open()
+            try activate()
+            try enable("[gaps]\nouter = 10000\n")
+            _ = try expectState(a, "floats", "cannot fill the screen")
+            let observation = try observe(), window = try #require(observation.windows.first { $0.id == a })
+            #expect(abs(window.frame[0] + window.frame[2] / 2 - (observation.area[0] + observation.area[2] / 2)) <= 1)
+            #expect(abs(window.frame[1] + window.frame[3] / 2 - (observation.area[1] + observation.area[3] / 2)) <= 1)
+        }
+
+        @Test func e20ConstrainedWindowFloatsAboveTheWorkspacesTile() throws {
+            let tile = try fixture.open(key: "tile")
+            try activate(key: "tile")
+            try enable()
+            try expectShown(tile)
+            let limited = try fixture.open(kind: "maxWidth", key: "limited")
+            try expectShown(limited, floating: true)
+            _ = try expectState(limited, "floats", "cannot fill the screen")
+            #expect(try eventually { try window(tile)?.visible == true })
+            #expect(try #require(try window(limited)).order < #require(try window(tile)).order)
+        }
+
+        @Test func e22GapReloadRelayoutsOnlyTheVisibleWindowUntilSwitch() throws {
+            let (a,b) = try split()
+            let before = try #require(try window(b)).frame
+            let start = monotonicSeconds()
+            try enable("[gaps]\nouter = 20\n")
+            try expectShown(a, since: start, within: 1, gap: 20)
+            #expect(try window(b)?.frame == before)
+            try expectShown(b, since: key(2), gap: 20)
+        }
+
+        @Test func e23DialogsBelongToTheActiveWorkspaceAndKeepTheirFrames() throws {
+            let (_,b) = try split()
+            try expectShown(b, since: key(2))
+            let d = try fixture.open(kind: "dialog", key: "dialog")
+            try expectShown(d, floating: true)
+            let frame = try #require(try window(d)).frame
+            #expect(try harness.row(d)?.workspace == 2)
+            try key(1)
+            try #require(try eventually(within: budget) { try window(d)?.visible == false })
+            try expectShown(d, since: key(2), floating: true)
+            #expect(try window(d)?.frame == frame)
+        }
+
+        @Test func e24ASheetAlwaysSharesItsParentsVisibilityAndWorkspace() throws {
+            let sheet = try fixture.open(kind: "sheet", key: "sheet")
+            let parent = try #require(try fixture.command("ping").windows["sheetParent"])
+            try activate(key: "sheetParent")
+            try enable()
+            try #require(try eventually { try window(sheet)?.visible == true })
+            let b = try fixture.open(key: "b")
+            try expectShown(b)
+            try expectShown(b, since: key(2, send: true))
+            #expect(try window(sheet)?.visible == false)
+            #expect(try window(parent)?.visible == false)
+            try key(1)
+            try #require(try eventually(within: budget) { try window(parent)?.visible == true && window(sheet)?.visible == true })
+            #expect(try harness.row(sheet)?.workspace == harness.row(parent)?.workspace)
+            try #require(try eventually { try window(sheet)?.focused == true })
+            let sent = try key(3, send: true)
+            try #require(try eventually(within: max(0, budget - (monotonicSeconds() - sent))) {
+                try harness.row(parent)?.workspace == 3 && harness.row(sheet)?.workspace == 3
+                    && shown(parent) && window(sheet)?.visible == true
+            }, "sending while a sheet is focused must move its parent and sheet together")
+        }
+
+        @Test(arguments: [false, true])
+        func e25MinimizeSelectsRecentWindowOrDesktopAndRestoreReturnsToWorkspace(last: Bool) throws {
+            let b = last ? nil : try fixture.open(key: "b")
+            let a = try fixture.open(key: "a")
+            try activate(key: "a")
+            try enable()
+            try expectShown(a)
+            try fixture.command("minimize", ["key": "a"])
+            let start = monotonicSeconds()
+            if let b { try expectShown(b, since: start) } else { try expectEmpty(since: start) }
+            #expect(try harness.row(a)?.workspace == 1)
+            #expect(try harness.row(a)?.state == "minimized")
+            try fixture.command("restore", ["key": "a"])
+            try expectShown(a, since: monotonicSeconds())
+            #expect(try harness.status().workspaces?.active == 1)
+        }
+
+        @Test func e25RestoringFromAnotherWorkspaceReturnsToTheMinimizedWindowsWorkspace() throws {
+            let (a,b) = try split()
+            try expectShown(b, since: key(2))
+            try fixture.command("minimize", ["key": "b"])
+            try expectEmpty(since: monotonicSeconds())
+            let c = try fixture.open(key: "c")
+            try activate(key: "c")
+            try expectShown(c)
+            let sent = try key(1, send: true)
+            try #require(try eventually(within: budget - (monotonicSeconds() - sent)) { try harness.status().workspaces?.active == 1 })
+            try fixture.command("restore", ["key": "b"])
+            try #require(try eventually(within: budget) {
+                try shown(b) && harness.status().workspaces?.active == 2
+            })
+            #expect(try harness.row(b)?.workspace == 2)
+            #expect(try window(a)?.visible == false)
+        }
+
+        @Test(arguments: [false, true])
+        func e26HideSelectsRecentWindowOrDesktopAndReactivationReturnsToItsWorkspace(last: Bool) throws {
+            let b = last ? nil : try fixture.open(key: "b")
+            let x = try other(), a = try x.open()
+            try activate(x)
+            try enable()
+            try expectShown(a)
+            try x.command("hide")
+            if let b { try expectShown(b, since: monotonicSeconds()) } else { try expectEmpty(since: monotonicSeconds()) }
+            #expect(try harness.row(a)?.workspace == 1)
+            try yieldActivation(to: x)
+            let start = monotonicSeconds()
+            try x.command("activate", ["key": "activationOnly"])
+            try expectShown(a, since: start)
+        }
+
+        @Test func e27NativeFullscreenHasNoWorkspaceAndIsNeverHiddenOrResized() throws {
+            let a = try fixture.open()
+            try activate()
+            try enable()
+            try expectShown(a)
+            try fixture.command("fullscreen")
+            #expect(try window(a)?.nativeFullscreen == true)
+            try expectState(a, "fullscreen")
+            #expect(try harness.row(a)?.workspace == nil)
+            let payload = try JSONSerialization.jsonObject(with: harness.invoke("windows", "--json").outputData) as? [[String: Any]]
+            let explicitNull = payload?.first { ($0["id"] as? UInt32) == a }?["workspace"] is NSNull
+            #expect(explicitNull)
+            let frame = try #require(try window(a)).frame
+            sleep(seconds: budget)
+            #expect(try window(a)?.frame == frame)
+            #expect(try window(a)?.visible == true)
+            try fixture.command("fullscreen")
+            try expectShown(a)
+            #expect(try harness.row(a)?.workspace == 1)
+        }
+
+        @Test func e27FullscreenLeavesItsClosetedSiblingAloneAndCannotSendIt() throws {
+            let b = try fixture.open(key: "b"), a = try fixture.open(key: "a")
+            try activate(key: "a")
+            try enable()
+            try expectShown(a)
+            try fixture.command("fullscreen", ["key": "a"])
+            defer {
+                if (try? window(a)?.nativeFullscreen) == true { _ = try? fixture.command("fullscreen", ["key": "a"]) }
+            }
+            _ = try expectState(a, "fullscreen")
+            try #require(try eventually { try window(a).map { $0.visible && $0.focused } == true })
+            #expect(try window(b)?.visible == false)
+            try key(2, send: true)
+            sleep(seconds: budget)
+            #expect(try harness.status().workspaces?.active == 1)
+            #expect(try harness.row(b)?.workspace == 1)
+            #expect(try window(a)?.nativeFullscreen == true)
+            #expect(try window(a)?.focused == true)
+            try fixture.command("fullscreen", ["key": "a"])
+            try expectShown(a)
+        }
+
+        @Test func e26UnhideUsesTheAppsFocusedWindowAcrossWorkspaces() throws {
+            let x = try other(), a = try x.open(key: "a"), b = try x.open(key: "b")
+            try activate(x, key: "b")
+            try enable()
+            try expectShown(b)
+            try expectShown(b, since: key(3, send: true))
+            try expectShown(a, since: key(1))
+            try x.command("hide")
+            try expectEmpty(since: monotonicSeconds())
+            try #require(try eventually {
+                try harness.row(a)?.state == "hidden" && harness.row(a)?.workspace == 1
+                    && harness.row(b)?.state == "hidden" && harness.row(b)?.workspace == 3
+            }, "hiding an app must retain every window's workspace")
+            let c = try fixture.open(key: "c")
+            try activate(key: "c")
+            try expectShown(c)
+            try expectShown(c, since: key(2, send: true))
+            try yieldActivation(to: x)
+            let start = monotonicSeconds()
+            try x.command("activate", ["key": "activationOnly"])
+            try #require(try eventually(within: max(0, budget - (monotonicSeconds() - start))) {
+                try shown(a) && harness.status().workspaces?.active == 1
+            })
+            #expect(try window(b)?.visible == false)
+            #expect(try harness.row(b)?.workspace == 3)
+        }
+
+        @Test func e33GapNumbersFollowTOMLGrammarWithTheFlagOff() throws {
+            for (literal, expected) in [("0x14", 20.0), ("0o24", 20.0), ("0b10100", 20.0), ("1_0.5", 10.5), ("+2e1", 20.0)] {
+                let revision = try harness.status().config.revision
+                try writeConfig("[gaps]\nouter = \(literal)\n")
+                try #require(try eventually(within: 1) { try harness.status().config.revision > revision })
+                #expect(try harness.status().workspaces?.gaps.outer == expected)
+                #expect(try harness.status().workspaces?.enabled == false)
+            }
+            for literal in [".1", "1.", "01", "1__0", "inf", "nan", "9223372036854775808"] {
+                let before = try harness.status().config.revision
+                try writeConfig("[gaps]\nouter = 20 # before \(literal)\n")
+                try #require(try eventually(within: 1) { try harness.status().config.revision > before })
+                let revision = try harness.status().config.revision
+                try writeConfig("[gaps]\nouter = \(literal)\n")
+                try #require(try eventually(within: 1) { try harness.status().config.error?.line == 2 })
+                #expect(try harness.status().config.revision == revision)
+                #expect(try harness.status().workspaces?.gaps.outer == 20)
+            }
+        }
+
+        @Test(arguments: [false, true])
+        func e28DisableOrQuitReturnsAllWindowsAndUnregistersHotkeys(quit: Bool) throws {
+            let (a,b) = try split()
+            let start = monotonicSeconds()
+            if quit { harness.stopApp() } else { try writeConfig("[experiments]\nworkspaces = false\n") }
+            try #require(try eventually(within: max(0, 1 - (monotonicSeconds() - start))) {
+                try window(a)?.visible == true && window(b)?.visible == true
+            })
+            try activate(key: "a")
+            let count = try fixture.command("ping").keyCount ?? 0
+            try key(1)
+            #expect(try eventually { try fixture.command("ping").keyCount == count + 1 })
+            if quit {
+                let result = try harness.invoke("status", "--json")
+                #expect(result.status != 0 && result.error.contains("tessel is not running"))
+                try writeConfig("")
+                try harness.startApp()
+            } else { #expect(try harness.status().workspaces?.enabled == false) }
+        }
+
+        @Test(arguments: [false, true])
+        func e29CrashRecoveryReturnsOrphansWithExperimentOnOrOff(on: Bool) throws {
+            let (a,b) = try split()
+            kill(harness.appPID, SIGKILL)
+            try #require(eventually(within: 2) { !harness.appIsRunning })
+            if !on { try writeConfig("") }
+            let start = monotonicSeconds()
+            try harness.startApp(fixtureReady: false)
+            if on {
+                try #require(try eventually(within: max(0, 1 - (monotonicSeconds() - start))) {
+                    let rows = try harness.rows()
+                    return rows.filter { [a,b].contains($0.id) }.count == 2 && rows.allSatisfy { $0.workspace == 1 }
+                })
+                let current = try #require(try eventualValue { try observe().windows.first { $0.main && $0.visible }?.id })
+                try expectShown(current == a ? b : a, since: post(38))
+            } else {
+                #expect(try eventually(within: max(0, 1 - (monotonicSeconds() - start))) {
+                    try window(a)?.visible == true && window(b)?.visible == true
+                })
+            }
+        }
+
+        @Test func e30HungAppDoesNotBlockSwitchingOrCLI() throws {
+            let (a,b) = try split()
+            let hung = try other(), h = try hung.open()
+            try activate(hung)
+            try expectShown(h)
+            try activate(key: "a")
+            try expectShown(a)
+            try hung.command("hang")
+            let start = try key(2)
+            try #require(try eventually(within: max(0, budget - (monotonicSeconds() - start))) {
+                let observation = try observe([fixture])
+                return observation.windows.first { $0.id == b }.map { $0.visible && $0.main && $0.focused && filled($0, area: observation.area) } == true
+            })
+            let query = monotonicSeconds()
+            #expect(try harness.row(h) != nil)
+            #expect(monotonicSeconds() - query < 1)
+        }
+
+        @Test func e31StatusListsAllDefaultShortcuts() throws {
+            var windows = [try fixture.open(key: "digit1")]
+            try activate(key: "digit1")
+            try enable()
+            try expectShown(windows[0])
+            let keys = try #require(try harness.status().workspaces).keys
+            #expect(keys.count == 22)
+            for number in 1...10 {
+                let digit = number == 10 ? 0 : number
+                #expect(keys["alt-\(digit)"] == "workspace \(number)")
+                #expect(keys["alt-shift-\(digit)"] == "send \(number)")
+            }
+            #expect(keys["alt-j"] == "focus next")
+            #expect(keys["alt-k"] == "focus previous")
+            for number in 2...10 {
+                let window = try fixture.open(key: "digit\(number)")
+                windows.append(window)
+                try expectShown(window)
+                let start = try key(number, send: true)
+                try #require(try eventually(within: max(0, budget - (monotonicSeconds() - start))) {
+                    try shown(window) && harness.status().workspaces?.active == number && harness.row(window)?.workspace == number
+                })
+            }
+            for number in 1...10 {
+                let start = try key(number)
+                try #require(try eventually(within: max(0, budget - (monotonicSeconds() - start))) {
+                    try shown(windows[number - 1]) && harness.status().workspaces?.active == number
+                })
+            }
+        }
+
+        @Test func e32CustomModifiersReachTheRegisteredCommand() throws {
+            let (_,b) = try split()
+            try enable("[keys]\nctrl-alt-shift-cmd-g = \"workspace 2\"\n")
+            let start = try #require(try harness.observer.command("hotkey", ["code": 5, "modifiers": ["alt","shift","ctrl","cmd"]]).postedAt)
+            try expectShown(b, since: start)
+            #expect(try harness.status().workspaces?.active == 2)
+        }
+
+        @Test func e32EveryANSILetterCanBindARealHotkey() throws {
+            let (a,b) = try split()
+            let letters = [
+                ("a", kVK_ANSI_A), ("b", kVK_ANSI_B), ("c", kVK_ANSI_C), ("d", kVK_ANSI_D), ("e", kVK_ANSI_E), ("f", kVK_ANSI_F),
+                ("g", kVK_ANSI_G), ("h", kVK_ANSI_H), ("i", kVK_ANSI_I), ("j", kVK_ANSI_J), ("k", kVK_ANSI_K), ("l", kVK_ANSI_L),
+                ("m", kVK_ANSI_M), ("n", kVK_ANSI_N), ("o", kVK_ANSI_O), ("p", kVK_ANSI_P), ("q", kVK_ANSI_Q), ("r", kVK_ANSI_R),
+                ("s", kVK_ANSI_S), ("t", kVK_ANSI_T), ("u", kVK_ANSI_U), ("v", kVK_ANSI_V), ("w", kVK_ANSI_W), ("x", kVK_ANSI_X),
+                ("y", kVK_ANSI_Y), ("z", kVK_ANSI_Z)
+            ]
+            for (letter, code) in letters {
+                try enable("[keys]\nalt-\(letter) = \"workspace 2\"\n")
+                try expectShown(b, since: post(code))
+                try expectShown(a, since: key(1))
+            }
+        }
+
+        @Test func e32OverridesMergeWithDefaultsAndEmptyBindingPassesThrough() throws {
+            let (a,b) = try split()
+            try enable("[keys]\nalt-1 = \"workspace 2\"\nalt-2 = \"\"\n")
+            let count = try fixture.command("ping").keyCount ?? 0
+            try key(2)
+            #expect(try eventually { try fixture.command("ping").keyCount == count + 1 })
+            #expect(try shown(a))
+            try expectShown(b, since: key(1))
+            #expect(try harness.status().workspaces?.keys["alt-j"] == "focus next")
+        }
+
+        nonisolated static let invalidWorkspaceConfigurations = [
+            ("[keys]\nalt-1 = \"workspace 2\"\nalt-1 = \"workspace 3\"\n", 5),
+            ("[keys]\nalt-1 = \"unknown\"\n", 4),
+            ("[keys]\nalt-1 = \"workspace 11\"\n", 4),
+            ("[keys]\ninvalid-1 = \"workspace 1\"\n", 4),
+            ("[gaps]\nouter = -1\n", 4),
+            ("[keys]\nalt-shift-1 = \"send 2\"\nshift-alt-1 = \"send 3\"\n", 5)
+        ]
+        @Test(arguments: [true, false], invalidWorkspaceConfigurations)
+        func e33InvalidConfigurationReportsItsLineAndKeepsWorkingBindings(on: Bool, invalid: (String, Int)) throws {
+            let (text, line) = invalid
+            let b: UInt32?
+            if on {
+                b = try split().1
+                try enable("[keys]\nalt-1 = \"workspace 2\"\n")
+            } else {
+                b = nil
+                let revision = try harness.status().config.revision
+                try writeConfig("[keys]\nalt-1 = \"workspace 2\"\n")
+                try #require(try eventually(within: 1) { try harness.status().config.revision > revision })
+            }
+            let revision = try harness.status().config.revision
+            try writeConfig("[experiments]\nworkspaces = \(on)\n" + text)
+            try #require(try eventually(within: 1) { try harness.status().config.error?.line == line })
+            #expect(try harness.status().config.revision == revision)
+            #expect(try harness.status().workspaces?.keys["alt-1"] == "workspace 2")
+            if let b { try expectShown(b, since: key(1)) }
+            else { #expect(try harness.status().workspaces?.enabled == false) }
+        }
+
+        @Test func e34MissingSkyLightDisablesWithoutMovingWindowsOrTakingKeys() throws {
+            harness.stopApp()
+            let a = try fixture.open()
+            try activate()
+            let frame = try #require(try window(a)).frame
+            try writeConfig(enabled)
+            try harness.startApp(fixtureReady: false, arguments: ["--test-missing-skylight"])
+            let status = try #require(try harness.status().workspaces)
+            #expect(!status.enabled)
+            #expect(status.reason.lowercased().contains("skylight"))
+            #expect(try window(a)?.frame == frame)
+            #expect(try window(a)?.visible == true)
+            let count = try fixture.command("ping").keyCount ?? 0
+            try key(1)
+            #expect(try eventually { try fixture.command("ping").keyCount == count + 1 })
+            try harness.observer.command("menu", ["pid": harness.appPID, "expected": status.reason, "open": true, "keepOpen": true])
+            #expect(try eventually(within: 1) {
+                try harness.observer.command("menu", ["pid": harness.appPID, "expected": status.reason, "open": true, "press": false, "keepOpen": true]).menuContains == true
+            })
+            harness.stopApp()
+            try writeConfig("")
+            try harness.startApp()
+        }
+
+        @Test func e34FailedHideReturnsAllWindowsAndReleasesHotkeys() throws {
+            harness.stopApp()
+            let a = try fixture.open(key: "a"), b = try fixture.open(key: "b")
+            try activate(key: "b")
+            try writeConfig(enabled)
+            let start = monotonicSeconds()
+            try harness.startApp(fixtureReady: false, arguments: ["--test-failed-hide"])
+            try #require(try eventually(within: max(0, 1 - (monotonicSeconds() - start))) {
+                try harness.status().workspaces?.enabled == false
+                    && harness.status().workspaces?.reason == "SkyLight could not hide a window"
+                    && window(a)?.visible == true && window(b)?.visible == true
+            })
+            try activate(key: "b")
+            let count = try fixture.command("ping").keyCount ?? 0
+            try key(1)
+            #expect(try eventually { try fixture.command("ping").keyCount == count + 1 })
+            harness.stopApp()
+            try writeConfig("")
+            try harness.startApp()
+        }
+
+        @Test func e34TestArgumentsRequireFixtureModeAndAreRejectedByTheDailyBuild() throws {
+            for argument in ["--test-missing-skylight", "--test-failed-hide", "--test-capture-ui"] {
+                #expect(try run([appExecutable.path, "--check-permission", argument]).status == 2)
+            }
+            #expect(try run([appExecutable.path, "--check-permission", "--test-fixture-only", "--test-unknown"]).status == 2)
+            let output = root.appending(path: ".work/daily-argument-check")
+            defer { try? FileManager.default.removeItem(at: output) }
+            try run([buildTool.path, "--variant", "daily", "--output-dir", output.path], timeout: 180, check: true)
+            let executable = output.appending(path: "Tessel.app/Contents/MacOS/TesselApp")
+            for argument in ["--test-fixture-only", "--test-missing-skylight", "--test-failed-hide", "--test-capture-ui"] {
+                // --check-permission exits before NSApplication starts, even if
+                // a regression incorrectly accepts a development argument.
+                #expect(try run([executable.path, "--check-permission", argument]).status == 2)
+            }
+        }
+
+        @Test func e35CLIReportsWorkspaceVisibilityAndNeverTitles() throws {
+            let (a,b) = try split()
+            let rows = try harness.rows()
+            #expect(rows.first { $0.id == a }?.workspace == 1)
+            #expect(rows.first { $0.id == a }?.visible == true)
+            #expect(rows.first { $0.id == b }?.workspace == 2)
+            #expect(rows.first { $0.id == b }?.visible == false)
+            let status = try #require(try harness.status().workspaces)
+            #expect(status.active == 1)
+            #expect(status.gaps.outer == 10)
+            #expect(!status.keys.isEmpty)
+            #expect(status.enabled)
+        }
+
+        @Test func switchLatencyCalibrationMeasuresTwentyCompletedSwitches() throws {
+            let (a,b) = try split()
+            var nanoseconds: [UInt64] = []
+            for index in 0..<20 {
+                let start = try key(index.isMultiple(of: 2) ? 2 : 1)
+                try expectShown(index.isMultiple(of: 2) ? b : a, since: start)
+                nanoseconds.append(UInt64((monotonicSeconds() - start) * 1e9))
+            }
+            let maximum = nanoseconds.max()!
+            #expect(maximum <= 200_000_000)
+            let result: [String: Any] = ["measurements": nanoseconds, "nanoseconds": min(200_000_000, maximum * 3),
+                "sourceRun": ProcessInfo.processInfo.environment["GITHUB_RUN_ID"] ?? "local"]
+            let path = root.appending(path: ".work/switch-calibration.json")
+            try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]).write(to: path)
+            print("Switch calibration: maximum \(Double(maximum) / 1e6) ms across 20 switches")
+        }
+
+        @Test(.enabled(if: ProcessInfo.processInfo.environment["TESSEL_CAPTURE_WORKSPACES"] == "1", "local E37 visual capture"))
+        func captureWorkspaceMenuForOwnerReview() throws {
+            let (a,b) = try split()
+            let directory = root.appending(path: ".work/captures")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            func capture(_ name: String, open: Bool = false, expected: String) throws {
+                let reply = try harness.observer.command("menu", ["pid": harness.appPID, "expected": expected, "open": open, "keepOpen": true])
+                if open {
+                    try #require(try eventually(within: 1) {
+                        try harness.observer.command("menu", ["pid": harness.appPID, "expected": expected, "open": true, "press": false, "keepOpen": true]).menuContains == true
+                    })
+                } else { try #require(reply.menuContains == true) }
+                let source = harness.configFile.deletingLastPathComponent().appending(path: "ui-captures/" + name + ".png")
+                let destination = directory.appending(path: name + ".png")
+                let png = try #require(eventualValue(within: 1) { () -> Data? in
+                    guard let data = FileManager.default.contents(atPath: source.path),
+                          data.starts(with: [0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]) else { return nil }
+                    return data
+                }, "the running development app must export its own rendered view")
+                try png.write(to: destination, options: .atomic)
+            }
+            try expectShown(a)
+            try capture("E37-workspace-1", expected: "Workspace 1")
+            try expectShown(b, since: key(2))
+            try capture("E37-workspace-2", expected: "Workspace 2")
+            try writeConfig("")
+            try #require(try eventually(within: 1) { try harness.status().workspaces?.enabled == false })
+            try capture("E37-disabled-menu", open: true, expected: "experiment off")
+            harness.stopApp()
+            try harness.startApp()
+        }
+    }
+}

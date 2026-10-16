@@ -1,6 +1,8 @@
 import AppKit
 import ApplicationServices
 import Darwin
+import Security
+import SwiftUI
 
 @_silgen_name("_AXUIElementGetWindow")
 func fixtureWindowID(_ element: AXUIElement, _ id: UnsafeMutablePointer<CGWindowID>) -> AXError
@@ -15,13 +17,26 @@ final class NewTabWindow: NSWindow {
 
 @MainActor
 final class Fixture: NSObject, NSApplicationDelegate {
+    static weak var current: Fixture?
     var windows: [String: NSWindow] = [:]
     var socketFD: Int32 = -1
     var source: DispatchSourceRead?
     var socketPath = ""
     var transitions: [UUID: NSObjectProtocol] = [:]
+    var keyCount = 0
+    var keyMonitor: Any?
+
+    override init() {
+        super.init()
+        Self.current = self
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Self.current = self
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            MainActor.assumeIsolated { self?.keyCount += 1 }
+            return event
+        }
         _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
         NSWindow.allowsAutomaticWindowTabbing = false
         let menu = NSMenu()
@@ -35,6 +50,9 @@ final class Fixture: NSObject, NSApplicationDelegate {
         guard let index = args.firstIndex(of: "--socket"), index + 1 < args.count else { exit(2) }
         socketPath = args[index + 1]
         socketFD = socket(AF_UNIX, SOCK_DGRAM, 0)
+        // A twenty-window observation exceeds macOS's 2 KiB datagram default.
+        var replyCapacity: Int32 = 65_536
+        guard setsockopt(socketFD, SOL_SOCKET, SO_SNDBUF, &replyCapacity, socklen_t(MemoryLayout.size(ofValue: replyCapacity))) == 0 else { exit(2) }
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
         let bytes = Array(socketPath.utf8CString)
@@ -61,14 +79,17 @@ final class Fixture: NSObject, NSApplicationDelegate {
         }
         guard count > 0, let command = try? JSONSerialization.jsonObject(with: Data(buffer.prefix(count))) as? [String: Any] else { return }
         let action = command["action"] as? String ?? ""
-        if ["minimize", "restore"].contains(action), let key = command["key"] as? String, let window = windows[key],
-           window.isMiniaturized != (action == "minimize") {
+        let key = command["key"] as? String ?? "window"
+        if ["minimize", "restore", "fullscreen"].contains(action), let window = windows[key],
+           action == "fullscreen" || window.isMiniaturized != (action == "minimize") {
             // The accepted deadline starts after the native Dock animation, at
             // AppKit's completion notification, rather than at the request.
             let operation = UUID()
             let destination = sender
             let destinationLength = length
-            let name = action == "minimize" ? NSWindow.didMiniaturizeNotification : NSWindow.didDeminiaturizeNotification
+            let name = action == "fullscreen"
+                ? (window.styleMask.contains(.fullScreen) ? NSWindow.didExitFullScreenNotification : NSWindow.didEnterFullScreenNotification)
+                : (action == "minimize" ? NSWindow.didMiniaturizeNotification : NSWindow.didDeminiaturizeNotification)
             transitions[operation] = NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.finishTransition(operation, to: destination, length: destinationLength)
@@ -96,10 +117,13 @@ final class Fixture: NSObject, NSApplicationDelegate {
     func send(_ response: [String: Any], to sender: sockaddr_un, length: socklen_t) {
         var destination = sender
         let data = (try? JSONSerialization.data(withJSONObject: response, options: [.sortedKeys])) ?? Data()
-        _ = data.withUnsafeBytes { bytes in
+        let sent = data.withUnsafeBytes { bytes in
             withUnsafePointer(to: &destination) {
                 $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { sendto(socketFD, bytes.baseAddress, data.count, 0, $0, length) }
             }
+        }
+        if sent < 0, errno == EMSGSIZE, response["error"] == nil {
+            send(["error": "fixture response exceeds its socket buffer (\(data.count) bytes)"], to: sender, length: length)
         }
     }
 
@@ -107,7 +131,9 @@ final class Fixture: NSObject, NSApplicationDelegate {
         let action = command["action"] as? String ?? ""
         let key = command["key"] as? String ?? "window"
         switch action {
-        case "ping": break
+        case "ping":
+            if CommandLine.arguments.contains("--swiftui"), windows["window"] == nil,
+               let window = NSApp.windows.first(where: { $0.styleMask.contains(.titled) }) { windows["window"] = window }
         case "reset":
             NSApp.unhide(nil)
             for window in windows.values where window.sheetParent != nil { window.sheetParent?.endSheet(window) }
@@ -156,6 +182,116 @@ final class Fixture: NSObject, NSApplicationDelegate {
         case "restore": windows[key]?.deminiaturize(nil)
         case "hide": NSApp.hide(nil)
         case "show": NSApp.unhide(nil)
+        case "yieldActivation": NSApp.yieldActivation(toApplicationWithBundleIdentifier: "com.taecontrol.tessel.fixture")
+        case "fixtureReady":
+            var reply = snapshot
+            if let pid = command["pid"] as? Int32, FixtureProbe.isFixture(pid) {
+                reply["ready"] = FixtureProbe.value(AXUIElementCreateApplication(pid), kAXWindowsAttribute) != nil
+            } else { reply["ready"] = false }
+            return reply
+        case "activate":
+            NSApp.activate(ignoringOtherApps: true)
+            if let window = windows[key] { window.makeKeyAndOrderFront(nil) }
+        case "activateFixture":
+            guard let pid = command["pid"] as? Int32,
+                  FixtureProbe.isFixture(pid) else {
+                return ["error": "activation accepts fixture processes only"]
+            }
+            let application = AXUIElementCreateApplication(pid)
+            _ = AXUIElementSetAttributeValue(application, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+            if let id = command["id"] as? UInt32 {
+                for window in FixtureProbe.value(application, kAXWindowsAttribute) as? [AXUIElement] ?? [] {
+                    var found: UInt32 = 0
+                    _ = fixtureWindowID(window, &found)
+                    if found == id {
+                        _ = AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+                        _ = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+                    }
+                }
+            }
+        case "move":
+            if let frame = command["frame"] as? [Double], frame.count == 4 {
+                let height = NSScreen.screens.first?.frame.height ?? 0
+                windows[key]?.setFrame(NSRect(x: frame[0], y: height - frame[1] - frame[3], width: frame[2], height: frame[3]), display: true)
+            }
+        case "limitHeight":
+            if let window = windows[key], let height = command["height"] as? Double {
+                let chrome = window.frame.height - window.contentRect(forFrameRect: window.frame).height
+                window.contentMaxSize = NSSize(width: 10000, height: height - chrome)
+            }
+        case "fullscreen": windows[key]?.toggleFullScreen(nil)
+        case "observe":
+            guard let pids = command["pids"] as? [Int32], pids.allSatisfy(FixtureProbe.isFixture) else {
+                return ["error": "the observer accepts fixture processes only"]
+            }
+            var reply = snapshot
+            reply["observation"] = observe(pids)
+            return reply
+        case "menu":
+            guard let pid = command["pid"] as? Int32,
+                  FixtureProbe.hasSignature(pid, identifier: "com.taecontrol.tessel.dev") else {
+                return ["error": "menu inspection accepts the development app only"]
+            }
+            let application = AXUIElementCreateApplication(pid)
+            AXUIElementSetMessagingTimeout(application, 0.2)
+            guard let bar = FixtureProbe.value(application, "AXExtrasMenuBar"), CFGetTypeID(bar) == AXUIElementGetTypeID(),
+                  let item = (FixtureProbe.value(bar as! AXUIElement, kAXChildrenAttribute) as? [AXUIElement])?.first else {
+                return ["error": "development status item unavailable"]
+            }
+            let open = command["open"] as? Bool ?? false
+            if open && command["press"] as? Bool != false { _ = AXUIElementPerformAction(item, kAXPressAction as CFString) }
+            let expected = command["expected"] as? String ?? ""
+            var found = false
+            var inspected = 0
+            func inspect(_ element: AXUIElement, depth: Int) {
+                guard depth < 8, inspected < 100 else { return }
+                inspected += 1
+                // Only menu-item titles are read. Window titles are never queried.
+                let role = FixtureProbe.value(element, kAXRoleAttribute) as? String
+                let attribute = role == kAXMenuItemRole ? kAXTitleAttribute : kAXDescriptionAttribute
+                if (open ? role == kAXMenuItemRole : role == kAXMenuBarItemRole),
+                   let text = FixtureProbe.value(element, attribute) as? String, text.contains(expected) { found = true }
+                for child in FixtureProbe.value(element, kAXChildrenAttribute) as? [AXUIElement] ?? [] { inspect(child, depth: depth + 1) }
+            }
+            inspect(item, depth: 0)
+            let menus = (FixtureProbe.value(item, kAXChildrenAttribute) as? [AXUIElement] ?? [])
+                .filter { FixtureProbe.value($0, kAXRoleAttribute) as? String == kAXMenuRole }
+            if open && command["keepOpen"] as? Bool != true {
+                for child in menus {
+                    _ = AXUIElementPerformAction(child, kAXCancelAction as CFString)
+                }
+            }
+            var reply = snapshot
+            reply["menuContains"] = found
+            return reply
+        case "hotkey":
+            // A missed hotkey must never type in a real user's app, even on failure.
+            guard let front = FixtureProbe.frontmostPID(), FixtureProbe.isFixture(front),
+                  let window = FixtureProbe.value(AXUIElementCreateApplication(front), kAXFocusedWindowAttribute),
+                  CFGetTypeID(window) == AXUIElementGetTypeID() else {
+                return ["error": "refusing synthetic hotkey: a fixture window must be frontmost"]
+            }
+            var id: CGWindowID = 0
+            _ = fixtureWindowID(window as! AXUIElement, &id)
+            let onscreen = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
+            guard onscreen.contains(where: { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == id }),
+                  let code = command["code"] as? Int, FixtureProbe.frontmostPID() == front else {
+                return ["error": "refusing synthetic hotkey: the fixture window must be on screen"]
+            }
+            let names = command["modifiers"] as? [String] ?? (["alt"] + (command["shift"] as? Bool == true ? ["shift"] : []))
+            let modifiers: [String: CGEventFlags] = ["alt": .maskAlternate, "shift": .maskShift, "ctrl": .maskControl, "cmd": .maskCommand]
+            guard names.allSatisfy({ modifiers[$0] != nil }) else { return ["error": "invalid fixture key modifiers"] }
+            let flags = names.reduce(CGEventFlags()) { $0.union(modifiers[$1]!) }
+            let down = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(code), keyDown: true)!
+            let up = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(code), keyDown: false)!
+            down.flags = flags
+            up.flags = flags
+            let posted = Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1e9
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+            var reply = snapshot
+            reply["postedAt"] = posted
+            return reply
         case "hang":
             // A genuine resize notification is delivered just before AppKit blocks.
             // This makes tessel attempt a refresh against the hung application.
@@ -166,7 +302,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
     }
 
     var snapshot: [String: Any] {
-        ["pid": getpid(), "windows": windows.mapValues { $0.windowNumber },
+        ["pid": getpid(), "active": NSApp.isActive, "keyCount": keyCount, "windows": windows.mapValues { $0.windowNumber },
          "nativeTabs": windows.mapValues { $0.tabGroup?.windows.count ?? 1 },
          "closable": windows.mapValues { $0.styleMask.contains(.closable) },
          "contentPages": windows.mapValues { window in
@@ -197,6 +333,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
         window.animationBehavior = .none
         window.tabbingMode = .disallowed
         window.title = title ?? "Fixture " + key
+        if kind == "maxWidth" { window.contentMaxSize = NSSize(width: 480, height: 10_000) }
         if kind == "noFullscreen" { window.collectionBehavior = .fullScreenNone }
         let label = NSTextField(labelWithString: "Generic fixture window")
         label.frame = NSRect(x: 30, y: 100, width: 350, height: 30)
@@ -234,10 +371,118 @@ final class Fixture: NSObject, NSApplicationDelegate {
         if show { window.makeKeyAndOrderFront(nil) }
         return window
     }
+
+    /// An independent AX/CG client; all returned window data belongs to fixtures.
+    func observe(_ pids: [pid_t]) -> [String: Any] {
+        let front = FixtureProbe.frontmostPID()
+        let listed = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
+        let visible = Set(listed.compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
+        let order = Dictionary(uniqueKeysWithValues: listed.enumerated().compactMap { index, item -> (UInt32, Int)? in
+            (item[kCGWindowNumber as String] as? NSNumber).map { ($0.uint32Value, index) }
+        })
+        var result: [[String: Any]] = []
+        for pid in pids {
+            let application = AXUIElementCreateApplication(pid)
+            AXUIElementSetMessagingTimeout(application, 0.02)
+            var focusedID: UInt32 = 0
+            if let focused = FixtureProbe.value(application, kAXFocusedWindowAttribute), CFGetTypeID(focused) == AXUIElementGetTypeID() {
+                _ = fixtureWindowID(focused as! AXUIElement, &focusedID)
+            }
+            func describe(_ window: AXUIElement, parent: UInt32? = nil) {
+                AXUIElementSetMessagingTimeout(window, 0.02)
+                var id: CGWindowID = 0
+                _ = fixtureWindowID(window, &id)
+                var position = CGPoint.zero, size = CGSize.zero
+                if let value = FixtureProbe.value(window, kAXPositionAttribute), CFGetTypeID(value) == AXValueGetTypeID() {
+                    _ = AXValueGetValue(value as! AXValue, .cgPoint, &position)
+                }
+                if let value = FixtureProbe.value(window, kAXSizeAttribute), CFGetTypeID(value) == AXValueGetTypeID() {
+                    _ = AXValueGetValue(value as! AXValue, .cgSize, &size)
+                }
+                let main = FixtureProbe.value(window, kAXMainAttribute) as? Bool ?? false
+                result.append(["id": id, "frame": [position.x, position.y, size.width, size.height],
+                               "visible": visible.contains(id), "main": main && front == pid,
+                               "focused": focusedID == id && front == pid,
+                               "parent": parent.map { $0 as Any } ?? NSNull(),
+                               "order": order[id] ?? Int.max,
+                               "nativeFullscreen": FixtureProbe.value(window, "AXFullScreen") as? Bool ?? false])
+                for child in FixtureProbe.value(window, kAXChildrenAttribute) as? [AXUIElement] ?? []
+                    where FixtureProbe.value(child, kAXRoleAttribute) as? String == kAXSheetRole { describe(child, parent: id) }
+            }
+            for window in FixtureProbe.value(application, kAXWindowsAttribute) as? [AXUIElement] ?? [] { describe(window) }
+        }
+        let screen = NSScreen.screens.first!
+        let area = screen.visibleFrame
+        var desktop = false
+        var finderHasNoOrdinaryWindows = false
+        if let finder = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first {
+            let application = AXUIElementCreateApplication(finder.processIdentifier)
+            AXUIElementSetMessagingTimeout(application, 0.02)
+            if let windows = FixtureProbe.value(application, kAXWindowsAttribute) as? [AXUIElement] {
+                finderHasNoOrdinaryWindows = windows.allSatisfy { FixtureProbe.value($0, kAXRoleAttribute) as? String == kAXScrollAreaRole }
+            }
+            if finderHasNoOrdinaryWindows, front == finder.processIdentifier,
+               FixtureProbe.hasSignature(finder.processIdentifier, identifier: "com.apple.finder"),
+               let focused = FixtureProbe.value(application, kAXFocusedWindowAttribute), CFGetTypeID(focused) == AXUIElementGetTypeID() {
+                desktop = FixtureProbe.value(focused as! AXUIElement, kAXSubroleAttribute) == nil
+            }
+        }
+        let frontmostFixture = front.map { pids.contains($0) } ?? false
+        let workspaceFront = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        return ["windows": result, "frontmostFixture": frontmostFixture,
+                "frontmostFixturePID": frontmostFixture ? front! : 0,
+                "activeFixturePID": workspaceFront.flatMap { pids.contains($0) ? $0 : nil } ?? 0,
+                "finderDesktop": desktop, "finderHasNoOrdinaryWindows": finderHasNoOrdinaryWindows,
+                "area": [area.minX, screen.frame.height - area.maxY, area.width, area.height]]
+    }
+}
+
+private struct CaptureWindow: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { CaptureView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+    final class CaptureView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let window { Fixture.current?.windows["window"] = window }
+        }
+    }
+}
+
+private struct FixedWidthFixture: SwiftUI.App {
+    @NSApplicationDelegateAdaptor(Fixture.self) var delegate
+    var body: some Scene {
+        Window("Generic fixed-width fixture", id: "fixed") {
+            Text("Generic fixture window").frame(width: 480).frame(minHeight: 300, maxHeight: .infinity)
+                .background(CaptureWindow())
+        }.windowResizability(.contentSize).defaultLaunchBehavior(.presented)
+    }
 }
 
 // The independent oracle reads only this repository's fixture. It never reads titles.
 enum FixtureProbe {
+    /// LaunchServices can temporarily omit live processes during activation.
+    /// Validate the running code's signature instead of trusting that cache.
+    static func hasSignature(_ pid: pid_t, identifier: String) -> Bool {
+        var code: SecCode?
+        guard SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributePid: NSNumber(value: pid)] as CFDictionary, [], &code) == errSecSuccess,
+              let code else { return false }
+        var requirement: SecRequirement?
+        guard SecRequirementCreateWithString(("identifier \"" + identifier + "\"") as CFString, [], &requirement) == errSecSuccess,
+              let requirement else { return false }
+        return SecCodeCheckValidity(code, [], requirement) == errSecSuccess
+    }
+
+    static func isFixture(_ pid: pid_t) -> Bool { hasSignature(pid, identifier: "com.taecontrol.tessel.fixture") }
+
+    static func frontmostPID() -> pid_t? {
+        let system = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(system, 0.02)
+        guard let application = value(system, kAXFocusedApplicationAttribute), CFGetTypeID(application) == AXUIElementGetTypeID() else { return nil }
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(application as! AXUIElement, &pid) == .success else { return nil }
+        return pid
+    }
+
     static func value(_ element: AXUIElement, _ attribute: String) -> CFTypeRef? {
         var result: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute as CFString, &result) == .success else { return nil }
@@ -253,7 +498,7 @@ enum FixtureProbe {
     }
 
     @MainActor static func run(pid: pid_t, resizeID: Int?) {
-        guard NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == "com.taecontrol.tessel.fixture" else { exit(3) }
+        guard isFixture(pid) else { exit(3) }
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.1)
         guard let windows = value(app, kAXWindowsAttribute) as? [AXUIElement] else {
@@ -282,6 +527,11 @@ enum FixtureProbe {
                 var size = CGSize(width: 650, height: 400)
                 let axSize = AXValueCreate(.cgSize, &size)!
                 result["resizeError"] = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, axSize).rawValue
+                if let returned = value(window, kAXSizeAttribute), CFGetTypeID(returned) == AXValueGetTypeID() {
+                    var accepted = CGSize.zero
+                    _ = AXValueGetValue(returned as! AXValue, .cgSize, &accepted)
+                    result["acceptedSize"] = [accepted.width, accepted.height]
+                }
             }
             result["sheets"] = (value(window, kAXChildrenAttribute) as? [AXUIElement] ?? [])
                 .filter { value($0, kAXRoleAttribute) as? String == kAXSheetRole }.map(describe)
@@ -296,6 +546,7 @@ enum FixtureProbe {
 struct Main {
     @MainActor static func main() {
         let args = CommandLine.arguments
+        if args.contains("--swiftui") { FixedWidthFixture.main(); return }
         if args.dropFirst().first == "--check-session" {
             let session = CGSessionCopyCurrentDictionary() as? [String: Any]
             let locked = session?["CGSSessionScreenIsLocked"] as? Bool ?? false

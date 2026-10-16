@@ -10,6 +10,8 @@ struct Row: Decodable, Equatable, Hashable {
     let state: String
     let reason: String
     let tabs: Int
+    let workspace: Int?
+    let visible: Bool?
 }
 
 struct Status: Decodable {
@@ -30,6 +32,15 @@ struct Status: Decodable {
     let config: Config
     let version: String
     let pid: pid_t
+    let workspaces: Workspaces?
+    struct Workspaces: Decodable {
+        let enabled: Bool
+        let reason: String
+        let active: Int
+        let gaps: Gaps
+        let keys: [String: String]
+        struct Gaps: Decodable { let outer: Double }
+    }
 }
 
 /// The fixture's own description of its windows, keyed by the test's names.
@@ -39,6 +50,32 @@ struct FixtureReply: Decodable {
     let nativeTabs: [String: Int]
     let closable: [String: Bool]
     let contentPages: [String: Int]
+    let observation: Observation?
+    let postedAt: Double?
+    let keyCount: Int?
+    let menuContains: Bool?
+    let ready: Bool?
+    let active: Bool?
+}
+
+struct Observation: Decodable {
+    struct Window: Decodable {
+        let id: UInt32
+        let frame: [Double]
+        let visible: Bool
+        let main: Bool
+        let focused: Bool
+        let order: Int
+        let nativeFullscreen: Bool
+        let parent: UInt32?
+    }
+    let windows: [Window]
+    let frontmostFixture: Bool
+    let frontmostFixturePID: Int32
+    let activeFixturePID: Int32
+    let finderDesktop: Bool
+    let finderHasNoOrdinaryWindows: Bool
+    let area: [Double]
 }
 
 /// What an independent AX client sees in the fixture. It never reads titles.
@@ -51,6 +88,7 @@ struct ProbeWindow: Decodable {
     let extraTabButtons: Int
     let perTabButtons: Int
     let resizeError: Int?
+    let acceptedSize: [Double]?
     let sheets: [ProbeWindow]
 }
 
@@ -62,10 +100,16 @@ final class FixtureSession {
     private let clientPath: String
     private let socket: Int32
 
-    init(directory: URL, number: Int) throws {
+    init(directory: URL, number: Int, swiftUI: Bool = false) throws {
         path = directory.appending(path: "f\(number).sock").path
         clientPath = directory.appending(path: "c\(number).sock").path
         socket = Darwin.socket(AF_UNIX, SOCK_DGRAM, 0)
+        var replyCapacity: Int32 = 65_536
+        guard setsockopt(socket, SOL_SOCKET, SO_RCVBUF, &replyCapacity, socklen_t(MemoryLayout.size(ofValue: replyCapacity))) == 0 else {
+            close(socket)
+            throw HarnessError("cannot reserve the fixture reply buffer")
+        }
+        unlink(path)
         unlink(clientPath)
         var address = try unixAddress(clientPath)
         let bound = withUnsafePointer(to: &address) {
@@ -73,7 +117,8 @@ final class FixtureSession {
         }
         guard bound == 0 else { throw HarnessError("cannot bind the fixture client socket: errno \(errno)") }
         setTimeout(socket, seconds: 3)
-        try run(["open", "-n", "-g", "--stdout", "/dev/null", "--stderr", "/dev/null", fixtureBundle.path, "--args", "--socket", path], check: true)
+        try run(["open", "-n"] + (swiftUI ? [] : ["-g"]) + ["--stdout", "/dev/null", "--stderr", "/dev/null", fixtureBundle.path, "--args", "--socket", path]
+                + (swiftUI ? ["--swiftui"] : []), check: true)
         let path = path
         guard eventually(within: 5, { FileManager.default.fileExists(atPath: path) }) else {
             throw HarnessError("fixture did not launch")
@@ -97,7 +142,9 @@ final class FixtureSession {
         guard sent == data.count else { throw HarnessError("cannot reach the fixture: errno \(errno)") }
         var buffer = [UInt8](repeating: 0, count: 65_536)
         let received = recv(socket, &buffer, buffer.count, 0)
-        guard received > 0 else { throw HarnessError("fixture did not answer \(action)") }
+        guard received > 0 else {
+            throw HarnessError("fixture did not answer \(action)")
+        }
         let reply = Data(buffer.prefix(received))
         if let object = try JSONSerialization.jsonObject(with: reply) as? [String: Any], let error = object["error"] as? String {
             throw HarnessError(error)
@@ -113,8 +160,10 @@ final class FixtureSession {
 
     func stop() {
         kill(pid, SIGKILL)
+        _ = eventually(within: 1) { kill(pid, 0) != 0 }
         close(socket)
         unlink(clientPath)
+        unlink(path)
     }
 }
 
@@ -129,6 +178,7 @@ final class Harness {
     private(set) var environment: [String: String] = [:]
     var fixture: FixtureSession!
     var otherFixtures: [FixtureSession] = []
+    var observer: FixtureSession!
     private(set) var appPID: pid_t = 0
     private var cleanups: [() -> Void] = []
     private var contracts: URL?
@@ -161,6 +211,8 @@ final class Harness {
         try FileManager.default.createDirectory(at: configFile.deletingLastPathComponent(), withIntermediateDirectories: true)
         environment = ProcessInfo.processInfo.environment.merging(["XDG_CONFIG_HOME": configHome.path]) { $1 }
         fixture = try FixtureSession(directory: directory, number: 0)
+        observer = try FixtureSession(directory: directory, number: 999)
+        cleanups.append { [unowned self] in observer.stop() }
         cleanups.append { [unowned self] in fixture.stop() }
         cleanups.append { [unowned self] in stopApp() }
         cleanups.append { [unowned self] in otherFixtures.forEach { $0.stop() } }
@@ -171,9 +223,11 @@ final class Harness {
         while let cleanup = cleanups.popLast() { cleanup() }
     }
 
-    func startApp(fixtureReady: Bool = true) throws {
+    func startApp(fixtureReady: Bool = true, arguments: [String] = []) throws {
+        let capture = ProcessInfo.processInfo.environment["TESSEL_CAPTURE_WORKSPACES"] == "1" ? ["--test-capture-ui"] : []
         try run(["open", "-n", "-g", "--stdout", "/dev/null", "--stderr", "/dev/null",
-                 "--env", "XDG_CONFIG_HOME=" + environment["XDG_CONFIG_HOME"]!, app.path], check: true)
+                 "--env", "XDG_CONFIG_HOME=" + environment["XDG_CONFIG_HOME"]!, app.path,
+                 "--args", "--test-fixture-only"] + capture + arguments, check: true)
         guard let pid = eventualValue(within: 5, { processIDs(appExecutable).first }) else {
             throw HarnessError("signed development app did not launch")
         }
@@ -245,14 +299,14 @@ final class Harness {
     }
 
     /// Reads the fixture through a separate AX client, as an oracle independent of tessel.
-    func probe(resizing resizeID: UInt32? = nil) throws -> [ProbeWindow] {
+    func probe(resizing resizeID: UInt32? = nil, session: FixtureSession? = nil) throws -> [ProbeWindow] {
         // LaunchServices must own the probe's TCC identity. A bare binary inherits
         // the terminal host's permission, which need not match the fixture grant.
         let output = directory.appending(path: "probe-\(UUID().uuidString).json")
         FileManager.default.createFile(atPath: output.path, contents: nil)
         defer { try? FileManager.default.removeItem(at: output) }
         var command = ["open", "-n", "-g", "--stdout", output.path, "--stderr", "/dev/null", fixtureBundle.path,
-                       "--args", "--probe", String(fixture.pid)]
+                       "--args", "--probe", String((session ?? fixture).pid)]
         if let resizeID { command.append(String(resizeID)) }
         try run(command, timeout: 3, check: true)
         struct Reply: Decodable { let windows: [ProbeWindow]? }
@@ -281,11 +335,14 @@ final class Harness {
 
     /// Per-test setup: a fresh fixture and the default configuration.
     func reset() throws {
-        try fixture.command("reset")
+        if !appIsRunning { try startApp(fixtureReady: false) }
         try? FileManager.default.removeItem(at: configFile)
         guard try eventually(within: 1, { try status().config.state == "defaults" }) else {
             throw HarnessError("tessel did not return to the default configuration")
         }
+        for other in otherFixtures { other.stop() }
+        otherFixtures.removeAll()
+        try fixture.command("reset")
     }
 }
 
