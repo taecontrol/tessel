@@ -19,6 +19,7 @@ final class NewTabWindow: NSWindow {
 final class Fixture: NSObject, NSApplicationDelegate {
     static weak var current: Fixture?
     var windows: [String: NSWindow] = [:]
+    private var retainedClosedWindows: [NSWindow] = []
     var socketFD: Int32 = -1
     var source: DispatchSourceRead?
     var socketPath = ""
@@ -139,6 +140,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
             for window in windows.values where window.sheetParent != nil { window.sheetParent?.endSheet(window) }
             for window in windows.values { window.close() }
             windows.removeAll()
+            retainedClosedWindows.removeAll()
         case "open":
             let kind = command["kind"] as? String ?? "standard"
             let count = command["count"] as? Int ?? 3
@@ -176,6 +178,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
         case "close":
             if let window = windows.removeValue(forKey: key) {
                 window.sheetParent?.endSheet(window)
+                if command["retain"] as? Bool == true { retainedClosedWindows.append(window) }
                 window.close()
             }
         case "minimize": windows[key]?.miniaturize(nil)

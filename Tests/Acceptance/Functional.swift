@@ -220,7 +220,7 @@ extension Acceptance {
             let window = try fixture.open(key: "background", ["background": true])
             try expectState(window, "tiled")
             sleep(seconds: 0.55)  // A settling or focus event must not replace destruction.
-            try fixture.command("close", ["key": "background"])
+            try fixture.command("close", ["key": "background", "retain": true])
             #expect(try eventually { try harness.row(window) == nil })
             let other = try FixtureSession(directory: harness.directory, number: 1)
             harness.otherFixtures.append(other)

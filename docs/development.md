@@ -105,6 +105,13 @@ tabs without close buttons, and native windows containing more content tabs.
 Their independent native-count oracle is `NSWindow.tabGroup.windows`.
 This relationship follows the installed AppKit implementation, rather than a
 public guarantee about future OS versions or custom Accessibility publishers.
+AXWindows can temporarily omit a live window during a Space move, fullscreen,
+or an app hide/unhide. The catalog revalidates known AX handles and retains sheet
+ownership. A native tab's bar keeps its AX identity when selection replaces the
+front window, so that identity retires the old tab root without retaining an
+extra window. Minimized tab entries continue to follow AppKit's published list.
+The close fixture can retain a closed NSWindow object to verify that revalidation
+still retires its AX window.
 
 CI runs the same commands on `xcode-27` (macOS 27). Its short-lived certificate
 is created in a temporary keychain; no signing material is stored in GitHub.

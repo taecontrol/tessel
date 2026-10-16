@@ -86,6 +86,11 @@ private struct WindowFacts {
     let tabs: Int
     let frame: CGRect
     let parent: UInt32?
+    let nativeTabGroups: [AXUIElement]
+
+    func sharesNativeTabs(with other: WindowFacts) -> Bool {
+        nativeTabGroups.contains { group in other.nativeTabGroups.contains { CFEqual(group, $0) } }
+    }
 
     func record(app: String, bundleId: String, hidden: Bool) -> WindowRecord {
         let state: WindowState
@@ -123,6 +128,7 @@ private final class AppWindows: @unchecked Sendable {
     ])
     private var facts: [WindowFacts] = []
     private var hidden: Bool
+    private var hiddenHint: Bool
     private var stopped = false
     private var pending: DispatchWorkItem?
     private var settleGeneration: UInt64 = 0
@@ -145,6 +151,7 @@ private final class AppWindows: @unchecked Sendable {
         self.name = name
         self.bundleId = bundleId
         self.hidden = hidden
+        self.hiddenHint = hidden
         self.generation = generation
         self.publish = publish
         application = AXUIElementCreateApplication(pid)
@@ -196,7 +203,7 @@ private final class AppWindows: @unchecked Sendable {
     func refresh(hidden: Bool? = nil, settle: Bool = false, change: CatalogChange = .snapshot) {
         queue.async { [self] in
             guard !stopped else { return }
-            if let hidden { self.hidden = hidden }
+            if let hidden { self.hiddenHint = hidden }
             if change == .activation || self.change != .activation && change != .snapshot { self.change = change }
             if settle { beginSettling() }
             failedReads = 0
@@ -249,22 +256,34 @@ private final class AppWindows: @unchecked Sendable {
             // Subscribe even if an animation makes this snapshot incomplete.
             // Otherwise a newly created window can finish minimizing unseen.
             defer { updateSubscriptions(elements, using: &windowSubscriptions) }
+            // Read hide state alongside the windows; NSWorkspace's notification
+            // can lag behind AX. Its cached value is a fallback for missing AXHidden.
+            hidden = try value(application, kAXHiddenAttribute) as? Bool ?? hiddenHint
             for window in windows {
                 do {
                     try inspect(window, into: &next, elements: &elements)
                 } catch AXReadError.gone { continue }
             }
-            // AppKit can omit the focused window while animating fullscreen,
-            // and omit closeted siblings while hiding their app. A missing list
-            // entry is not closure: verify these existing AX handles directly.
+            // AppKit can omit live windows during Space moves, fullscreen and
+            // app hide/unhide. Revalidate known handles; a different native tab
+            // front is identified by the bar retained from its previous root.
             var omitted: [AXUIElement] = []
+            var focusedElement: AXUIElement?
             if let focused = try value(application, kAXFocusedWindowAttribute), CFGetTypeID(focused) == AXUIElementGetTypeID() {
-                omitted.append(focused as! AXUIElement)
+                let element = focused as! AXUIElement
+                focusedElement = element
+                omitted.append(element)
             }
-            if hidden { omitted += elementsByID.values }
+            omitted += elementsByID.values
             for window in omitted where !elements.contains(where: { CFEqual($0, window) }) {
+                let cached = facts.first { fact in elementsByID[fact.id].map { CFEqual($0, window) } == true }
+                if let cached, next.contains(where: { $0.id != cached.id && $0.sharesNativeTabs(with: cached) }) { continue }
+                // AppKit publishes every minimized tab, then only the selected
+                // window after restore. Its focused window is checked above.
+                let isFocused = focusedElement.map { CFEqual($0, window) } == true
+                if cached?.minimized == true && !hidden && !isFocused { continue }
                 do {
-                    try inspect(window, into: &next, elements: &elements)
+                    try inspect(window, into: &next, elements: &elements, parent: cached?.parent)
                 } catch AXReadError.gone { continue }
             }
             let oldIDs = Set(facts.map(\.id))
@@ -308,7 +327,7 @@ private final class AppWindows: @unchecked Sendable {
         let frame = try frame(window)
         elementsByID[id] = window
         result.append(WindowFacts(id: id, minimized: minimized, fullscreen: fullscreen, subrole: subrole,
-                                  resizable: resizable.boolValue, tabs: max(1, tabs), frame: frame, parent: parent))
+                                  resizable: resizable.boolValue, tabs: max(1, tabs), frame: frame, parent: parent, nativeTabGroups: tabGroups))
         elements.append(contentsOf: tabGroups)
         for sheet in sheets { try inspect(sheet, into: &result, elements: &elements, parent: id) }
     }
