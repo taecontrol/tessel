@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import signal
 import socket
+import stat
 import subprocess
 import tempfile
 import time
@@ -73,12 +74,22 @@ class RUsage(ctypes.Structure):
         "wired_size", "resident_size", "phys_footprint", "proc_start_abstime", "proc_exit_abstime")]
 
 
+class MachTimebase(ctypes.Structure):
+    _fields_ = [("numer", ctypes.c_uint32), ("denom", ctypes.c_uint32)]
+
+
+TIMEBASE = MachTimebase()
+if ctypes.CDLL("/usr/lib/libSystem.B.dylib").mach_timebase_info(ctypes.byref(TIMEBASE)) != 0 or not TIMEBASE.denom:
+    raise RuntimeError("cannot determine the Mach CPU timebase")
+
+
 def resources(pid):
     usage = RUsage()
     libproc = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
     if libproc.proc_pid_rusage(pid, 0, ctypes.byref(usage)):
         raise OSError(ctypes.get_errno(), "cannot read tessel resource usage")
-    return usage.user_time + usage.system_time, usage.resident_size
+    ticks = usage.user_time + usage.system_time
+    return ticks * TIMEBASE.numer // TIMEBASE.denom, usage.resident_size
 
 
 class FoundationAcceptance(unittest.TestCase):
@@ -158,12 +169,22 @@ class FoundationAcceptance(unittest.TestCase):
         return self.fixture.command("open", kind=kind, key=key, **kwargs)["windows"][key]
 
     def probe(self, resize_id=None):
-        command = [str(FIXTURE_BIN), "--probe", str(self.fixture.pid)]
-        if resize_id:
-            command.append(str(resize_id))
-        result = subprocess.run(command, capture_output=True, text=True, timeout=2)
-        self.assertEqual(result.returncode, 0, "independent fixture AX probe needs Accessibility")
-        return json.loads(result.stdout)["windows"]
+        # LaunchServices must own the probe's TCC identity. A bare binary inherits
+        # the terminal host's permission, which need not match the fixture grant.
+        with tempfile.NamedTemporaryFile(dir=self.directory, suffix=".json") as output:
+            command = ["open", "-n", "-g", "--stdout", output.name, "--stderr", "/dev/null", str(FIXTURE), "--args", "--probe", str(self.fixture.pid)]
+            if resize_id:
+                command.append(str(resize_id))
+            subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
+            def completed():
+                try:
+                    return json.loads(Path(output.name).read_text())
+                except json.JSONDecodeError:
+                    return None
+            value = eventually(completed, 2)
+            self.assertIsNotNone(value, "independent fixture AX probe did not complete")
+            self.assertIn("windows", value, "independent fixture AX probe needs Accessibility")
+            return value["windows"]
 
     def setUp(self):
         self.fixture.command("reset")
@@ -204,7 +225,7 @@ class FoundationAcceptance(unittest.TestCase):
     def test_E05_native_tabs_remain_one_entry_through_switch_add_and_close(self):
         reply = self.fixture.command("open", kind="tabs", key="tabs", count=3)
         first = reply["windows"]["tabs0"]
-        self.assertTrue(eventually(lambda: len(self.rows()) == 1 and self.rows()[0]["tabs"] == 3))
+        self.assertTrue(eventually(lambda: len(rows := self.rows()) == 1 and rows[0]["tabs"] == 3))
         row = self.rows()[0]
         self.assertIn("3 native tabs", row["reason"])
         observed = self.probe()
@@ -213,20 +234,20 @@ class FoundationAcceptance(unittest.TestCase):
         before = observed[0]["id"]
         second = reply["windows"]["tabs1"]
         self.fixture.command("tab", key="tabs1")
-        self.assertTrue(eventually(lambda: len(self.rows()) == 1 and self.rows()[0]["id"] == second))
+        self.assertTrue(eventually(lambda: len(rows := self.rows()) == 1 and rows[0]["id"] == second))
         observed = self.probe()
         self.assertEqual(len(observed), 1)
         self.assertNotEqual(observed[0]["id"], before)
         self.fixture.command("addTab", key="tabs3", reference="tabs1")
-        self.assertTrue(eventually(lambda: len(self.rows()) == 1 and self.rows()[0]["tabs"] == 4))
+        self.assertTrue(eventually(lambda: len(rows := self.rows()) == 1 and rows[0]["tabs"] == 4))
         self.fixture.command("close", key="tabs3")
-        self.assertTrue(eventually(lambda: len(self.rows()) == 1 and self.rows()[0]["tabs"] == 3))
+        self.assertTrue(eventually(lambda: len(rows := self.rows()) == 1 and rows[0]["tabs"] == 3))
         self.fixture.command("tab", key="tabs0")
         self.assert_state(first, "tiled")
         self.fixture.command("minimize", key="tabs0")
-        self.assertTrue(eventually(lambda: len(self.rows()) == 1 and self.rows()[0]["state"] == "minimized"))
+        self.assertTrue(eventually(lambda: len(rows := self.rows()) == 1 and rows[0]["state"] == "minimized"))
         self.fixture.command("restore", key="tabs0")
-        self.assertTrue(eventually(lambda: len(self.rows()) == 1 and self.rows()[0]["state"] == "tiled"))
+        self.assertTrue(eventually(lambda: len(rows := self.rows()) == 1 and rows[0]["state"] == "tiled"))
         for key in ("tabs0", "tabs1", "tabs2"):
             self.fixture.command("close", key=key)
         self.assertTrue(eventually(lambda: not self.rows()))
@@ -243,9 +264,9 @@ class FoundationAcceptance(unittest.TestCase):
             self.fixture.command("restore", key=kind)
             self.assert_state(window, expected)
         self.fixture.command("hide")
-        self.assertTrue(eventually(lambda: len(self.rows()) == len(ids) and all(row["state"] == "hidden" for row in self.rows())))
+        self.assertTrue(eventually(lambda: len(rows := self.rows()) == len(ids) and all(row["state"] == "hidden" for row in rows)))
         self.fixture.command("show")
-        self.assertTrue(eventually(lambda: len(self.rows()) == len(ids) and all(row["state"] not in ("hidden", "minimized") for row in self.rows())))
+        self.assertTrue(eventually(lambda: len(rows := self.rows()) == len(ids) and all(row["state"] not in ("hidden", "minimized") for row in rows)))
 
     def test_E07_new_window_converges_within_500ms_and_stays_classified(self):
         window = self.open_window("noFullscreen")
@@ -299,6 +320,14 @@ class FoundationAcceptance(unittest.TestCase):
         self.assertEqual(set(row), {"id", "app", "bundleId", "state", "reason", "tabs"})
 
     def test_E11_absent_app_fails_in_under_one_second(self):
+        os.kill(self.app_pid, signal.SIGSTOP)
+        try:
+            started = time.monotonic()
+            result = self.invoke("windows")
+            self.assertLess(time.monotonic() - started, 1)
+            self.assertNotEqual(result.returncode, 0, "a stalled server must not hang the CLI")
+        finally:
+            os.kill(self.app_pid, signal.SIGCONT)
         self.stop_app()
         try:
             started = time.monotonic()
@@ -308,6 +337,30 @@ class FoundationAcceptance(unittest.TestCase):
             self.assertIn("tessel is not running", result.stderr)
         finally:
             self.start_app()
+
+    def test_transport_is_private_to_the_current_user(self):
+        result = subprocess.run(["/usr/sbin/lsof", "-a", "-p", str(self.app_pid), "-U", "-Fn"], capture_output=True, text=True, check=True)
+        paths = [Path(line[1:]) for line in result.stdout.splitlines() if line.startswith("n/") and line.endswith(".sock")]
+        self.assertEqual(len(paths), 1)
+        endpoint = paths[0]
+        self.assertEqual(endpoint.stat().st_uid, os.getuid())
+        self.assertEqual(stat.S_IMODE(endpoint.stat().st_mode), 0o600)
+        self.assertEqual(endpoint.parent.stat().st_uid, os.getuid())
+        self.assertEqual(stat.S_IMODE(endpoint.parent.stat().st_mode), 0o700)
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            attempt = "import socket,sys\ns=socket.socket(socket.AF_UNIX)\ntry:\n s.connect(sys.argv[1])\nexcept PermissionError:\n sys.exit(0)\nexcept OSError:\n sys.exit(2)\nsys.exit(1)\n"
+            denied = subprocess.run(["sudo", "-n", "-u", "nobody", "/usr/bin/python3", "-c", attempt, str(endpoint)], capture_output=True, timeout=2)
+            self.assertEqual(denied.returncode, 0, "a different Unix user must be denied access")
+
+    def test_resource_cpu_measurement_matches_the_process_cpu_clock(self):
+        before, _ = resources(os.getpid())
+        clock = time.process_time_ns()
+        while time.process_time_ns() - clock < 20_000_000:
+            pass
+        after, _ = resources(os.getpid())
+        elapsed = time.process_time_ns() - clock
+        self.assertGreater(after - before, elapsed * 0.75)
+        self.assertLess(after - before, elapsed * 1.25)
 
     def test_E12_status_reports_permission_config_path_error_line_and_version(self):
         status = self.status()
@@ -448,7 +501,8 @@ class FoundationAcceptance(unittest.TestCase):
             self.assertLess(resident, budget["residentBytes"])
             self.assertLess(after - before, 100_000_000 if CALIBRATE else budget["cpuNanoseconds"])
         maximum = max(item["cpuNanoseconds"] for item in measurements)
-        result = {"measurements": measurements, "cpuNanoseconds": min(100_000_000, maximum * 3), "residentBytes": 50_000_000}
+        result = {"measurements": measurements, "cpuNanoseconds": min(100_000_000, maximum * 3), "residentBytes": 50_000_000,
+                  "machTimebase": {"numer": TIMEBASE.numer, "denom": TIMEBASE.denom}}
         destination = ROOT / ".work/resource-calibration.json"
         destination.parent.mkdir(exist_ok=True)
         destination.write_text(json.dumps(result, indent=2) + "\n")

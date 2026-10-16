@@ -15,6 +15,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
     var socketFD: Int32 = -1
     var source: DispatchSourceRead?
     var socketPath = ""
+    var transitions: [UUID: NSObjectProtocol] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
@@ -55,16 +56,46 @@ final class Fixture: NSObject, NSApplicationDelegate {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { recvfrom(socketFD, &buffer, buffer.count, 0, $0, &length) }
         }
         guard count > 0, let command = try? JSONSerialization.jsonObject(with: Data(buffer.prefix(count))) as? [String: Any] else { return }
-        let response = perform(command)
-        let data = (try? JSONSerialization.data(withJSONObject: response, options: [.sortedKeys])) ?? Data()
-        _ = data.withUnsafeBytes { bytes in
-            withUnsafePointer(to: &sender) {
-                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { sendto(socketFD, bytes.baseAddress, data.count, 0, $0, length) }
+        let action = command["action"] as? String ?? ""
+        if ["minimize", "restore"].contains(action), let key = command["key"] as? String, let window = windows[key],
+           window.isMiniaturized != (action == "minimize") {
+            // The accepted deadline starts after the native Dock animation, at
+            // AppKit's completion notification, rather than at the request.
+            let operation = UUID()
+            let destination = sender
+            let destinationLength = length
+            let name = action == "minimize" ? NSWindow.didMiniaturizeNotification : NSWindow.didDeminiaturizeNotification
+            transitions[operation] = NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.finishTransition(operation, to: destination, length: destinationLength)
+                }
             }
+            _ = perform(command)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.finishTransition(operation, to: destination, length: destinationLength, error: "native window transition did not finish")
+            }
+            return
         }
-        if command["action"] as? String == "hang" {
+        send(perform(command), to: sender, length: length)
+        if action == "hang" {
             // A real blocked AppKit main thread, after acknowledging the request.
             DispatchQueue.main.async { while true { sleep(3600) } }
+        }
+    }
+
+    func finishTransition(_ operation: UUID, to sender: sockaddr_un, length: socklen_t, error: String? = nil) {
+        guard let token = transitions.removeValue(forKey: operation) else { return }
+        NotificationCenter.default.removeObserver(token)
+        send(error.map { ["error": $0] } ?? snapshot, to: sender, length: length)
+    }
+
+    func send(_ response: [String: Any], to sender: sockaddr_un, length: socklen_t) {
+        var destination = sender
+        let data = (try? JSONSerialization.data(withJSONObject: response, options: [.sortedKeys])) ?? Data()
+        _ = data.withUnsafeBytes { bytes in
+            withUnsafePointer(to: &destination) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { sendto(socketFD, bytes.baseAddress, data.count, 0, $0, length) }
+            }
         }
     }
 
@@ -120,8 +151,10 @@ final class Fixture: NSObject, NSApplicationDelegate {
         case "hang": break
         default: return ["error": "unknown fixture command"]
         }
-        return ["pid": getpid(), "windows": windows.mapValues { $0.windowNumber }]
+        return snapshot
     }
+
+    var snapshot: [String: Any] { ["pid": getpid(), "windows": windows.mapValues { $0.windowNumber }] }
 
     @discardableResult
     func makeWindow(key: String, kind: String, title: String? = nil, show: Bool = true) -> NSWindow {
@@ -132,6 +165,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
         if kind == "panel" {
             window = NSPanel(contentRect: rect, styleMask: style.union(.utilityWindow), backing: .buffered, defer: false)
             (window as? NSPanel)?.isFloatingPanel = true
+            (window as? NSPanel)?.hidesOnDeactivate = false
         } else if kind == "dialog" {
             window = DialogWindow(contentRect: rect, styleMask: style, backing: .buffered, defer: false)
         } else {
