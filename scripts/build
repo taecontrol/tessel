@@ -24,12 +24,14 @@ def main():
         config = args.signing_config.read_text()
     except OSError:
         config = ""
-    match = re.search(r"^\s*CODE_SIGN_IDENTITY\s*=\s*(.+?)\s*$", config, re.M)
-    identity = match[1].strip('"') if match else ""
+    match = re.search(r"^[ \t]*CODE_SIGN_IDENTITY[ \t]*=[ \t]*([^\r\n]*)$", config, re.M)
+    identity = match[1].strip().strip('"').strip() if match else ""
     if not identity or identity == "-" or identity.lower() in {"adhoc", "ad-hoc", "sign to run locally"}:
         sys.exit("Configure CODE_SIGN_IDENTITY in Signing.local.xcconfig with a code-signing identity from your keychain. See docs/development.md. Ad-hoc signing is not allowed.")
     identities = subprocess.run(["security", "find-identity", "-v", "-p", "codesigning"], capture_output=True, text=True, check=True).stdout
-    if not any(identity in line for line in identities.splitlines() if re.search(r"[0-9A-F]{40}", line)):
+    available = [match.groups() for line in identities.splitlines()
+                 if (match := re.fullmatch(r'\s*\d+\)\s+([0-9A-Fa-f]{40})\s+"(.*)"\s*', line))]
+    if not any(identity.casefold() == fingerprint.casefold() or identity == name for fingerprint, name in available):
         sys.exit("The configured code-signing identity is unavailable. See docs/development.md.")
 
     os.chdir(ROOT)
