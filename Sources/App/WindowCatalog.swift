@@ -311,6 +311,11 @@ private final class AppWindows: @unchecked Sendable {
             let newIDs = Set(next.map(\.id))
             facts = next
             elementsByID = handles.filter { newIDs.contains($0.key) }
+            // The last fill result belongs to the continuing native group.
+            // Selecting a tab preserves it until the next ordinary show retries.
+            for (id, previous) in replacements where constrained.contains(previous) {
+                constrained.insert(id)
+            }
             constrained.formIntersection(newIDs)
             validations = validations.filter { newIDs.contains($0.key) }
             failedReads = 0

@@ -113,6 +113,8 @@ extra window. Minimized tab entries continue to follow AppKit's published list.
 The catalog carries a native front's replacement relationship into Workspaces,
 which preserves membership, arrival position, and focus history. Its next render
 reconciles visibility for the replacement CG window, including hidden groups.
+The group's last fill result also follows its front; an ordinary show retries
+that result without resizing the group merely because another tab was selected.
 The close fixture can retain a closed NSWindow object to verify that revalidation
 still retires its AX window.
 
