@@ -175,7 +175,10 @@ private final class AppWindows: @unchecked Sendable {
         do {
             guard let windows = try value(application, kAXWindowsAttribute) as? [AXUIElement] else { return }
             var next: [WindowFacts] = []
-            var elements: [AXUIElement] = []
+            var elements = windows
+            // Subscribe even if an animation makes this snapshot incomplete.
+            // Otherwise a newly created window can finish minimizing unseen.
+            defer { updateWindowNotifications(elements) }
             for window in windows {
                 do {
                     try inspect(window, into: &next, elements: &elements)
@@ -184,7 +187,6 @@ private final class AppWindows: @unchecked Sendable {
             let oldIDs = Set(facts.map(\.id))
             let newIDs = Set(next.map(\.id))
             facts = next
-            updateWindowNotifications(elements)
             publish(facts.map { $0.record(app: name, bundleId: bundleId, hidden: hidden) })
             if !newIDs.subtracting(oldIDs).isEmpty {
                 beginSettling()
@@ -196,6 +198,7 @@ private final class AppWindows: @unchecked Sendable {
     }
 
     private func inspect(_ window: AXUIElement, into result: inout [WindowFacts], elements: inout [AXUIElement]) throws {
+        if !elements.contains(where: { CFEqual($0, window) }) { elements.append(window) }
         AXUIElementSetMessagingTimeout(window, 0.05)
         var id: CGWindowID = 0
         try check(axWindowID(window, &id))
@@ -209,7 +212,6 @@ private final class AppWindows: @unchecked Sendable {
         var visited = 0
         let tabs = try chrome(window, depth: 0, visited: &visited, sheets: &sheets, groups: &tabGroups)
         result.append(WindowFacts(id: id, minimized: minimized, subrole: subrole, resizable: resizable.boolValue, tabs: max(1, tabs)))
-        elements.append(window)
         elements.append(contentsOf: tabGroups)
         for sheet in sheets { try inspect(sheet, into: &result, elements: &elements) }
     }

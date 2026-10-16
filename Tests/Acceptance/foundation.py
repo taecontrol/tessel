@@ -290,6 +290,7 @@ class FoundationAcceptance(unittest.TestCase):
     def test_E08_closed_windows_and_terminated_apps_disappear_within_500ms(self):
         window = self.open_window()
         self.assert_state(window, "tiled")
+        time.sleep(0.55)  # A settling read must not stand in for a close notification.
         self.fixture.command("close")
         self.assertTrue(eventually(lambda: self.row(window) is None))
         other = FixtureSession(self.directory, 1)
