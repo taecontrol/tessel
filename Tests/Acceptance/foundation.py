@@ -144,14 +144,14 @@ class FoundationAcceptance(unittest.TestCase):
         result = self.invoke("status", "--json")
         self.assertEqual(result.returncode, 0, "status command failed (window data withheld)")
         value = json.loads(result.stdout)
-        self.assertIsInstance(value, dict)
+        self.assertTrue(isinstance(value, dict), "status is not an object (content withheld)")
         return value
 
     def rows(self):
         result = self.invoke("windows", "--json")
         self.assertEqual(result.returncode, 0, "windows command failed; check Accessibility using tessel status")
         value = json.loads(result.stdout)
-        self.assertIsInstance(value, list, "window listing is not implemented")
+        self.assertTrue(isinstance(value, list), "window listing is not implemented (content withheld)")
         # Do not include other apps in failure output, comparison values, or artifacts.
         return [row for row in value if row.get("bundleId") == FIXTURE_ID]
 
@@ -222,7 +222,7 @@ class FoundationAcceptance(unittest.TestCase):
                 self.assertNotEqual(subrole, "AXStandardWindow")
                 self.assert_state(window, "floats", subrole)
 
-    def test_E05_native_tabs_remain_one_entry_through_switch_add_and_close(self):
+    def test_E05_native_tabs_keep_one_front_entry_and_expose_minimized_ax_entries(self):
         reply = self.fixture.command("open", kind="tabs", key="tabs", count=3)
         first = reply["windows"]["tabs0"]
         self.assertTrue(eventually(lambda: len(rows := self.rows()) == 1 and rows[0]["tabs"] == 3))
@@ -244,10 +244,22 @@ class FoundationAcceptance(unittest.TestCase):
         self.assertTrue(eventually(lambda: len(rows := self.rows()) == 1 and rows[0]["tabs"] == 3))
         self.fixture.command("tab", key="tabs0")
         self.assert_state(first, "tiled")
+        self.fixture.command("hide")
+        self.assertTrue(eventually(lambda: len(rows := self.rows()) == 1 and rows[0]["state"] == "hidden" and rows[0]["tabs"] == 3))
+        self.fixture.command("show")
+        self.assertTrue(eventually(lambda: len(rows := self.rows()) == 1 and rows[0]["state"] == "tiled" and rows[0]["tabs"] == 3))
         self.fixture.command("minimize", key="tabs0")
-        self.assertTrue(eventually(lambda: len(rows := self.rows()) == 1 and rows[0]["state"] == "minimized"))
+        group_ids = {reply["windows"]["tabs" + str(index)] for index in range(3)}
+        self.assertTrue(eventually(lambda: len(rows := self.rows()) == 3 and {row["id"] for row in rows} == group_ids and all(row["state"] == "minimized" for row in rows)))
+        self.assertEqual(sorted(row["tabs"] for row in self.rows()), [1, 1, 3])
+        self.assertEqual({item["id"] for item in self.probe()}, group_ids)
+        # An unrelated minimized window must never be guessed into the group.
+        separate = self.open_window(key="separate")
+        self.fixture.command("minimize", key="separate")
+        self.assertTrue(eventually(lambda: len(rows := self.rows()) == 4 and {row["id"] for row in rows} == group_ids | {separate} and all(row["state"] == "minimized" for row in rows)))
+        self.fixture.command("close", key="separate")
         self.fixture.command("restore", key="tabs0")
-        self.assertTrue(eventually(lambda: len(rows := self.rows()) == 1 and rows[0]["state"] == "tiled"))
+        self.assertTrue(eventually(lambda: len(rows := self.rows()) == 1 and rows[0]["state"] == "tiled" and rows[0]["tabs"] == 3))
         for key in ("tabs0", "tabs1", "tabs2"):
             self.fixture.command("close", key=key)
         self.assertTrue(eventually(lambda: not self.rows()))

@@ -57,6 +57,12 @@ at that point; the animation itself can take longer than 500 ms. The fixture
 acknowledges those commands on completion, without changing the assertion's
 deadline. Other window operations use the ordinary command acknowledgement.
 
+Native tab groups have one front entry while visible or hidden. When a group is
+minimized, macOS 27 exposes each tab as an AX window, and only one reports the
+group's tab count. Tessel lists those minimized entries as reported; it does not
+guess which windows belong together. Restoring the group returns to one entry.
+Keeping one entry while minimized needs further investigation beyond #1.
+
 CI runs the same commands on `xcode-27` (macOS 27). Its short-lived certificate
 is created in a temporary keychain; no signing material is stored in GitHub.
 Only the disposable runner provisions its Accessibility database. Local
