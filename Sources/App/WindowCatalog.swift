@@ -95,6 +95,7 @@ private final class AppWindows: @unchecked Sendable {
     private var stopped = false
     private var pending: DispatchWorkItem?
     private var settleGeneration: UInt64 = 0
+    private var failedReads = 0
 
     init(pid: pid_t, name: String, bundleId: String, hidden: Bool, generation: UUID,
          publish: @escaping @Sendable ([WindowRecord]) -> Void) {
@@ -132,7 +133,9 @@ private final class AppWindows: @unchecked Sendable {
     }
 
     private func changed(_ notification: String) {
-        let needsSettling = [kAXWindowCreatedNotification, kAXSheetCreatedNotification, kAXMainWindowChangedNotification].contains(notification)
+        // A closing window can still be listed by the read that follows its event.
+        let needsSettling = [kAXWindowCreatedNotification, kAXSheetCreatedNotification, kAXMainWindowChangedNotification,
+                             kAXUIElementDestroyedNotification].contains(notification)
         refresh(settle: needsSettling)
     }
 
@@ -141,11 +144,16 @@ private final class AppWindows: @unchecked Sendable {
             guard !stopped else { return }
             if let hidden { self.hidden = hidden }
             if settle { beginSettling() }
-            pending?.cancel()
-            let item = DispatchWorkItem { [weak self] in self?.readSnapshot() }
-            pending = item
-            queue.asyncAfter(deadline: .now() + .milliseconds(10), execute: item)
+            failedReads = 0
+            scheduleRead(after: 10)
         }
+    }
+
+    private func scheduleRead(after milliseconds: Int) {
+        pending?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.readSnapshot() }
+        pending = item
+        queue.asyncAfter(deadline: .now() + .milliseconds(milliseconds), execute: item)
     }
 
     func stop() {
@@ -194,6 +202,7 @@ private final class AppWindows: @unchecked Sendable {
             let oldIDs = Set(facts.map(\.id))
             let newIDs = Set(next.map(\.id))
             facts = next
+            failedReads = 0
             publish(facts.map { $0.record(app: name, bundleId: bundleId, hidden: hidden) })
             if !newIDs.subtracting(oldIDs).isEmpty {
                 beginSettling()
@@ -201,6 +210,12 @@ private final class AppWindows: @unchecked Sendable {
         } catch {
             // A failed read is not a classification signal, nor proof of closure.
             publish(facts.map { $0.record(app: name, bundleId: bundleId, hidden: hidden) })
+            // A busy app can time out the only read after its last event. Back off
+            // a few times, then wait for the next event so a hung app costs nothing.
+            if failedReads < 4 {
+                failedReads += 1
+                scheduleRead(after: 50 << failedReads)
+            }
         }
     }
 
