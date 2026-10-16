@@ -599,6 +599,50 @@ class FoundationAcceptance(unittest.TestCase):
                     self.assertIn("Signing.local.xcconfig", result.stderr)
                 self.assertFalse(output.exists())
 
+    def test_E16_signing_identity_requires_exact_available_name_or_fingerprint(self):
+        # Exercise the build's external-command boundary without touching the
+        # keychain or producing a binary with any tessel bundle ID.
+        shims = self.directory / "signing-tools"
+        shims.mkdir()
+        marker = self.directory / "signing-command-reached"
+        fingerprint = "0123456789ABCDEF0123456789ABCDEF01234567"
+        name = "Generic Contract Signing Identity"
+        listing = '  1) ' + fingerprint + ' "' + name + '"\n     1 valid identities found\n'
+        commands = {
+            "security": "#!/bin/sh\ncat <<'IDENTITIES'\n" + listing + "IDENTITIES\n",
+            "xcrun": '#!/bin/sh\nprintf compiler > "$TESSEL_SIGNING_PROBE"\nexit 91\n',
+            "codesign": '#!/bin/sh\nprintf signer > "$TESSEL_SIGNING_PROBE"\nexit 92\n',
+        }
+        for command, body in commands.items():
+            path = shims / command
+            path.write_text(body)
+            path.chmod(0o755)
+        env = {**os.environ, "PATH": str(shims) + os.pathsep + os.environ["PATH"],
+               "TESSEL_SIGNING_PROBE": str(marker)}
+        invalid = ("CODE_SIGN_IDENTITY = \t \n", 'CODE_SIGN_IDENTITY = "  \t "\n',
+                   "CODE_SIGN_IDENTITY = \nOTHER_SETTING = ignored\n",
+                   "CODE_SIGN_IDENTITY = Contract Signing\n",
+                   "CODE_SIGN_IDENTITY = " + fingerprint[:20] + "\n")
+        valid = ('CODE_SIGN_IDENTITY = "' + name + '"\n',
+                 "CODE_SIGN_IDENTITY = " + fingerprint.lower() + "\n")
+        for index, text in enumerate((*invalid, *valid)):
+            with self.subTest(case=index):
+                marker.unlink(missing_ok=True)
+                config = self.directory / "GenericIdentity.local.xcconfig"
+                config.write_text(text)
+                output = self.directory / ("signing-boundary-output-" + str(index))
+                result = subprocess.run([str(ROOT / "scripts/build"), "--signing-config", str(config),
+                                         "--output-dir", str(output)], env=env, capture_output=True, timeout=3)
+                self.assertNotEqual(result.returncode, 0, "the fake compiler must prevent every build")
+                if index < len(invalid):
+                    self.assertFalse(marker.exists(), "an invalid identity reached compilation or signing")
+                    self.assertFalse(output.exists(), "an invalid identity created build output")
+                    self.assertTrue(b"docs/development.md" in result.stderr, "invalid identity lacks setup guidance")
+                else:
+                    self.assertTrue(marker.exists(), "an exact available identity must reach the fake compiler")
+                    self.assertEqual(marker.read_text(), "compiler", "the signer must never be reached")
+                    self.assertFalse(any(output.glob("*.app")), "the fake compiler must not install a bundle")
+
     def test_E17_missing_configuration_uses_defaults_without_an_error(self):
         self.stop_app()
         self.config_file.unlink(missing_ok=True)
