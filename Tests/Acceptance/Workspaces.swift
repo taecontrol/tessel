@@ -511,11 +511,27 @@ extension Acceptance {
             }
         }
 
-        @Test func e21ManualMoveIsLeftAloneUntilTheWindowIsShownAgain() throws {
-            let (a,b) = try split()
+        @Test(arguments: [false, true])
+        func e21ManualMoveIsLeftAloneUntilTheWindowIsShownAgain(nativeTabs: Bool) throws {
+            var a: UInt32
+            let b: UInt32
+            if nativeTabs {
+                let group = try fixture.command("open", ["kind": "tabs", "key": "a", "count": 2])
+                a = try #require(group.windows["a0"])
+                b = try fixture.open(key: "b")
+                try activate(key: "b")
+                try enable()
+                try expectShown(b)
+                try expectShown(b, since: key(2, send: true))
+                try expectShown(a, since: key(1))
+            } else { (a,b) = try split() }
             sleep(seconds: 0.15)
-            try fixture.command("move", ["key": "a", "frame": [120.0, 130.0, 430.0, 290.0]])
+            try fixture.command("move", ["key": nativeTabs ? "a0" : "a", "frame": [120.0, 130.0, 430.0, 290.0]])
             let frame = try #require(try window(a)).frame
+            if nativeTabs {
+                a = try #require(try fixture.command("tab", ["key": "a1"]).windows["a1"])
+                try #require(try converges { $0.count == 2 && $0.contains { $0.id == a && $0.workspace == 1 } })
+            }
             let empty = try other()
             empty.stop()
             harness.otherFixtures.removeAll { $0 === empty }
