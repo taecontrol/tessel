@@ -110,6 +110,9 @@ or an app hide/unhide. The catalog revalidates known AX handles and retains shee
 ownership. A native tab's bar keeps its AX identity when selection replaces the
 front window, so that identity retires the old tab root without retaining an
 extra window. Minimized tab entries continue to follow AppKit's published list.
+The catalog carries a native front's replacement relationship into Workspaces,
+which preserves membership, arrival position, and focus history. Its next render
+reconciles visibility for the replacement CG window, including hidden groups.
 The close fixture can retain a closed NSWindow object to verify that revalidation
 still retires its AX window.
 

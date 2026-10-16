@@ -338,13 +338,28 @@ extension Acceptance {
             // The group arrived between B and C; a different front is not an arrival.
             try expectShown(c, since: post(38))
             try expectShown(replacement, since: post(40))
-            try expectShown(replacement, since: key(3, send: true))
+
+            // A background selection must preserve hide intent and the group's
+            // focus history while another fixture owns the active workspace.
+            let foreground = try other()
+            let d = try foreground.open()
+            try activate(foreground)
+            try expectShown(d)
+            try expectShown(d, since: key(2, send: true))
+            let backgroundReplacement = try replaceFront(key: inserting ? "backgroundInserted" : "tabs2")
+            try #require(try converges { $0.count == 4 && $0.contains { $0.id == backgroundReplacement && $0.workspace == 1 } })
+            #expect(try !visible(backgroundReplacement))
+            #expect(try harness.status().workspaces?.active == 2)
+            try expectShown(d)
+            try expectShown(backgroundReplacement, since: key(1))
+
+            try expectShown(backgroundReplacement, since: key(3, send: true))
             try expectShown(c, since: key(1))
-            #expect(try !visible(replacement))
+            #expect(try !visible(backgroundReplacement))
 
             // Selecting a hidden group's next front keeps its original workspace.
-            let hiddenReplacement = try replaceFront(key: inserting ? "insertedAgain" : "tabs2")
-            try #require(try converges { $0.count == 3 && $0.contains { $0.id == hiddenReplacement && $0.workspace == 3 } })
+            let hiddenReplacement = try replaceFront(key: inserting ? "insertedAgain" : "tabs0")
+            try #require(try converges { $0.count == 4 && $0.contains { $0.id == hiddenReplacement && $0.workspace == 3 } })
             try expectShown(hiddenReplacement)
             #expect(try harness.status().workspaces?.active == 3)
             try expectShown(c, since: key(1))

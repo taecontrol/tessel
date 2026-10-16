@@ -312,11 +312,8 @@ final class Workspaces {
         }
         let managed = Set(entries.keys.filter { entries[$0]?.workspace != nil && available($0) })
         let hide = managed.subtracting(show)
-        let onScreen = Self.onScreen()
-        // A replacement tab can surface a new CG window even when its logical
-        // group was already hidden. Preserve that group's intended hide state.
-        let newlyHidden = hide.subtracting(closeted).union(hide.intersection(onScreen))
-        let newlyShown = show.intersection(closeted).union(show.subtracting(onScreen))
+        let newlyHidden = hide.subtracting(closeted)
+        let newlyShown = show.intersection(closeted).union(show.subtracting(Self.onScreen()))
         closet.hide(newlyHidden.filter { entries[$0]?.observation.parent == nil })
         closet.show(newlyShown.filter { entries[$0]?.observation.parent == nil })
         closeted.formUnion(hide)
@@ -380,7 +377,9 @@ final class Workspaces {
         }
         if focused == previous { focused = id }
         if expectedFocus == previous { expectedFocus = id }
-        if closeted.remove(previous) != nil { closeted.insert(id) }
+        // Hide intent follows membership and focus history. A new CG window
+        // still needs its own move; do not inherit the old ID's completed move.
+        closeted.remove(previous)
     }
 
     private func assign(_ id: UInt32, to workspace: Int) {
