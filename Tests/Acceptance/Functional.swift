@@ -125,13 +125,15 @@ extension Acceptance {
         }
 
         @Test func e05ReplacingNativeTabFrontDuringInsertionKeepsOneEntry() throws {
-            try fixture.command("open", ["kind": "tabs", "key": "tabs", "count": 3])
+            let group = try fixture.command("open", ["kind": "tabs", "key": "tabs", "count": 3])
             try #require(try converges { $0.count == 1 && $0[0].tabs == 3 })
             // Insertion can briefly leave AXWindows pointing at the old front
             // while AXFocusedWindow already identifies its replacement.
-            for index in 0..<20 {
-                try fixture.command("tab", ["key": "tabs\(index % 3)"])
-                try fixture.command("addTab", ["key": "inserted", "reference": "tabs\(index % 3)"])
+            for _ in 0..<20 {
+                let front = try #require(try harness.rows().first?.id)
+                let target = try #require((0..<3).map { "tabs\($0)" }.first { group.windows[$0] != front })
+                try fixture.command("tab", ["key": target])
+                try fixture.command("addTab", ["key": "inserted", "reference": target])
                 try #require(try converges { $0.count == 1 && $0[0].tabs == 4 })
                 try fixture.command("close", ["key": "inserted"])
                 try #require(try converges { $0.count == 1 && $0[0].tabs == 3 })
