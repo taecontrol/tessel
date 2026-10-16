@@ -70,7 +70,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.updateMenu()
         }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem?.button?.image = NSImage(systemSymbolName: "square.split.2x2", accessibilityDescription: "tessel")
         updateMenu()
         if trusted {
             windows = WindowCatalog(workspaces: workspaces, fixtureOnly: LaunchOptions.fixtureOnly)
@@ -101,12 +100,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         let workspace = workspaces?.status ?? WorkspaceStatus()
         if workspace.enabled {
-            statusItem?.button?.image = nil
             statusItem?.button?.title = String(workspace.active)
             menu.addItem(withTitle: "Workspace \(workspace.active)", action: nil, keyEquivalent: "")
         } else {
-            statusItem?.button?.title = ""
-            statusItem?.button?.image = NSImage(systemSymbolName: "square.split.2x2", accessibilityDescription: "tessel")
+            // Reuse the number's text renderer. Images and fallback symbol fonts
+            // keep extra graphics/font caches resident while workspaces are enabled.
+            statusItem?.button?.title = "t"
             menu.addItem(withTitle: "Workspaces disabled: \(workspace.reason)", action: nil, keyEquivalent: "")
         }
         let permission = trusted ? "Accessibility permission granted" : "Accessibility permission needed"

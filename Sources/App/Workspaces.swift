@@ -400,8 +400,12 @@ final class Workspaces {
     }
 
     private static func onScreen() -> Set<UInt32> {
-        Set((CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? [])
-            .compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
+        // Only IDs survive this query. Drain Objective-C bridge temporaries
+        // without waiting for AppKit's next input event on the main thread.
+        autoreleasepool {
+            Set((CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? [])
+                .compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
+        }
     }
 
     private func publish() {
