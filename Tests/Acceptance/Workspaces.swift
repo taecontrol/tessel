@@ -477,18 +477,28 @@ extension Acceptance {
             #expect(try harness.row(a)?.reason.contains("cannot fill") == false)
         }
 
-        @Test(arguments: [false, true])
-        func e20AppKitAndSwiftUIWidthLimitsFloatCenteredOnEveryShow(swiftUI: Bool) throws {
-            let session = swiftUI ? try other(swiftUI: true) : fixture
-            let a: UInt32
-            if swiftUI {
+        enum WidthLimit: CaseIterable, Sendable { case appKit, swiftUI, nativeTabs }
+
+        @Test(arguments: WidthLimit.allCases)
+        func e20AppKitAndSwiftUIWidthLimitsFloatCenteredOnEveryShow(_ kind: WidthLimit) throws {
+            let session = kind == .swiftUI ? try other(swiftUI: true) : fixture
+            var a: UInt32
+            if kind == .swiftUI {
                 a = try #require(try eventualValue(within: 3) { try session.command("ping").windows["window"] })
+            } else if kind == .nativeTabs {
+                a = try #require(try session.command("open", ["kind": "tabs", "key": "limited", "count": 2,
+                                                            "windowKind": "maxWidth"]).windows["limited0"])
             } else { a = try session.open(kind: "maxWidth") }
             try activate(session)
             let immediate = try #require(try harness.probe(resizing: a, session: session).first { $0.id == a })
             #expect(immediate.resizeError == 0)
             #expect(try #require(immediate.acceptedSize).first! < 550)
             try enable()
+            if kind == .nativeTabs {
+                try expectShown(a, floating: true)
+                try expectState(a, "floats", "cannot fill the screen")
+                a = try #require(try session.command("tab", ["key": "limited1"]).windows["limited1"])
+            }
             try expectShown(a, floating: true)
             let row = try expectState(a, "floats", "cannot fill the screen")
             #expect(row.workspace == 1)
