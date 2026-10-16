@@ -253,7 +253,7 @@ private final class AppWindows: @unchecked Sendable {
         do {
             guard let windows = try value(application, kAXWindowsAttribute) as? [AXUIElement] else { return }
             var next: [WindowFacts] = []
-            var handles = elementsByID
+            var handles: [UInt32: AXUIElement] = [:]
             var elements = windows
             // Subscribe even if an animation makes this snapshot incomplete.
             // Otherwise a newly created window can finish minimizing unseen.

@@ -102,11 +102,13 @@ final class Workspaces {
     func update(pid: pid_t, observations: [WindowObservation], focused rawFocus: UInt32?, frontmost: Bool, change: CatalogChange) {
         let incoming = Set(observations.map { $0.record.id })
         var replacements = Set<UInt32>()
+        var hiddenReplacements = Set<UInt32>()
         // A native group's selected CG window changes without a new arrival.
         // Transfer policy state atomically before reconciling the new facts.
         for observation in observations {
             guard let previous = observation.replaces, !incoming.contains(previous),
                   entries[previous]?.pid == pid else { continue }
+            if closeted.contains(previous) { hiddenReplacements.insert(observation.record.id) }
             replace(previous, with: observation.record.id)
             replacements.insert(observation.record.id)
         }
@@ -208,12 +210,12 @@ final class Workspaces {
                 render(focusing: selection, relayout: false, layoutWindows: Set(newWindows))
             }
         } else if needsRender {
-            render(focusing: focused ?? preferred(in: status.active), relayout: false, layoutWindows: replacements)
+            render(focusing: focused ?? preferred(in: status.active), relayout: false, layoutWindows: hiddenReplacements)
         } else if !replacements.isEmpty {
             if frontmost, front == pid, let reportedFocus, replacements.contains(reportedFocus), available(reportedFocus) {
-                followExternalFocus(reportedFocus, layoutWindows: replacements)
-            } else {
-                render(focusing: focused, relayout: false, takeFocus: false, layoutWindows: replacements)
+                followExternalFocus(reportedFocus, layoutWindows: hiddenReplacements)
+            } else if !hiddenReplacements.isEmpty {
+                render(focusing: focused, relayout: false, takeFocus: false)
             }
         } else if changedTiling {
             let stillFront = focused.flatMap { entries[$0]?.pid } == NSWorkspace.shared.frontmostApplication?.processIdentifier
