@@ -8,9 +8,13 @@ to stay fast and light, so it only gains what it actually needs.
 
 ## Status
 
-Nothing to install yet. The [roadmap](https://github.com/taecontrol/tessel/issues)
-lives in the issues, and [docs/features.md](docs/features.md) compares the
-window managers that inspired it and tracks which ideas are planned.
+The current foundation is a menu bar observer and a read-only `tessel` CLI.
+It lists windows with their classification and reason, preserves Accessibility
+across signed rebuilds, and reloads its TOML config on save. The
+[roadmap](https://github.com/taecontrol/tessel/issues) tracks the tiling experiments;
+[docs/features.md](docs/features.md) compares the window managers that inspired them.
+
+Build from source with Xcode 27 using [the development guide](docs/development.md).
 
 ## Requirements
 

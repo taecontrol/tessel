@@ -1,0 +1,14 @@
+{
+  "cpuNanoseconds": 41319498,
+  "residentBytes": 50000000,
+  "calibration": {
+    "source": "https://github.com/taecontrol/tessel/actions/runs/38827876915",
+    "revision": "79dd386d67e7379e323896cae377b329966ebb2c",
+    "runner": "xcode-27",
+    "windows": 20,
+    "secondsPerRun": 60,
+    "cpuNanoseconds": [4121584, 13773166, 2456584, 668875, 1809958, 509750, 339833, 862667, 618000, 762917],
+    "maximumResidentBytes": 47071232,
+    "machTimebase": {"numer": 125, "denom": 3}
+  }
+}

@@ -49,3 +49,9 @@ This repository is public. Never commit:
 Examples and fixtures use generic apps and invented titles. Local signing
 settings live in ignored files. Everything committed is in English, even when
 the conversation is not.
+
+## Verification
+
+For building, launching, or verifying tessel, follow [docs/development.md](docs/development.md).
+Use the signed development bundle and isolated fixture harness described there;
+keep the local signing identity stable so rebuilds preserve Accessibility.
