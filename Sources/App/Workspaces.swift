@@ -112,7 +112,10 @@ final class Workspaces {
         }
         // AX focuses the sheet itself; workspace selection, sends and expected
         // focus all belong to the window that owns it.
-        let reportedFocus = rawFocus.map { id in observations.first(where: { $0.record.id == id })?.parent ?? id }
+        let reportedFocus = rawFocus.map { id in
+            let current = observations.first(where: { $0.replaces == id })?.record.id ?? id
+            return observations.first(where: { $0.record.id == current })?.parent ?? current
+        }
         let previous = entries.filter { $0.value.pid == pid }
         appFocus[pid] = reportedFocus
         let previousFocus = focused
