@@ -100,12 +100,21 @@ final class Workspaces {
     }
 
     func update(pid: pid_t, observations: [WindowObservation], focused rawFocus: UInt32?, frontmost: Bool, change: CatalogChange) {
+        let incoming = Set(observations.map { $0.record.id })
+        var replacements = Set<UInt32>()
+        // A native group's selected CG window changes without a new arrival.
+        // Transfer policy state atomically before reconciling the new facts.
+        for observation in observations {
+            guard let previous = observation.replaces, !incoming.contains(previous),
+                  entries[previous]?.pid == pid else { continue }
+            replace(previous, with: observation.record.id)
+            replacements.insert(observation.record.id)
+        }
         // AX focuses the sheet itself; workspace selection, sends and expected
         // focus all belong to the window that owns it.
         let reportedFocus = rawFocus.map { id in observations.first(where: { $0.record.id == id })?.parent ?? id }
         let previous = entries.filter { $0.value.pid == pid }
         appFocus[pid] = reportedFocus
-        let incoming = Set(observations.map { $0.record.id })
         let previousFocus = focused
         let lostCurrent = previousFocus.map { previous[$0] != nil && !incoming.contains($0) } ?? false
         var needsRender = false
@@ -196,7 +205,13 @@ final class Workspaces {
                 render(focusing: selection, relayout: false, layoutWindows: Set(newWindows))
             }
         } else if needsRender {
-            render(focusing: focused ?? preferred(in: status.active), relayout: false)
+            render(focusing: focused ?? preferred(in: status.active), relayout: false, layoutWindows: replacements)
+        } else if !replacements.isEmpty {
+            if frontmost, front == pid, let reportedFocus, replacements.contains(reportedFocus), available(reportedFocus) {
+                followExternalFocus(reportedFocus, layoutWindows: replacements)
+            } else {
+                render(focusing: focused, relayout: false, takeFocus: false, layoutWindows: replacements)
+            }
         } else if changedTiling {
             let stillFront = focused.flatMap { entries[$0]?.pid } == NSWorkspace.shared.frontmostApplication?.processIdentifier
             render(focusing: focused, relayout: false, takeFocus: stillFront, layoutWindows: newlyTiled)
@@ -267,14 +282,14 @@ final class Workspaces {
         publish()
     }
 
-    private func followExternalFocus(_ id: UInt32) {
+    private func followExternalFocus(_ id: UInt32, layoutWindows: Set<UInt32> = []) {
         guard let workspace = entries[id]?.workspace else { return }
         // macOS can re-activate the already selected app when another process
         // exits. Its visible window has not been shown again or switched.
-        guard id != focused || workspace != status.active || closeted.contains(id) else { return }
+        guard id != focused || workspace != status.active || closeted.contains(id) || !layoutWindows.isEmpty else { return }
         status.active = workspace
         remember(id)
-        render(focusing: id, relayout: false)
+        render(focusing: id, relayout: false, layoutWindows: layoutWindows)
         publish()
     }
 
@@ -297,8 +312,11 @@ final class Workspaces {
         }
         let managed = Set(entries.keys.filter { entries[$0]?.workspace != nil && available($0) })
         let hide = managed.subtracting(show)
-        let newlyHidden = hide.subtracting(closeted)
-        let newlyShown = show.intersection(closeted).union(show.subtracting(Self.onScreen()))
+        let onScreen = Self.onScreen()
+        // A replacement tab can surface a new CG window even when its logical
+        // group was already hidden. Preserve that group's intended hide state.
+        let newlyHidden = hide.subtracting(closeted).union(hide.intersection(onScreen))
+        let newlyShown = show.intersection(closeted).union(show.subtracting(onScreen))
         closet.hide(newlyHidden.filter { entries[$0]?.observation.parent == nil })
         closet.show(newlyShown.filter { entries[$0]?.observation.parent == nil })
         closeted.formUnion(hide)
@@ -351,6 +369,18 @@ final class Workspaces {
             }
         }
         finder.activate()
+    }
+
+    private func replace(_ previous: UInt32, with id: UInt32) {
+        if entries[id] != nil { forget(id) }
+        guard let entry = entries.removeValue(forKey: previous) else { return }
+        entries[id] = entry
+        if let workspace = entry.workspace, let index = arrival[workspace]?.firstIndex(of: previous) {
+            arrival[workspace]?[index] = id
+        }
+        if focused == previous { focused = id }
+        if expectedFocus == previous { expectedFocus = id }
+        if closeted.remove(previous) != nil { closeted.insert(id) }
     }
 
     private func assign(_ id: UInt32, to workspace: Int) {

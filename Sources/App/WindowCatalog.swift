@@ -8,6 +8,7 @@ struct WindowObservation: Sendable {
     var record: WindowRecord
     let frame: CGRect
     let parent: UInt32?
+    var replaces: UInt32? = nil
 }
 
 enum CatalogChange: Sendable, Equatable { case snapshot, activation, focus, restored }
@@ -293,6 +294,10 @@ private final class AppWindows: @unchecked Sendable {
                 next.contains { $0.id != cached.id && !$0.minimized && $0.sharesNativeTabs(with: cached) }
             }.map(\.id))
             next.removeAll { retired.contains($0.id) }
+            let replacements = Dictionary(uniqueKeysWithValues: next.compactMap { window -> (UInt32, UInt32)? in
+                guard let previous = facts.first(where: { retired.contains($0.id) && window.sharesNativeTabs(with: $0) }) else { return nil }
+                return (window.id, previous.id)
+            })
             let oldIDs = Set(facts.map(\.id))
             let newIDs = Set(next.map(\.id))
             facts = next
@@ -300,7 +305,7 @@ private final class AppWindows: @unchecked Sendable {
             constrained.formIntersection(newIDs)
             validations = validations.filter { newIDs.contains($0.key) }
             failedReads = 0
-            publishSnapshot()
+            publishSnapshot(replacing: replacements)
             if !newIDs.subtracting(oldIDs).isEmpty {
                 beginSettling()
             }
@@ -378,7 +383,7 @@ private final class AppWindows: @unchecked Sendable {
         })
     }
 
-    private func publishSnapshot() {
+    private func publishSnapshot(replacing replacements: [UInt32: UInt32] = [:]) {
         var focused: UInt32 = 0
         if let element = try? value(application, kAXFocusedWindowAttribute), CFGetTypeID(element) == AXUIElementGetTypeID() {
             _ = axWindowID(element as! AXUIElement, &focused)
@@ -390,7 +395,7 @@ private final class AppWindows: @unchecked Sendable {
                 record.state = .floats
                 record.reason = "cannot fill the screen"
             }
-            return WindowObservation(record: record, frame: fact.frame, parent: fact.parent)
+            return WindowObservation(record: record, frame: fact.frame, parent: fact.parent, replaces: replacements[fact.id])
         }
         publish(observations, focused == 0 ? nil : focused, frontmost, change)
         change = .snapshot
