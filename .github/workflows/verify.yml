@@ -33,9 +33,6 @@ jobs:
         run: scripts/verify --permission
       - name: Acceptance suite
         run: scripts/verify --${{ matrix.suite }} ${{ inputs.calibrate && matrix.suite == 'resources' && '--calibrate-resources' || '' }}
-      - name: Capture the app's workspace menu
-        if: matrix.suite == 'functional'
-        run: TESSEL_CAPTURE_WORKSPACES=1 scripts/verify captureWorkspaceMenu
       - uses: actions/upload-artifact@v4
         if: matrix.suite == 'resources' && always()
         with:
@@ -47,12 +44,6 @@ jobs:
         with:
           name: switch-calibration
           path: .work/switch-calibration.json
-          if-no-files-found: ignore
-      - uses: actions/upload-artifact@v4
-        if: matrix.suite == 'functional' && always()
-        with:
-          name: workspace-menu-evidence
-          path: .work/captures/E37-*.png
           if-no-files-found: ignore
       - name: Remove ephemeral keychain
         if: always()

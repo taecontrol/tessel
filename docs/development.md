@@ -205,8 +205,8 @@ and menu views into the isolated config directory; the harness copies them to
 `.work/captures`. This requires no Screen Recording permission and captures no
 desktop or other app windows. Review the two workspace numbers and the disabled
 reason in those images. The capture facility is absent from the daily build.
-CI runs this capture separately from the timed functional suite and publishes
-the three images in its `workspace-menu-evidence` artifact for owner review.
+Run this capture only when owner review requires new evidence; it is separate
+from the automated gates. The issue #2 delivery's E37 capture is already accepted.
 
 Switch completion means visible, filled, and focused, measured from posting the
 event. The functional suite records 20 switches in `.work/switch-calibration.json`.
