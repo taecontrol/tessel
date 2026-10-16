@@ -24,8 +24,10 @@ struct AXSubscriptions {
             guard !next.contains(where: { CFEqual($0.element, element) }) else { continue }
             var entry = entries.first(where: { CFEqual($0.element, element) }) ?? Entry(element: element)
             for name in names where !entry.names.contains(name) {
-                _ = add(element, name)
-                entry.names.insert(name)
+                let result = add(element, name)
+                if result == .success || result == .notificationAlreadyRegistered || result == .notificationUnsupported {
+                    entry.names.insert(name)
+                }
             }
             next.append(entry)
         }

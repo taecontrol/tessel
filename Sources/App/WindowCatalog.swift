@@ -86,7 +86,10 @@ private final class AppWindows: @unchecked Sendable {
         kAXUIElementDestroyedNotification, kAXWindowMiniaturizedNotification, kAXWindowDeminiaturizedNotification,
         kAXWindowResizedNotification, kAXLayoutChangedNotification, kAXValueChangedNotification
     ])
-    private var appNotifications: Set<String> = []
+    private var appSubscriptions = AXSubscriptions([
+        kAXWindowCreatedNotification, kAXFocusedWindowChangedNotification,
+        kAXMainWindowChangedNotification, kAXSheetCreatedNotification
+    ])
     private var facts: [WindowFacts] = []
     private var hidden: Bool
     private var stopped = false
@@ -158,6 +161,7 @@ private final class AppWindows: @unchecked Sendable {
             }
             observer = nil
             windowSubscriptions.removeAll()
+            appSubscriptions.removeAll()
         }
     }
 
@@ -174,14 +178,14 @@ private final class AppWindows: @unchecked Sendable {
 
     private func readSnapshot() {
         guard !stopped else { return }
-        registerApplicationNotifications()
+        updateSubscriptions([application], using: &appSubscriptions)
         do {
             guard let windows = try value(application, kAXWindowsAttribute) as? [AXUIElement] else { return }
             var next: [WindowFacts] = []
             var elements = windows
             // Subscribe even if an animation makes this snapshot incomplete.
             // Otherwise a newly created window can finish minimizing unseen.
-            defer { updateWindowNotifications(elements) }
+            defer { updateSubscriptions(elements, using: &windowSubscriptions) }
             for window in windows {
                 do {
                     try inspect(window, into: &next, elements: &elements)
@@ -241,21 +245,10 @@ private final class AppWindows: @unchecked Sendable {
         return count
     }
 
-    private func registerApplicationNotifications() {
-        guard let observer else { return }
-        for name in [kAXWindowCreatedNotification, kAXFocusedWindowChangedNotification, kAXMainWindowChangedNotification, kAXSheetCreatedNotification] {
-            guard !appNotifications.contains(name) else { continue }
-            let result = AXObserverAddNotification(observer, application, name as CFString, Unmanaged.passUnretained(self).toOpaque())
-            if result == .success || result == .notificationAlreadyRegistered || result == .notificationUnsupported {
-                appNotifications.insert(name)
-            }
-        }
-    }
-
-    private func updateWindowNotifications(_ elements: [AXUIElement]) {
+    private func updateSubscriptions(_ elements: [AXUIElement], using subscriptions: inout AXSubscriptions) {
         guard let observer else { return }
         let context = Unmanaged.passUnretained(self).toOpaque()
-        windowSubscriptions.update(elements, add: { element, name in
+        subscriptions.update(elements, add: { element, name in
             AXObserverAddNotification(observer, element, name as CFString, context)
         }, remove: { element, name in
             AXObserverRemoveNotification(observer, element, name as CFString)
