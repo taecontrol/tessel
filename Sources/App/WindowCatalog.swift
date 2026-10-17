@@ -473,7 +473,7 @@ private final class AppWindows: @unchecked Sendable {
             defer { DispatchQueue.main.async { completion() } }
             guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
             do {
-                guard try canPresent(window) else { return }
+                guard try canPresent(window, id: id) else { return }
                 if let area {
                     var origin = area.origin, size = area.size
                     try check(AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, AXValueCreate(.cgPoint, &origin)!))
@@ -482,7 +482,7 @@ private final class AppWindows: @unchecked Sendable {
                     validations[id] = Validation(area: area, token: token, completion: completion)
                     queue.asyncAfter(deadline: .now() + .milliseconds(100)) { [weak self] in self?.validatePresentation(id: id, token: token) }
                 }
-                guard presentationLock.withLock({ presentation == token }), try canPresent(window) else { return }
+                guard presentationLock.withLock({ presentation == token }), try canPresent(window, id: id) else { return }
                 if focus {
                     try check(AXUIElementSetAttributeValue(application, kAXFrontmostAttribute as CFString, kCFBooleanTrue))
                     guard presentationLock.withLock({ presentation == token }) else { return }
@@ -510,7 +510,7 @@ private final class AppWindows: @unchecked Sendable {
         guard let pending = validations[id], token == nil || token == pending.token else { return }
         validations[id] = nil
         guard presentationLock.withLock({ presentation == pending.token }), let window = elementsByID[id],
-              (try? canPresent(window)) == true,
+              (try? canPresent(window, id: id)) == true,
               let cannotFill = try? checkSize(window, area: pending.area) else { return }
         if cannotFill { constrained.insert(id) } else { constrained.remove(id) }
         publishSnapshot()
@@ -519,10 +519,17 @@ private final class AppWindows: @unchecked Sendable {
 
     /// Native hide, minimize, and fullscreen can begin between a snapshot and a
     /// queued write. Never let an old presentation undo the user's operation.
-    private func canPresent(_ window: AXUIElement) throws -> Bool {
+    private func canPresent(_ window: AXUIElement, id: UInt32) throws -> Bool {
         guard !hidden, try value(application, kAXHiddenAttribute) as? Bool != true,
               try value(window, kAXMinimizedAttribute) as? Bool != true,
               try value(window, "AXFullScreen") as? Bool != true else { return false }
+        // Selecting another native tab moves the group's bar to that window.
+        // Raising the former front would select it again over the user's choice.
+        for bar in facts.first(where: { $0.id == id })?.nativeTabGroups ?? [] {
+            AXUIElementSetMessagingTimeout(bar, 0.05)
+            if let front = try? value(bar, kAXWindowAttribute), CFGetTypeID(front) == AXUIElementGetTypeID(),
+               !CFEqual(front, window) { return false }
+        }
         return true
     }
 

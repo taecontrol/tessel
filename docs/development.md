@@ -126,7 +126,10 @@ moved bar identifies the successor, and AXWindows can keep listing a retired
 root afterwards. An unfocused root without a bar keeps the bar identity it last
 showed, so the successor retires it and it stays retired while another listed
 window holds that bar. A focused window without a bar, such as a tab dragged
-out of its group, is an ordinary window.
+out of its group, is an ordinary window. A queued presentation never writes to
+a tab that is no longer its group's front, and a classification change
+reasserts focus only when the app reports another window, so a raise cannot
+select the former tab again over the user's choice.
 Minimized tab entries continue to follow AppKit's published list.
 The catalog carries a native front's replacement relationship into Workspaces,
 which preserves membership, arrival position, and focus history. Its next render

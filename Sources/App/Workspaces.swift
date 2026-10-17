@@ -219,8 +219,13 @@ final class Workspaces {
                 render(focusing: focused, relayout: false, takeFocus: false)
             }
         } else if changedTiling {
-            let stillFront = focused.flatMap { entries[$0]?.pid } == NSWorkspace.shared.frontmostApplication?.processIdentifier
-            render(focusing: focused, relayout: false, takeFocus: stillFront, layoutWindows: newlyTiled)
+            // A classification change does not move focus. Reassert it only when
+            // the app reports another window: a redundant raise of a native tab
+            // can select it again over a tab the user has just chosen.
+            let owner = focused.flatMap { entries[$0]?.pid }
+            let stillFront = owner == NSWorkspace.shared.frontmostApplication?.processIdentifier
+            let focusMoved = owner.flatMap { appFocus[$0] } != focused
+            render(focusing: focused, relayout: false, takeFocus: stillFront && focusMoved, layoutWindows: newlyTiled)
         } else if frontmost, NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
                   let reportedFocus, available(reportedFocus), entries[reportedFocus]?.observation.parent == nil {
             if reportedFocus == expectedFocus { expectedFocus = nil }
