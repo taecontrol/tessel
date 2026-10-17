@@ -435,12 +435,18 @@ extension Acceptance {
             #expect(try harness.status().workspaces?.rail == 1)
             try other.command("restore"); try focus(ids[1]); try order([ids[0],ids[2],d,ids[1]])
         }
-        @Test func e17MinimizeImmediatelyAfterExternalFocusDoesNotCancelTheNativeTransition() throws {
+        @Test(arguments: [true,false])
+        func e17MinimizeImmediatelyAfterExternalFocusDoesNotCancelTheNativeTransition(rails: Bool) throws {
             let ids = try setup([0.22,0.22])
+            if !rails {
+                try flow.enable()
+                try flow.expectShown(ids[0])
+            }
             let other = try flow.other(), b = try open("window",width:0.22,session:other)
             try flow.activate(other); try focus(b)
-            try order([ids[0],b,ids[1]])
-            try focus(ids[1],since:flow.post(37))
+            if rails { try order([ids[0],b,ids[1]]) }
+            else { try #require(try eventually { try harness.row(b)?.workspace == 1 }) }
+            try focus(ids[1],since:flow.post(rails ? 37 : 40))
             try flow.activate(other); try focus(b)
             try other.command("minimize")
             try focus(ids[1])
