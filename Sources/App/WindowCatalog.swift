@@ -633,7 +633,10 @@ private final class AppWindows: @unchecked Sendable {
               try value(window, "AXFullScreen") as? Bool != true else { return false }
         // Selecting another native tab moves the group's bar to that window.
         // Raising the former front would select it again over the user's choice.
-        for bar in facts.first(where: { $0.id == id })?.nativeTabGroups ?? [] {
+        let groups = facts.first(where: { $0.id == id })?.nativeTabGroups ?? []
+        // Its bar can leave the former root before the successor is published.
+        // The retained group still identifies the real selected native window.
+        for bar in groups.isEmpty ? (nativeBars[id] ?? []) : groups {
             AXUIElementSetMessagingTimeout(bar, 0.05)
             if let front = try? value(bar, kAXWindowAttribute), CFGetTypeID(front) == AXUIElementGetTypeID(),
                !CFEqual(front, window) { return false }

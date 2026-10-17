@@ -280,7 +280,11 @@ final class Workspaces {
         } else if needsRender || resizedRail {
             render(focusing: focused ?? preferred(in: status.active), relayout: false, layoutWindows: hiddenReplacements)
         } else if !replacements.isEmpty {
-            if frontmost, front == pid, let reportedFocus, replacements.contains(reportedFocus), available(reportedFocus) {
+            if let focused, replacements.contains(focused), railPresentation?.pending.contains(focused) == true {
+                // The old native root rejected this current presentation. Its
+                // successor owns the unfinished position and focus intent.
+                render(focusing: focused, relayout: false)
+            } else if frontmost, front == pid, let reportedFocus, replacements.contains(reportedFocus), available(reportedFocus) {
                 followExternalFocus(reportedFocus, layoutWindows: hiddenReplacements)
             } else if !hiddenReplacements.isEmpty {
                 render(focusing: focused, relayout: false, takeFocus: false)
