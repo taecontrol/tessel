@@ -509,7 +509,8 @@ extension Acceptance {
             try order([ids[0]],rail:1); try order([ids[1]],rail:2)
         }
 
-        @Test func e11TerminatingTheFocusedAppsOnlyRailSelectsTheRailBelow() throws {
+        @Test(arguments: ["abrupt", "nativeQuit"])
+        func e11TerminatingTheFocusedAppsOnlyRailSelectsTheRailBelow(termination: String) throws {
             let ids = try setup([0.22,0.22])
             let other = try flow.other(), middle = try open("window",width:0.22,session:other)
             try focus(middle); try order([ids[0],middle,ids[1]])
@@ -524,7 +525,16 @@ extension Acceptance {
             try #require(try eventually { try harness.row(dialog)?.workspace == 1 })
             try flow.activate(other); try focus(middle)
             try #require(try eventually { try harness.status().workspaces?.rail == 2 })
-            other.stop()
+            if termination == "nativeQuit" {
+                let native = try flow.observe(focusedOnly: true, expectedPID: other.pid)
+                let active = try other.command("ping").active
+                try #require(native.frontmostFixturePID == other.pid && active == true,
+                             "native quit must start with the fixture actually frontmost")
+                try harness.observer.command("hotkey", ["code": 12, "modifiers": ["cmd"]])
+                try #require(eventually(within: 1) { kill(other.pid, 0) != 0 },
+                             "one genuine Command-Q must terminate the fixture")
+                other.disconnect()
+            } else { other.stop() }
             harness.otherFixtures.removeAll { $0.pid == other.pid }
             try focus(ids[1])
             try order([ids[0]],rail:1); try order([ids[1]],rail:2)
