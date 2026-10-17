@@ -91,13 +91,17 @@ extension Acceptance {
                     "directional overrides must reach the app while rails is off")
             near(try frame(a),before)
         }
-        @Test(arguments: [false,true])
-        func e02EnableAndStartupKeepWidthsArrivalAndFocus(startup: Bool) throws {
+        @Test(arguments: [false,true], [0.4,1.2])
+        func e02EnableAndStartupKeepWidthsArrivalAndFocus(startup: Bool, secondWidth: Double) throws {
             if startup { harness.stopApp() }
-            let a = try open("w0", width: 0.25), b = try open("w1", width: 1.2)
+            let a = try open("w0", width: 0.25), b = try open("w1", width: secondWidth)
             try flow.activate(key: "w0")
             let aw = try frame(a)[2], originalWidth = try frame(b)[2], usable = try flow.observe().area[2]-20
-            try #require(originalWidth > usable,"the native input must exceed the rail area before clamping")
+            if secondWidth > 1 {
+                try #require(originalWidth > usable,"the native input must exceed the rail area before clamping")
+            } else {
+                try #require(aw+originalWidth+10 <= usable,"the native inputs must form a fitting rail")
+            }
             let bw = min(originalWidth,usable)
             if startup { try writeConfig(config); try harness.startApp(fixtureReady: false) }
             else { try enable() }
