@@ -44,7 +44,7 @@ final class WindowCatalog: NSObject {
                 guard let self, let worker = self.apps[pid], worker.generation == generation else { return }
                 // An activation can wait behind a newer keyboard selection in
                 // either queue. Its facts remain valid; its old intent does not.
-                let received: CatalogChange = change == .activation && !worker.ownsPresentation(activation) ? .snapshot : change
+                let received: CatalogChange = change == .activation && !worker.ownsFocusIntent(activation) ? .snapshot : change
                 self.workspaces.update(pid: pid, observations: rows, focused: focused, frontmost: frontmost, change: received)
             }
         }
@@ -82,7 +82,9 @@ final class WindowCatalog: NSObject {
 
     func returnInside(ids: Set<UInt32>, area: CGRect) { apps.values.forEach { $0.returnInside(ids:ids,area:area) } }
 
-    func cancelPresentations() { apps.values.forEach { $0.cancelPresentation() } }
+    func cancelPresentations(invalidatingFocus: Bool = true) {
+        apps.values.forEach { $0.cancelPresentation(invalidatingFocus: invalidatingFocus) }
+    }
 }
 
 private enum AXReadError: Error { case unresponsive, gone, changed }
@@ -154,6 +156,9 @@ private final class AppWindows: @unchecked Sendable {
     private var activationToken: UUID?
     private let presentationLock = NSLock()
     private var presentation = UUID()
+    // Geometry can supersede queued writes without superseding a native
+    // selection whose activation facts have not arrived yet.
+    private var focusIntent = UUID()
     private var railActivationCheck: (token: UUID, work: DispatchWorkItem)?
     private var constrained = Set<UInt32>()
     private struct Validation {
@@ -219,7 +224,7 @@ private final class AppWindows: @unchecked Sendable {
     }
 
     func refresh(hidden: Bool? = nil, settle: Bool = false, change: CatalogChange = .snapshot) {
-        let activation = change == .activation ? presentationLock.withLock { presentation } : nil
+        let activation = change == .activation ? presentationLock.withLock { focusIntent } : nil
         queue.async { [self] in
             guard !stopped else { return }
             if let hidden { self.hiddenHint = hidden }
@@ -487,12 +492,15 @@ private final class AppWindows: @unchecked Sendable {
         return CGRect(origin: point, size: size)
     }
 
-    func cancelPresentation() {
-        presentationLock.withLock { presentation = UUID() }
+    func cancelPresentation(invalidatingFocus: Bool = true) {
+        presentationLock.withLock {
+            presentation = UUID()
+            if invalidatingFocus { focusIntent = UUID() }
+        }
     }
 
-    func ownsPresentation(_ token: UUID?) -> Bool {
-        presentationLock.withLock { token == presentation }
+    func ownsFocusIntent(_ token: UUID?) -> Bool {
+        presentationLock.withLock { token == focusIntent }
     }
 
     func present(id: UInt32, area: CGRect?, focus: Bool, completion: @escaping @MainActor @Sendable () -> Void) {

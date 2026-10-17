@@ -429,7 +429,7 @@ final class Workspaces {
         transition += 1
         let token = transition
         expectedFocus = nil
-        catalog?.cancelPresentations()
+        catalog?.cancelPresentations(invalidatingFocus: takeFocus)
         if let selection, available(selection) { remember(selection) } else { focused = nil }
         let workspace = status.active
         let eligible = entries.keys.filter { entries[$0]?.workspace == workspace && available($0) }
@@ -670,7 +670,7 @@ final class Workspaces {
         transition += 1
         let token = transition
         expectedFocus = nil
-        catalog?.cancelPresentations()
+        catalog?.cancelPresentations(invalidatingFocus: takeFocus)
         if let selection, available(selection) { remember(selection) } else { focused = nil }
         let frames = rails.frames(status.active,area:area)
         let screen = NSScreen.screens.first!
