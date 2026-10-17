@@ -494,7 +494,10 @@ extension Acceptance {
             #expect(try !visible(b))
             try yieldActivation(to: fixture)
             let start = monotonicSeconds()
-            try fixture.command("activate", ["key": "activationOnly"])
+            // With C still visible, AppKit may select it on a plain activation.
+            // Select B explicitly in the failed-only case; cancellation leaves
+            // both windows hidden and preserves the unchanged key-window trace.
+            try fixture.command("activate", ["key": cancelled ? "activationOnly" : "b"])
             try expectShown(b, since: start)
             #expect(try harness.status().workspaces?.active == 3)
         }
