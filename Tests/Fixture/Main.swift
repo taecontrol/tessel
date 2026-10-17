@@ -203,9 +203,10 @@ final class Fixture: NSObject, NSApplicationDelegate {
             // bar has left the former root. Publishing announces the real focus.
             guard let application = NSApp as? FixtureApplication else { return ["error": "focusedWindow requires the fixture application"] }
             application.withholdsFocusedWindow = command["published"] as? Bool != true
-            if !application.withholdsFocusedWindow, let window = NSApp.keyWindow {
-                NSAccessibility.post(element: window, notification: .focusedWindowChanged)
-                NSAccessibility.post(element: window, notification: .mainWindowChanged)
+            if !application.withholdsFocusedWindow {
+                // Inactive apps can expose real AX focus without a key window.
+                NSAccessibility.post(element: application, notification: .focusedWindowChanged)
+                NSAccessibility.post(element: application, notification: .mainWindowChanged)
             }
         case "addTab":
             if let reference = windows[command["reference"] as? String ?? "tabs0"] {
