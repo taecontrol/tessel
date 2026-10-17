@@ -36,7 +36,7 @@ extension Acceptance {
                 let rows = try harness.rows()
                 return ids.enumerated().allSatisfy { i,id in rows.contains { $0.id == id && $0.workspace == workspace && $0.rail == rail && $0.slot == i + 1 } }
             }
-            if !ready { print("Order failure", ids,try harness.rows()) }
+            if !ready { print("Order failure", ids,try harness.status().workspaces as Any,try harness.rows()) }
             try #require(ready, "CLI rail and slot membership must match the accepted order",sourceLocation:sourceLocation)
         }
         func near(_ actual: [Double], _ expected: [Double], sourceLocation: SourceLocation = #_sourceLocation) {
@@ -143,6 +143,21 @@ extension Acceptance {
             try focus(ids[2], since: flow.post(4))
             for (i,id) in ids.enumerated() { near(try frame(id),before[i]) }
         }
+        @Test(arguments: ["default","alias","external"])
+        func e04e20VisibleFocusPreservesManuallyMovedFrames(command: String) throws {
+            let ids = try setup([0.25,0.25])
+            if command == "alias" { try enable("[keys]\nalt-a = 'focus next'\n") }
+            try focus(ids[1],since:flow.post(37)); try focus(ids[0],since:flow.post(4))
+            var moved = try frame(ids[0]); moved[0] += 23; moved[1] += 17
+            try fixture.command("move",["key":"w0","frame":moved])
+            if command == "external" { try fixture.command("tab",["key":"w1"]); try focus(ids[1]) }
+            else { try focus(ids[1],since:flow.post(command == "alias" ? 0 : 37)) }
+            // Include the bounded external-focus decision, not just its first
+            // AX focus sample, in this negative assertion.
+            sleep(seconds:0.2)
+            near(try frame(ids[0]),moved)
+        }
+
         @Test func e05e06e27RingScrollPeeksHidesWrapsAndNeverResizes() throws {
             let ids = try setup([0.45,0.45,0.45,0.45,0.45])
             let sizes = try ids.map { Array(try frame($0)[2...3]) }
@@ -233,6 +248,27 @@ extension Acceptance {
             try fixture.command("close",["key":"w0"]); try focus(ids[1])
             let start = monotonicSeconds(); try fixture.command("close",["key":"w1"]); try flow.expectEmpty(since: start)
         }
+        @Test(arguments: [2,3,5,8])
+        func e13CoalescedClosuresSelectASurvivingLeftNeighbor(closedCount: Int) throws {
+            let ids = try setup(Array(repeating:min(0.22,0.8/Double(closedCount+1)),count:closedCount+1))
+            for id in ids.dropFirst().dropLast() { try focus(id,since:flow.post(37)) }
+            kill(harness.appPID,SIGSTOP)
+            do {
+                defer { kill(harness.appPID,SIGCONT) }
+                let indices = Array(0..<closedCount)
+                for index in closedCount.isMultiple(of:2) ? indices : indices.reversed() {
+                    try fixture.command("close",["key":"w\(index)"])
+                }
+            }
+            try focus(ids.last!); try order([ids.last!])
+            sleep(seconds:0.2)
+            try focus(ids.last!)
+            // AppKit can focus the survivor even if tessel forgot its own
+            // selection. Sending proves that the logical focus also survived.
+            try flow.key(2,send:true)
+            try order([ids.last!],workspace:2)
+        }
+
         @Test func e14e15SendingFollowsInsertsAfterMemoryAndWorkspaceRestoresRail() throws {
             let ids = try setup()
             try focus(ids[0],since: flow.key(2,send: true)); try order([ids[0]],workspace: 2)
@@ -321,6 +357,9 @@ extension Acceptance {
             let ids = try setup([0.22,0.22])
             let other = try flow.other(), middle = try open("window",width:0.22,session:other)
             try flow.activate(other); try focus(middle)
+            // AppKit can focus the newly opened window before the catalog has
+            // inserted it. Establish its rail membership before moving focus.
+            try order([ids[0],middle,ids[1]])
             try focus(middle,since:flow.post(38,shift:true)); try order([middle],rail:2)
             try focus(ids[0],since:flow.post(40))
             try focus(ids[1],since:flow.post(37))
@@ -352,6 +391,9 @@ extension Acceptance {
             let d = try fixture.open(kind:"dialog",key:"dialog"), before = try frame(d)
             try focus(d); near(try frame(d),before)
             #expect(try harness.row(d)?.rail == nil && harness.row(d)?.workspace == 1)
+            let payload = try JSONSerialization.jsonObject(with:harness.invoke("windows","--json").outputData) as? [[String:Any]]
+            let dialog = try #require(payload?.first { ($0["id"] as? UInt32) == d })
+            #expect(dialog["rail"] is NSNull && dialog["slot"] is NSNull)
             try focus(d,since: flow.key(2,send:true)); near(try frame(d),before)
             try focus(ids[0],since: flow.key(1))
             let sheet = try fixture.open(kind:"sheet",key:"sheet")
@@ -364,6 +406,51 @@ extension Acceptance {
             #expect(try eventually(within:1) { try harness.row(parent)?.state == "fullscreen" && harness.row(parent)?.rail == nil && harness.row(parent)?.workspace == nil })
             try fixture.command("fullscreen",["key":"sheetParent"])
         }
+        @Test func e19ReturningToAMixedWorkspaceRestoresTheRememberedDialog() throws {
+            let ids = try setup([0.25])
+            let dialog = try fixture.open(kind:"dialog",key:"dialog")
+            try focus(dialog)
+            let original = try frame(dialog)
+            let b = try open("new",width:0.25); try focus(b)
+            try focus(b,since:flow.key(2,send:true))
+            try focus(dialog,since:flow.key(1))
+            #expect(try flow.visible(ids[0]))
+            near(try frame(dialog),original)
+        }
+
+        @Test func e19NativeTabReplacementRetainsRailSlotSizeAndRememberedFocus() throws {
+            let ids = try setup([0.25,0.25])
+            let group = try fixture.command("open",["kind":"tabs","key":"tabs","count":2])
+            let first = try #require(group.windows["tabs0"]), next = try #require(group.windows["tabs1"])
+            try focus(first); try order([ids[0],first,ids[1]])
+            let before = try frame(first)
+            try focus(first,since:flow.post(38,shift:true)); try order([first],rail:2)
+            try focus(ids[0],since:flow.post(40))
+            try fixture.command("tab",["key":"tabs1"])
+            try focus(next); try order([next],rail:2)
+            #expect(try eventually { try harness.row(first) == nil })
+            #expect(abs(try frame(next)[2]-before[2])<=1)
+            try focus(ids[0],since:flow.post(40)); try focus(ids[1],since:flow.post(37))
+            try focus(next,since:flow.post(38))
+        }
+
+        @Test func e03FailedRailHideReturnsWindowsInsideAndReleasesHotkeys() throws {
+            harness.stopApp()
+            defer { harness.stopApp(); try? writeConfig("") }
+            let ids = try (0..<3).map { try open("w\($0)",width:0.6) }
+            try flow.activate(key:"w0")
+            try writeConfig(config)
+            try harness.startApp(fixtureReady:false,arguments:["--test-failed-hide"])
+            try #require(try eventually(within:1) {
+                let s = try harness.status().workspaces, o = try flow.observe()
+                return s?.enabled == false && s?.reason == "SkyLight could not hide a window"
+                    && ids.allSatisfy { id in o.windows.contains { $0.id == id && $0.visible && $0.frame[0]>=o.area[0]-1 && $0.frame[0]+$0.frame[2]<=o.area[0]+o.area[2]+1 } }
+            })
+            let count = try fixture.command("ping").keyCount ?? 0
+            try flow.post(37)
+            #expect(try eventually { try fixture.command("ping").keyCount == count+1 })
+        }
+
         @Test func e20ManualMoveWaitsForRenderAndE21ResizeAdoptsOnlyNewWidth() throws {
             let ids = try setup([0.25,0.25,0.25]), originals = try ids.map(frame)
             var moved = originals[1]; moved[0] += 23; moved[1] += 17
@@ -406,6 +493,9 @@ extension Acceptance {
             try focus(ids[1],since:flow.post(0)); try focus(ids[0],since:flow.post(11)); try focus(ids[0],since:flow.post(8))
             try writeConfig(config+"[keys]\nalt-a = 'move sideways'\n")
             #expect(try eventually { try harness.status().config.error?.line == 4 })
+            let message = try #require(try harness.status().config.error).message
+            #expect(message.contains("focus next|previous|left|right|up|down"))
+            #expect(message.contains("move left|right|up|down"))
             #expect(try harness.status().workspaces?.keys["alt-c"] == "move down")
         }
         @Test func e24e25CLIHasRailSlotLayoutAndAXLabelTracksElevator() throws {

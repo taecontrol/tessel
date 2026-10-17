@@ -29,6 +29,7 @@ struct Status: Decodable {
     }
     struct ConfigError: Decodable {
         let line: Int
+        let message: String
     }
     let permission: String
     let config: Config
