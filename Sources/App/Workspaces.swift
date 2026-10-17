@@ -413,7 +413,9 @@ final class Workspaces {
            owner != entries[id]?.pid, kill(owner,0) == -1 && errno == ESRCH { return }
         status.active = workspace
         remember(id)
-        render(focusing: id, relayout: false, layoutWindows: layoutWindows)
+        // The native operation already selected this window. A queued raise
+        // can otherwise interrupt a minimize that begins after this snapshot.
+        render(focusing: id, relayout: false, takeFocus: false, layoutWindows: layoutWindows)
         publish()
     }
 
