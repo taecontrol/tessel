@@ -740,6 +740,7 @@ extension Acceptance {
             let d = try fixture.open(kind: "dialog", key: "dialog")
             try expectShown(d, floating: true)
             let frame = try #require(try window(d)).frame
+            try #require(try eventually { try harness.row(d) != nil }, "native dialog focus can precede its catalog arrival")
             #expect(try harness.row(d)?.workspace == 2)
             try key(1)
             try #require(try eventually(within: budget) { try !visible(d) })
