@@ -418,10 +418,12 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 if knownID == nil { _ = fixtureWindowID(window, &id) }
                 guard id != 0 else { return }
                 // Read the same facts in one AX message during timed switches.
+                let includeChildren = !focusedOnly || focusedSheet
+                let attributes = [kAXPositionAttribute, kAXSizeAttribute, kAXMainAttribute, "AXFullScreen"]
+                    + (includeChildren ? [kAXChildrenAttribute] : [])
                 var values: CFArray?
-                guard AXUIElementCopyMultipleAttributeValues(window,
-                    [kAXPositionAttribute, kAXSizeAttribute, kAXMainAttribute, "AXFullScreen", kAXChildrenAttribute] as CFArray,
-                    [], &values) == .success, let fields = values as? [AnyObject], fields.count == 5 else { return }
+                guard AXUIElementCopyMultipleAttributeValues(window, attributes as CFArray, [], &values) == .success,
+                      let fields = values as? [AnyObject], fields.count == attributes.count else { return }
                 var position = CGPoint.zero, size = CGSize.zero
                 if CFGetTypeID(fields[0]) == AXValueGetTypeID() {
                     _ = AXValueGetValue(fields[0] as! AXValue, .cgPoint, &position)
@@ -436,7 +438,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
                                "parent": parent.map { $0 as Any } ?? NSNull(),
                                "order": order[id] ?? Int.max,
                                "nativeFullscreen": fields[3] as? Bool ?? false])
-                if !focusedOnly || focusedSheet {
+                if includeChildren {
                     for child in fields[4] as? [AXUIElement] ?? []
                         where FixtureProbe.value(child, kAXRoleAttribute) as? String == kAXSheetRole { describe(child, parent: id) }
                 }
@@ -488,7 +490,8 @@ final class Fixture: NSObject, NSApplicationDelegate {
             }
         }
         let frontmostFixture = front.map { pids.contains($0) } ?? false
-        let workspaceFront = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        // Cached activation metadata serves setup, outside the switch deadline.
+        let workspaceFront = focusedOnly ? nil : NSWorkspace.shared.frontmostApplication?.processIdentifier
         return ["windows": result, "visibleIDs": visibleIDs, "frontmostFixture": frontmostFixture,
                 "frontmostFixturePID": frontmostFixture ? front! : 0,
                 "activeFixturePID": workspaceFront.flatMap { pids.contains($0) ? $0 : nil } ?? 0,

@@ -197,6 +197,8 @@ supplies fixture visibility independently, including the empty-workspace check.
 The focused window's frame and main state are read together in one AX request;
 ordinary focused-only observations omit unrelated child controls. Sheet and full
 observations retain their parent and child relationships.
+Cached LaunchServices activation metadata is read only by setup observations;
+timed checks retain the live system-wide AX focus check.
 The active number is observed through the signed app's status-item AX label
 inside the switch deadline; CLI fields are checked afterward so process startup
 does not consume that deadline. The blocked-initial-AX regression deliberately
