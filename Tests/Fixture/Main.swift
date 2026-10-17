@@ -16,6 +16,15 @@ final class NewTabWindow: NSWindow {
 }
 
 @MainActor
+final class FixtureApplication: NSApplication {
+    var windowList: [NSWindow]?
+
+    override func accessibilityWindows() -> [Any]? {
+        windowList ?? super.accessibilityWindows()
+    }
+}
+
+@MainActor
 final class Fixture: NSObject, NSApplicationDelegate {
     static weak var current: Fixture?
     var windows: [String: NSWindow] = [:]
@@ -136,6 +145,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
             if CommandLine.arguments.contains("--swiftui"), windows["window"] == nil,
                let window = NSApp.windows.first(where: { $0.styleMask.contains(.titled) }) { windows["window"] = window }
         case "reset":
+            (NSApp as? FixtureApplication)?.windowList = nil
             NSApp.unhide(nil)
             for window in windows.values where window.sheetParent != nil { window.sheetParent?.endSheet(window) }
             for window in windows.values { window.close() }
@@ -168,6 +178,14 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 if background { window.orderBack(nil) }
             }
         case "tab": windows[key]?.makeKeyAndOrderFront(nil)
+        case "windowList":
+            // Model AppKit's lagging AXWindows enumeration with real windows.
+            // AXFocusedWindow and the native tab bar still come from AppKit.
+            guard let application = NSApp as? FixtureApplication,
+                  let keys = command["keys"] as? [String], keys.allSatisfy({ windows[$0] != nil }) else {
+                return ["error": "windowList requires existing fixture windows"]
+            }
+            application.windowList = keys.compactMap { windows[$0] }
         case "addTab":
             if let reference = windows[command["reference"] as? String ?? "tabs0"] {
                 let window = makeWindow(key: key, kind: "standard")
@@ -656,7 +674,7 @@ struct Main {
             FixtureProbe.run(pid: pid, resizeID: args.count > 3 ? Int(args[3]) : nil)
             return
         }
-        let app = NSApplication.shared
+        let app = FixtureApplication.shared
         let delegate = Fixture()
         app.delegate = delegate
         withExtendedLifetime(delegate) { app.run() }

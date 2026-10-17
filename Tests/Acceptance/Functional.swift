@@ -165,6 +165,20 @@ extension Acceptance {
             }
         }
 
+        @Test func e05FocusedNativeTabReplacementSurvivesLaggingWindowList() throws {
+            let group = try fixture.command("open", ["kind": "tabs", "key": "tabs", "count": 3])
+            let first = try #require(group.windows["tabs0"])
+            let selected = try #require(group.windows["tabs1"])
+            try #require(try converges { $0.count == 1 && $0[0].id == first && $0[0].tabs == 3 })
+            // AXWindows can retain the old front while AXFocusedWindow exposes
+            // the uncached replacement. Keep that ordering stable instead of
+            // hoping a normal tab transition lands between two AX requests.
+            try fixture.command("windowList", ["keys": ["tabs0"]])
+            let changed = try fixture.command("tab", ["key": "tabs1"])
+            #expect(changed.nativeTabs["tabs1"] == 3)
+            try #require(try converges { $0.count == 1 && $0[0].id == selected && $0[0].tabs == 3 })
+        }
+
         @Test(arguments: ["emptyContentTabs", "contentTabs", "segmentedTabs"])
         func e05ContentTabsDoNotCountAsNativeWindowTabs(kind: String) throws {
             let reply = try fixture.command("open", ["kind": kind, "key": "content"])
