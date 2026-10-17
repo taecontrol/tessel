@@ -369,6 +369,12 @@ extension Acceptance {
             try expectShown(backgroundReplacement, since: key(1))
 
             try expectShown(backgroundReplacement, since: key(3, send: true))
+            // A delayed activation from the preceding handoff must not undo a
+            // newer keyboard selection, even when sends finish without moving.
+            for _ in 0..<4 {
+                try expectShown(c, since: key(1))
+                try expectShown(backgroundReplacement, since: key(3))
+            }
             try expectShown(c, since: key(1))
             #expect(try !visible(backgroundReplacement))
 
