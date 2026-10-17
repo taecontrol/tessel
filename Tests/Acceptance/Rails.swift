@@ -158,6 +158,21 @@ extension Acceptance {
             near(try frame(ids[0]),moved)
         }
 
+        @Test func e04e18HeightConstrainedFocusPreservesManuallyMovedFrames() throws {
+            let ids = try setup([0.25,0.25])
+            let area = try flow.observe().area
+            try fixture.command("limitHeight",["key":"w0","height":area[3]/2])
+            try enable("[gaps]\nouter = 11\n")
+            try #require(try eventually {
+                try frame(ids[0])[3] <= area[3]/2+1 && harness.row(ids[0])?.reason.contains("height") == true
+            })
+            var moved = try frame(ids[0]); moved[0] += 23; moved[1] += 17
+            try fixture.command("move",["key":"w0","frame":moved])
+            try focus(ids[1],since:flow.post(37))
+            sleep(seconds:0.2)
+            near(try frame(ids[0]),moved)
+        }
+
         @Test func e05e06e27RingScrollPeeksHidesWrapsAndNeverResizes() throws {
             let ids = try setup([0.45,0.45,0.45,0.45,0.45])
             let sizes = try ids.map { Array(try frame($0)[2...3]) }
@@ -371,6 +386,26 @@ extension Acceptance {
             try #require(try eventually { try harness.status().workspaces?.rail == 2 })
             try other.command(operation)
             try focus(operation == "close" ? ids[1] : ids[0])
+            try order([ids[0]],rail:1); try order([ids[1]],rail:2)
+        }
+
+        @Test func e11TerminatingTheFocusedAppsOnlyRailSelectsTheRailBelow() throws {
+            let ids = try setup([0.22,0.22])
+            let other = try flow.other(), middle = try open("window",width:0.22,session:other)
+            try focus(middle); try order([ids[0],middle,ids[1]])
+            try focus(middle,since:flow.post(38,shift:true)); try order([middle],rail:2)
+            try focus(ids[0],since:flow.post(40))
+            try focus(ids[1],since:flow.post(37))
+            try focus(ids[1],since:flow.post(38,shift:true)); try order([middle,ids[1]],rail:2)
+            try focus(ids[1],since:flow.post(38,shift:true)); try order([ids[1]],rail:3)
+            try focus(middle,since:flow.post(40))
+            try focus(ids[0],since:flow.post(40))
+            let dialog = try fixture.open(kind:"dialog",key:"dialog"); try focus(dialog)
+            try flow.activate(other); try focus(middle)
+            try #require(try eventually { try harness.status().workspaces?.rail == 2 })
+            other.stop()
+            harness.otherFixtures.removeAll { $0.pid == other.pid }
+            try focus(ids[1])
             try order([ids[0]],rail:1); try order([ids[1]],rail:2)
         }
 

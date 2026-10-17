@@ -320,11 +320,17 @@ final class Workspaces {
     func remove(pid: pid_t) {
         let removed = entries.filter { $0.value.pid == pid }
         let affectsVisible = removed.contains { $0.value.workspace == status.active && !closeted.contains($0.key) }
+        let lostRailFocus = railEnabled && focused.map { removed[$0] != nil && rails.location($0) != nil } == true
         for id in removed.keys { forget(id) }
         knownApplications.remove(pid)
         appFocus.removeValue(forKey: pid)
         store.update(pid: pid, windows: nil)
-        if status.enabled && affectsVisible { render(focusing: preferred(in: status.active), relayout: false) }
+        if status.enabled && affectsVisible {
+            // App termination closes its tiles just like a destruction snapshot;
+            // a floating MRU must not override the surviving rail's selection.
+            let selection = lostRailFocus ? rails.remembered(status.active) ?? mostRecent(in: status.active) : preferred(in: status.active)
+            render(focusing: selection, relayout: false)
+        }
         publish()
     }
 
@@ -689,6 +695,12 @@ final class Workspaces {
                     self.railSizing.remove(id)
                     let previous = self.rails.size(id)
                     self.rails.setSize(id,accepted.size)
+                    // The accepted size completes this same layout. Retain its
+                    // logical origin so a later focus-only render sees no move.
+                    if var frame = self.railPresentation?.frames[id] {
+                        frame.size = accepted.size
+                        self.railPresentation?.frames[id] = frame
+                    }
                     if let previous, abs(previous.width-accepted.width)>1 {
                         self.render(focusing:self.focused,relayout:false,takeFocus:false)
                     }
