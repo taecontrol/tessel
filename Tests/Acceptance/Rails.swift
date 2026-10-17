@@ -46,7 +46,7 @@ extension Acceptance {
             var ids: [UInt32] = []
             for (i,w) in widths.enumerated() { ids.append(try open("w\(i)", width: w)) }
             try flow.activate(key: "w0")
-            try #require(try converges { $0.count == widths.count })
+            try #require(try converges { Set($0.map(\.id)) == Set(ids) })
             try enable()
             try focus(ids[0])
             try order(ids)
@@ -544,7 +544,9 @@ extension Acceptance {
             #expect(abs(try frame(ids[0])[1] - (area[1]+11)) <= 1)
             #expect(try eventually { try harness.row(ids[0])?.reason.contains("height") == true && harness.row(ids[0])?.rail == 1 })
             let b = try fixture.open(kind: "maxWidth",key: "limited")
-            try focus(b); #expect(try frame(b)[2] <= 481); #expect(try harness.row(b)?.rail == 1)
+            try focus(b); #expect(try frame(b)[2] <= 481)
+            try #require(try eventually { try harness.row(b) != nil }, "native focus can precede catalog arrival")
+            #expect(try harness.row(b)?.rail == 1)
         }
         @Test func e19DialogsSheetsAndFullscreenKeepWorkspaceRules() throws {
             let ids = try setup([0.3])
