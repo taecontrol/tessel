@@ -446,6 +446,59 @@ extension Acceptance {
             #expect(try harness.status().workspaces?.active == 3)
         }
 
+        @Test(arguments: [false, true])
+        func e16ActivationAfterFailedOrCancelledPresentationRescuesTheActualFocus(cancelled: Bool) throws {
+            let b = try fixture.open(key: "b"), c = try fixture.open(key: "c")
+            let empty = try other()
+            try activate(key: "c")
+            try enable()
+            try expectShown(c)
+            try expectShown(c, since: key(2, send: true))
+            try expectShown(b, since: key(1))
+            try expectShown(b, since: key(3, send: true))
+
+            // Queue real hotkeys while their safety check can still read a
+            // responsive, visible fixture. Suspend it only after posting: AX
+            // presentation must fail without ever changing its focused window.
+            kill(harness.appPID, SIGSTOP)
+            do {
+                defer { kill(harness.appPID, SIGCONT) }
+                try key(2)
+                if cancelled { try key(1) }
+                kill(fixture.pid, SIGSTOP)
+            }
+            defer { kill(fixture.pid, SIGCONT) }
+            let destination = cancelled ? 1 : 2
+            try #require(try eventually { try harness.status().workspaces?.active == destination })
+            // Exceed the bounded AX timeout before resuming the app. In the
+            // cancellation case the second render has already ended its intent.
+            sleep(seconds: 0.4)
+            // Establish a windowless foreground app without relying on AppKit
+            // activating a never-keyed windowless process. While tessel is
+            // paused, activate Y with a temporary fixture window, then close it.
+            // No catalog snapshot can observe that setup window.
+            kill(harness.appPID, SIGSTOP)
+            do {
+                defer { kill(harness.appPID, SIGCONT) }
+                kill(fixture.pid, SIGCONT)
+                _ = try empty.open()
+                try activate(empty)
+                try empty.command("close")
+                let foreground = try empty.command("ping")
+                try #require(foreground.active == true && foreground.windows.isEmpty)
+            }
+            // Let read-only recovery snapshots settle with the windowless app
+            // frontmost; none is an acknowledgement of the requested C focus.
+            sleep(seconds: 0.5)
+            #expect(try harness.status().workspaces?.active == destination)
+            #expect(try !visible(b))
+            try yieldActivation(to: fixture)
+            let start = monotonicSeconds()
+            try fixture.command("activate", ["key": "activationOnly"])
+            try expectShown(b, since: start)
+            #expect(try harness.status().workspaces?.active == 3)
+        }
+
         @Test func e16ActivatingAnInvisibleFocusedSheetRescuesItsParentsWorkspace() throws {
             let a = try fixture.open(key: "a")
             try activate(key: "a")
