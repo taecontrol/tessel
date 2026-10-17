@@ -915,6 +915,65 @@ extension Acceptance {
             try focus(ids[0],since:flow.post(40),within:0.2)
         }
 
+        @Test(arguments: [8, 20])
+        func e07e16QueuedActivationCannotUndoANewerRailSelection(count: Int) throws {
+            let ids = try setup([0.25] + Array(repeating: 0.08, count: count - 1))
+            let destination = try flow.other()
+            let m = try open("window", width: 0.25, session: destination)
+            try focus(m); try order([ids[0], m] + Array(ids.dropFirst()))
+            try focus(m, since: flow.post(38, shift: true)); try order([m], rail: 2)
+            let third = try flow.other()
+            let c = try open("window", width: 0.25, session: third)
+            try focus(c)
+            try #require(try eventually { try harness.row(c)?.workspace == 1 })
+            try focus(c, since: flow.key(3, send: true)); try order([c], workspace: 3)
+            try focus(m, since: flow.key(1))
+            try focus(ids[0], since: flow.post(40)); try order(ids)
+
+            var sutStopped = false, sourceStopped = false, destinationStopped = false
+            defer {
+                if sourceStopped { kill(fixture.pid, SIGCONT) }
+                if destinationStopped { kill(destination.pid, SIGCONT) }
+                if sutStopped { kill(harness.appPID, SIGCONT) }
+            }
+            var displaced = try frame(ids[0]); displaced[0] += 1
+            try fixture.command("move", ["key": "w0", "frame": displaced])
+            // A real subscribed move schedules the source's AX read. Suspend the
+            // manager with that read due, then create actual native activation.
+            sleep(seconds: 0.012)
+            kill(harness.appPID, SIGSTOP); sutStopped = true
+            kill(destination.pid, SIGSTOP); destinationStopped = true
+            try flow.activate(third)
+            try flow.activate(key: "w0")
+            kill(fixture.pid, SIGSTOP); sourceStopped = true
+            kill(harness.appPID, SIGCONT); sutStopped = false
+            // Let the main queue receive activation while the source AX queue is
+            // waiting. The source must be responsive again before posting real keys.
+            sleep(seconds: 0.02)
+            kill(fixture.pid, SIGCONT); sourceStopped = false
+            try flow.post(38)
+            try #require(try eventually {
+                let s = try harness.status().workspaces
+                return s?.active == 1 && s?.rail == 2
+            }, "the real Down must establish its destination layout")
+            sleep(seconds: 0.1)
+            #expect(try harness.status().workspaces?.rail == 2,
+                    "an activation received before Down cannot replace the newer layout")
+            try #require(try eventually {
+                let o = try flow.observe(focusedOnly: true)
+                return o.visibleIDs.contains(m) && ids.allSatisfy { !o.visibleIDs.contains($0) }
+            }, "the destination remains visible while its application is blocked")
+
+            kill(destination.pid, SIGCONT); destinationStopped = false
+            // This keeper concerns stale selection, not completion of AX requests
+            // while the target is stopped. The ordinary keeper enforces 200 ms.
+            try flow.activate(destination); try focus(m)
+            try flow.activate(third); try focus(c)
+            try #require(try eventually { try harness.status().workspaces?.active == 3 })
+            sleep(seconds: 0.1); try focus(c)
+            #expect(try harness.status().workspaces?.active == 3)
+        }
+
         @Test func e28RailLatencyCalibrationMeasuresTwentyScrollsAndElevatorTrips() throws {
             let ids = try setup([0.45,0.45,0.45,0.45,0.45])
             try focus(ids[0],since:flow.post(38,shift:true)); try order([ids[0]],rail:2)
