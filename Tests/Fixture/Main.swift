@@ -223,7 +223,11 @@ final class Fixture: NSObject, NSApplicationDelegate {
         case "restore": windows[key]?.deminiaturize(nil)
         case "hide": NSApp.hide(nil)
         case "show": NSApp.unhide(nil)
-        case "yieldActivation": NSApp.yieldActivation(toApplicationWithBundleIdentifier: "com.taecontrol.tessel.fixture")
+        case "yieldActivation":
+            // Every fixture shares one bundle ID; yield to the intended process.
+            guard let pid = command["pid"] as? Int32, FixtureProbe.isFixture(pid),
+                  let target = NSRunningApplication(processIdentifier:pid) else { return ["error":"activation yields accept fixture processes only"] }
+            NSApp.yieldActivation(to:target)
         case "fixtureReady":
             var reply = snapshot
             if let pid = command["pid"] as? Int32, FixtureProbe.isFixture(pid) {
@@ -231,7 +235,13 @@ final class Fixture: NSObject, NSApplicationDelegate {
             } else { reply["ready"] = false }
             return reply
         case "activate":
-            NSApp.activate(ignoringOtherApps: true)
+            if let sourcePID = FixtureProbe.frontmostPID(), FixtureProbe.isFixture(sourcePID),
+               let source = NSRunningApplication(processIdentifier:sourcePID) {
+                _ = NSRunningApplication.current.activate(from:source,options:[])
+            } else {
+                // Initial activation has no fixture handoff source.
+                NSApp.activate(ignoringOtherApps:true)
+            }
             if let window = windows[key] { window.makeKeyAndOrderFront(nil) }
         case "activateFixture":
             guard let pid = command["pid"] as? Int32,

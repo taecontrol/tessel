@@ -39,10 +39,13 @@ final class WindowCatalog: NSObject {
         if let existing = apps[pid] { existing.refresh(hidden: app.isHidden); return }
         let generation = UUID()
         let worker = AppWindows(pid: pid, name: app.localizedName ?? "Application", bundleId: app.bundleIdentifier ?? "",
-                                hidden: app.isHidden, generation: generation) { [weak self] rows, focused, frontmost, change in
+                                hidden: app.isHidden, generation: generation) { [weak self] rows, focused, frontmost, change, activation in
             DispatchQueue.main.async {
-                guard let self, self.apps[pid]?.generation == generation else { return }
-                self.workspaces.update(pid: pid, observations: rows, focused: focused, frontmost: frontmost, change: change)
+                guard let self, let worker = self.apps[pid], worker.generation == generation else { return }
+                // An activation can wait behind a newer keyboard selection in
+                // either queue. Its facts remain valid; its old intent does not.
+                let received: CatalogChange = change == .activation && !worker.ownsPresentation(activation) ? .snapshot : change
+                self.workspaces.update(pid: pid, observations: rows, focused: focused, frontmost: frontmost, change: received)
             }
         }
         apps[pid] = worker
@@ -124,7 +127,7 @@ private final class AppWindows: @unchecked Sendable {
     private let name: String
     private let bundleId: String
     private let queue: DispatchQueue
-    private let publish: @Sendable ([WindowObservation], UInt32?, Bool, CatalogChange) -> Void
+    private let publish: @Sendable ([WindowObservation], UInt32?, Bool, CatalogChange, UUID?) -> Void
     // All mutable state below belongs to queue, including AX handles.
     private let application: AXUIElement
     private var observer: AXObserver?
@@ -148,8 +151,10 @@ private final class AppWindows: @unchecked Sendable {
     private var failedReads = 0
     private var elementsByID: [UInt32: AXUIElement] = [:]
     private var change = CatalogChange.snapshot
+    private var activationToken: UUID?
     private let presentationLock = NSLock()
     private var presentation = UUID()
+    private var railActivationCheck: (token: UUID, work: DispatchWorkItem)?
     private var constrained = Set<UInt32>()
     private struct Validation {
         let area: CGRect
@@ -159,7 +164,7 @@ private final class AppWindows: @unchecked Sendable {
     private var validations: [UInt32: Validation] = [:]
 
     init(pid: pid_t, name: String, bundleId: String, hidden: Bool, generation: UUID,
-         publish: @escaping @Sendable ([WindowObservation], UInt32?, Bool, CatalogChange) -> Void) {
+         publish: @escaping @Sendable ([WindowObservation], UInt32?, Bool, CatalogChange, UUID?) -> Void) {
         self.pid = pid
         self.name = name
         self.bundleId = bundleId
@@ -214,9 +219,15 @@ private final class AppWindows: @unchecked Sendable {
     }
 
     func refresh(hidden: Bool? = nil, settle: Bool = false, change: CatalogChange = .snapshot) {
+        let activation = change == .activation ? presentationLock.withLock { presentation } : nil
         queue.async { [self] in
             guard !stopped else { return }
             if let hidden { self.hiddenHint = hidden }
+            if change == .activation {
+                self.activationToken = activation
+                self.railActivationCheck?.work.cancel()
+                self.railActivationCheck = nil
+            }
             if change == .activation || self.change != .activation && change != .snapshot { self.change = change }
             if settle { beginSettling() }
             failedReads = 0
@@ -234,6 +245,8 @@ private final class AppWindows: @unchecked Sendable {
     func stop() {
         queue.async { [self] in
             stopped = true
+            railActivationCheck?.work.cancel()
+            railActivationCheck = nil
             pending?.cancel()
             if let observer {
                 let source = AXObserverGetRunLoopSource(observer)
@@ -446,6 +459,10 @@ private final class AppWindows: @unchecked Sendable {
             _ = axWindowID(window, &focused)
         }
         let frontmost = (try? value(application, kAXFrontmostAttribute) as? Bool) == true
+        if frontmost {
+            railActivationCheck?.work.cancel()
+            railActivationCheck = nil
+        }
         let observations = facts.map { fact in
             var record = fact.record(app: name, bundleId: bundleId, hidden: hidden)
             if record.state == .tiled, constrained.contains(fact.id) {
@@ -454,8 +471,9 @@ private final class AppWindows: @unchecked Sendable {
             }
             return WindowObservation(record: record, frame: fact.frame, parent: fact.parent, replaces: replacements[fact.id])
         }
-        publish(observations, focused == 0 ? nil : focused, frontmost, change)
+        publish(observations, focused == 0 ? nil : focused, frontmost, change, activationToken)
         change = .snapshot
+        activationToken = nil
     }
 
     private func frame(_ window: AXUIElement) throws -> CGRect {
@@ -471,6 +489,10 @@ private final class AppWindows: @unchecked Sendable {
 
     func cancelPresentation() {
         presentationLock.withLock { presentation = UUID() }
+    }
+
+    func ownsPresentation(_ token: UUID?) -> Bool {
+        presentationLock.withLock { token == presentation }
     }
 
     func present(id: UInt32, area: CGRect?, focus: Bool, completion: @escaping @MainActor @Sendable () -> Void) {
@@ -541,6 +563,26 @@ private final class AppWindows: @unchecked Sendable {
                     try check(AXUIElementSetAttributeValue(window,kAXMainAttribute as CFString,kCFBooleanTrue))
                     guard presentationLock.withLock({ presentation == token }) else { return }
                     try check(AXUIElementPerformAction(window,kAXRaiseAction as CFString))
+                    // AX accepts an activation request before it necessarily
+                    // becomes active. Retry once only while it is unconfirmed.
+                    railActivationCheck?.work.cancel()
+                    let check = DispatchWorkItem { [weak self] in
+                        guard let self, self.railActivationCheck?.token == token else { return }
+                        self.railActivationCheck = nil
+                        guard !self.stopped, self.presentationLock.withLock({ self.presentation == token }),
+                              (try? self.canPresent(window,id:id)) == true,
+                              (try? self.value(self.application,kAXFrontmostAttribute) as? Bool) != true else { return }
+                        do {
+                            try self.check(AXUIElementSetAttributeValue(self.application,kAXFrontmostAttribute as CFString,kCFBooleanTrue))
+                            guard self.presentationLock.withLock({ self.presentation == token }) else { return }
+                            try self.check(AXUIElementSetAttributeValue(window,kAXMainAttribute as CFString,kCFBooleanTrue))
+                            guard self.presentationLock.withLock({ self.presentation == token }) else { return }
+                            try self.check(AXUIElementPerformAction(window,kAXRaiseAction as CFString))
+                            self.publishSnapshot()
+                        } catch { /* Another app and newer focus intents remain independent. */ }
+                    }
+                    railActivationCheck = (token,check)
+                    queue.asyncAfter(deadline:.now() + .milliseconds(50),execute:check)
                 }
                 publishSnapshot()
             } catch { /* Another app's queue and the CLI remain independent. */ }

@@ -107,7 +107,7 @@ extension Acceptance {
             let observation = try observe()
             let front = observation.activeFixturePID != 0 ? observation.activeFixturePID : observation.frontmostFixturePID
             if front != session.pid, let source = ([fixture] + harness.otherFixtures).first(where: { $0.pid == front }) {
-                try source.command("yieldActivation")
+                try source.command("yieldActivation",["pid":session.pid])
             }
         }
 

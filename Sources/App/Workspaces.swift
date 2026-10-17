@@ -113,7 +113,11 @@ final class Workspaces {
     private func installKeys() {
         hotkeys?.stop()
         hotkeys = nil
-        do { hotkeys = try Hotkeys(keys: configuration.keys) { [weak self] in self?.perform($0) } }
+        let keys = configuration.keys.filter { binding in
+            guard !railEnabled, let command = WorkspaceCommand(binding.value) else { return true }
+            switch command { case .focus, .move: return false; default: return true }
+        }
+        do { hotkeys = try Hotkeys(keys: keys) { [weak self] in self?.perform($0) } }
         catch { disable(reason: "Could not register workspace hotkeys") }
     }
 
@@ -399,6 +403,10 @@ final class Workspaces {
         // macOS can re-activate the already selected app when another process
         // exits. Its visible window has not been shown again or switched.
         guard id != focused || workspace != status.active || closeted.contains(id) || !layoutWindows.isEmpty else { return }
+        // macOS promotes another app before delivering process termination.
+        // Preserve the dead rail owner so removal selects its adjacent rail.
+        if railEnabled, let focused, let owner = entries[focused]?.pid,
+           owner != entries[id]?.pid, kill(owner,0) == -1 && errno == ESRCH { return }
         status.active = workspace
         remember(id)
         render(focusing: id, relayout: false, layoutWindows: layoutWindows)
