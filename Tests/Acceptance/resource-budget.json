@@ -1,14 +1,187 @@
 {
-  "cpuNanoseconds": 41319498,
-  "residentBytes": 60000000,
-  "calibration": {
-    "source": "https://github.com/taecontrol/tessel/actions/runs/38827876915",
-    "revision": "79dd386d67e7379e323896cae377b329966ebb2c",
+  "windowSeconds": 20,
+  "interruptWakeups": 11,
+  "cpuNanoseconds": 100000000,
+  "footprintBytes": 30000000,
+  "rationale": {
+    "windowSeconds": "One window after the existing 1 s settle detects work recurring every 2 s or less. Longer windows include another system-tail wakeup near +30 s; setup itself produces about 180 wakeups.",
+    "interruptWakeups": "Inclusive maximum: 3 above the observed CI maximum of 8 and about 3 below the predicted minimum of 14 for an empty 2 s timer.",
+    "cpuNanoseconds": "Inclusive 100 ms cap catches busy work without timer wakeups. CI baseline was at most 3.4 ms per 20 s; local LaunchServices bursts reached about 72 ms (issue #15). R01 used about 240 ms.",
+    "footprintBytes": "Exclusive 30 MB limit at both window boundaries. Baseline was 11.6-13.8 MB; retaining 60 MB reached 73.6 MB. Physical footprint avoids the shared-page and memory-pressure variation of resident size."
+  },
+  "spike": {
+    "date": "2026-10-17",
+    "units": "Decimal MB and milliseconds; pairs are observed minimum/maximum ranges. All scenarios use fixture windows.",
+    "ciSource": "https://github.com/taecontrol/tessel/actions/runs/39042890419",
     "runner": "xcode-27",
     "windows": 20,
-    "secondsPerRun": 60,
-    "cpuNanoseconds": [4121584, 13773166, 2456584, 668875, 1809958, 509750, 339833, 862667, 618000, 762917],
-    "maximumResidentBytes": 47071232,
-    "machTimebase": {"numer": 125, "denom": 3}
+    "workspaceCount": 10,
+    "local": [
+      {
+        "scenario": "E22 baseline, four runs",
+        "footprintMB": [
+          13.2,
+          13.6
+        ],
+        "interruptWakeupsByWindow": {
+          "10s": 5,
+          "20s": 6,
+          "30s": 7
+        },
+        "cpuMillisecondsByWindow": {
+          "10s": [
+            2.2,
+            2.9
+          ],
+          "20s": [
+            2.4,
+            2.9
+          ],
+          "30s": [
+            2.9,
+            3.4
+          ]
+        }
+      },
+      {
+        "scenario": "E36 baseline, four runs",
+        "footprintMB": [
+          13.4,
+          13.8
+        ],
+        "interruptWakeupsByWindow": {
+          "10s": 6,
+          "20s": 7,
+          "30s": 8
+        },
+        "cpuMillisecondsByWindow": {
+          "10s": [
+            2.6,
+            3.8
+          ],
+          "20s": [
+            2.6,
+            3.9
+          ],
+          "30s": [
+            3.0,
+            4.1
+          ]
+        }
+      },
+      {
+        "scenario": "R01: 0.2 s timer with 2 ms spin",
+        "footprintMB": 13.4,
+        "interruptWakeupsByWindow": {
+          "10s": 57,
+          "20s": 108,
+          "30s": 160
+        },
+        "cpuMillisecondsByWindow": {
+          "10s": 118,
+          "20s": 240,
+          "30s": 346
+        }
+      },
+      {
+        "scenario": "R03: empty main-thread 1 s timer",
+        "footprintMB": 13.6,
+        "interruptWakeupsByWindow": {
+          "10s": 18,
+          "20s": 29,
+          "30s": 40
+        },
+        "cpuMillisecondsByWindow": {
+          "10s": 15,
+          "20s": 16,
+          "30s": 21
+        }
+      },
+      {
+        "scenario": "R04: empty background 1 s DispatchSourceTimer",
+        "footprintMB": 13.6,
+        "interruptWakeupsByWindow": {
+          "10s": 14,
+          "20s": 24,
+          "30s": 34
+        },
+        "cpuMillisecondsByWindow": {
+          "10s": 3.0,
+          "20s": 4.0,
+          "30s": 5.1
+        }
+      },
+      {
+        "scenario": "R02: 60 MB retained",
+        "footprintAtSetupEndMB": 73.6
+      }
+    ],
+    "ci": [
+      {
+        "scenario": "E22 baseline, three runs",
+        "footprintMB": 11.7,
+        "interruptWakeupsByWindow": {
+          "10s": [
+            4,
+            6
+          ],
+          "20s": [
+            5,
+            7
+          ],
+          "30s": [
+            6,
+            8
+          ]
+        }
+      },
+      {
+        "scenario": "E36 baseline, three runs",
+        "footprintMB": [
+          11.6,
+          11.8
+        ],
+        "interruptWakeupsByWindow": {
+          "10s": [
+            4,
+            7
+          ],
+          "20s": [
+            4,
+            8
+          ],
+          "30s": [
+            5,
+            9
+          ]
+        }
+      },
+      {
+        "scenario": "R03: empty main-thread 1 s timer",
+        "footprintMB": 11.7,
+        "interruptWakeupsByWindow": {
+          "10s": 17,
+          "20s": 28,
+          "30s": 39
+        }
+      }
+    ],
+    "ciCPUPer20SecondsMilliseconds": {
+      "E22": [
+        1.9,
+        2.8
+      ],
+      "E36": [
+        1.4,
+        3.4
+      ],
+      "R03": 3.8
+    },
+    "rejectedSignals": {
+      "cpuOnly": "R03 uses about 17 ms/min and R04 5.5 ms/min, both below the former 41.3 ms/min budget.",
+      "residentBytes": "Local resident size drifted from 55 to 25 MB; CI stayed near 50 MB while footprint was about 11.7 MB.",
+      "instructionsAndCycles": "Both were zero in the CI VM.",
+      "packageIdleWakeups": "Zero locally but nonzero in CI."
+    }
   }
 }

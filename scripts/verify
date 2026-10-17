@@ -3,15 +3,13 @@
 # With no suite or test name, runs the functional and resource suites.
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
-usage='Usage: scripts/verify [--functional] [--resources] [--permission] [--calibrate-resources] [TEST...]'
+usage='Usage: scripts/verify [--functional] [--resources] [--permission] [TEST...]'
 filters=()
 for argument in "$@"; do
     case $argument in
         --functional) filters+=(--filter /Functional/ --filter /FunctionalWorkspaces/) ;;
-        --resources) filters+=(--filter /Resources/) ;;
+        --resources) filters+=(--filter /Resources/ --filter /Verification/) ;;
         --permission) filters+=(--filter /Permission/) ;;
-        # Record the ten CI measurements; keep enforcing the 100 ms cap.
-        --calibrate-resources) export TESSEL_CALIBRATE_RESOURCES=1 ;;
         -h | --help) echo "$usage"; exit 0 ;;
         -*) echo "$usage" >&2; exit 2 ;;
         *) filters+=(--filter "$argument") ;;
