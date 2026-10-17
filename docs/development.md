@@ -322,7 +322,9 @@ identifies it as a former rail window.
 
 Numeric workspace/send shortcuts keep their meanings. `focus next|previous`
 remain bindable aliases for rail traversal, with no default binding in rails.
-`[keys]` overrides merge with the layout's defaults. `windows --json` adds
+`[keys]` overrides merge with the layout's defaults. Directional rail commands
+are validated with the flag off, but their shortcuts are registered only while
+rails is enabled. `windows --json` adds
 nullable one-based `rail` and `slot` fields, and `status --json` reports
 `workspaces.layout`, the nullable current `rail`, and `railCount`. The status
 item shows the workspace number and one bar per rail, highlighting the current
