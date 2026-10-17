@@ -811,11 +811,13 @@ extension Acceptance {
             #expect(try harness.invoke("windows","--json").status == 0)
             try focus(ids[2],since: flow.post(38),within:0.5)
         }
-        @Test(arguments:["focus","layout"])
-        func e22e28BurstInputPreservesTheLatestFocusAndEveryPendingPosition(kind: String) throws {
-            let a = try open("w0",width:0.3)
-            let other = try flow.other(), b = try open("window",width:0.3,session:other)
-            let c = try open("w2",width:0.3), d = try open("w3",width:0.3)
+        @Test(arguments:["focus","layout"], [false,true])
+        func e22e28BurstInputPreservesTheLatestFocusAndEveryPendingPosition(kind: String, oppositePlacement: Bool) throws {
+            let probeArea = try flow.observe().area
+            let fraction = oppositePlacement ? (probeArea[2]-20-100)/(3*(probeArea[2]-20)) : 0.3
+            let a = try open("w0",width:fraction)
+            let other = try flow.other(), b = try open("window",width:fraction,session:other)
+            let c = try open("w2",width:fraction), d = try open("w3",width:fraction)
             try flow.activate(key:kind == "focus" ? "w0" : "w2")
             try #require(try converges { Set($0.map(\.id)) == Set([a,b,c,d]) })
             try enable(); try focus(kind == "focus" ? a : c); try order([a,b,c,d])
@@ -840,7 +842,11 @@ extension Acceptance {
             try #require(try eventually {
                 let o = try flow.observe()
                 return [a,b,c,d].enumerated().allSatisfy { index,id in
-                    let expected = [area[0]+10+Double(index)*step-offset,area[1]+10,w,area[3]-20]
+                    var x = area[0]+10+Double(index)*step-offset
+                    // In this four-window ring A can show more at the right
+                    // edge (56 points) than its linear copy shows at the left.
+                    if index == 0 && kind == "layout" && x+w < area[0]+56 { x += 4*step }
+                    let expected = [x,area[1]+10,w,area[3]-20]
                     return o.windows.contains { $0.id == id && zip($0.frame,expected).allSatisfy { abs($0-$1)<=1 } && $0.visible }
                 }
             },"a later focus-only render must finish every pending position")
