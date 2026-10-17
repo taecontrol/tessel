@@ -558,6 +558,7 @@ extension Acceptance {
             let ids = try setup([0.3])
             let d = try fixture.open(kind:"dialog",key:"dialog"), before = try frame(d)
             try focus(d); near(try frame(d),before)
+            try #require(try eventually { try harness.row(d) != nil }, "native focus can precede catalog arrival")
             #expect(try harness.row(d)?.rail == nil && harness.row(d)?.workspace == 1)
             let payload = try JSONSerialization.jsonObject(with:harness.invoke("windows","--json").outputData) as? [[String:Any]]
             let dialog = try #require(payload?.first { ($0["id"] as? UInt32) == d })
@@ -802,7 +803,7 @@ extension Acceptance {
             let other = try flow.other(), b = try open("window",width:0.3,session:other)
             let c = try open("w2",width:0.3), d = try open("w3",width:0.3)
             try flow.activate(key:kind == "focus" ? "w0" : "w2")
-            try #require(try converges { $0.count == 4 })
+            try #require(try converges { Set($0.map(\.id)) == Set([a,b,c,d]) })
             try enable(); try focus(kind == "focus" ? a : c); try order([a,b,c,d])
             let area = try flow.observe().area, w = try frame(a)[2], step = w+10
             try #require(try eventually {
