@@ -374,6 +374,9 @@ final class Workspaces {
                 ? rails.moveX(focused,direction:direction == .left ? -1 : 1)
                 : rails.moveY(focused,direction:direction == .up ? -1 : 1)
             guard moved else { return }
+            // A successful reorder is a redraw even if a short ring returns
+            // every tile to the same target frame after anchoring and reveal.
+            railPresentation = nil
             render(focusing:focused,relayout:false)
         case .next, .previous:
             if railEnabled, let focused, rails.location(focused) != nil {

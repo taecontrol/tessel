@@ -311,8 +311,10 @@ window otherwise. External activation selects the window's workspace and rail
 and reveals it. Dialogs float as before, sheets follow their parents, and
 native fullscreen windows have no rail or workspace.
 
-A manually moved window stays where released until the next rail render. A
-manual resize updates that window's width and repositions its right neighbors.
+A manually moved window stays where released until the next rail render.
+Successful window moves redraw the rail even when a ring's final target frames
+coincide. A manual resize updates that window's width and repositions its right
+neighbors.
 Disabling rails or quitting returns all managed windows fully inside the
 visible desktop. After a crash, closet recovery still works with the flag off,
 but a partially visible window stays where it was: no persisted membership
