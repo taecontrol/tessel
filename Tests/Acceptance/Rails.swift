@@ -84,6 +84,12 @@ extension Acceptance {
                 #expect(try eventually { try fixture.command("ping").keyCount == count + 6 })
                 near(try frame(a), before)
             }
+            try flow.enable("[keys]\nalt-h = 'focus right'\nalt-shift-h = 'move down'\n")
+            let before = try frame(a), count = try fixture.command("ping").keyCount ?? 0
+            try flow.post(4); try flow.post(4,shift:true)
+            #expect(try eventually { try fixture.command("ping").keyCount == count + 2 },
+                    "directional overrides must reach the app while rails is off")
+            near(try frame(a),before)
         }
         @Test(arguments: [false,true])
         func e02EnableAndStartupKeepWidthsArrivalAndFocus(startup: Bool) throws {
@@ -419,6 +425,7 @@ extension Acceptance {
             try focus(middle,since:flow.post(40))
             try focus(ids[0],since:flow.post(40))
             let dialog = try fixture.open(kind:"dialog",key:"dialog"); try focus(dialog)
+            try #require(try eventually { try harness.row(dialog)?.workspace == 1 })
             try flow.activate(other); try focus(middle)
             try #require(try eventually { try harness.status().workspaces?.rail == 2 })
             other.stop()
@@ -562,6 +569,37 @@ extension Acceptance {
             let result = try harness.invoke("windows","--json")
             #expect(!result.output.contains("Fixture w")); #expect(!result.output.contains("\"title\""))
         }
+        @Test func e07e16e28CrossApplicationElevatorCompletesAndExternalActivationWins() throws {
+            let ids = try setup([0.25])
+            let other = try flow.other(), m = try open("window",width:0.25,session:other)
+            try focus(m); try order([ids[0],m])
+            let area = try flow.observe().area
+            try #require(try eventually { abs(try frame(m)[3]-(area[3]-20)) <= 1 })
+            let aSize = Array(try frame(ids[0])[2...3]), mSize = Array(try frame(m)[2...3])
+            try focus(m,since:flow.post(38,shift:true)); try order([m],rail:2)
+            for index in 0..<20 {
+                let target = index.isMultiple(of:2) ? ids[0] : m
+                let hidden = index.isMultiple(of:2) ? m : ids[0]
+                let size = index.isMultiple(of:2) ? aSize : mSize
+                let start = try flow.post(index.isMultiple(of:2) ? 40 : 38)
+                let complete = try eventually(within:max(0,0.2-(monotonicSeconds()-start))) {
+                    let observation = try flow.observe()
+                    return observation.windows.contains { window in
+                        window.id == target && window.visible && window.main && window.focused
+                            && zip(window.frame,[area[0]+10,area[1]+10,size[0],size[1]]).allSatisfy { abs($0-$1)<=1 }
+                    } && !observation.visibleIDs.contains(hidden)
+                }
+                if !complete { print("Cross-application elevator failure",index,target,try flow.observe()) }
+                try #require(complete,"a cross-application elevator must complete position, visibility and focus within 200 ms")
+            }
+            try focus(ids[0],since:flow.post(40),within:0.2)
+            try flow.activate(other); try focus(m)
+            try #require(try eventually { try harness.status().workspaces?.rail == 2 })
+            sleep(seconds:0.1)
+            try focus(m)
+            try focus(ids[0],since:flow.post(40),within:0.2)
+        }
+
         @Test func e28RailLatencyCalibrationMeasuresTwentyScrollsAndElevatorTrips() throws {
             let ids = try setup([0.45,0.45,0.45,0.45,0.45])
             try focus(ids[0],since:flow.post(38,shift:true)); try order([ids[0]],rail:2)
