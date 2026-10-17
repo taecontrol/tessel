@@ -240,6 +240,24 @@ extension Acceptance {
             try focus(ids[0], since: flow.post(4,shift: true)); try order([ids[2],ids[1],ids[0]])
             for (i,id) in ids.enumerated() { #expect(abs(try frame(id)[2]-widths[i]) <= 1) }
         }
+        @Test func e09e20SwapRedrawsManualMovesEvenWhenRingFramesCoincide() throws {
+            let ids = try setup([0.6,0.6])
+            try focus(ids[1],since:flow.post(37))
+            try focus(ids[0],since:flow.post(37))
+            let area = try flow.observe().area, width = try frame(ids[0])[2]
+            let right = area[0]+area[2]-10-56-width
+            try #require(try eventually { abs(try frame(ids[0])[0]-right) <= 1 })
+            let original = try frame(ids[0])
+            var moved = original; moved[0] += 23; moved[1] += 17
+            try fixture.command("move",["key":"w0","frame":moved])
+            near(try frame(ids[0]),moved)
+            try focus(ids[0],since:flow.post(37,shift:true))
+            try order([ids[1],ids[0]])
+            try #require(try eventually {
+                zip(try frame(ids[0]),original).allSatisfy { abs($0-$1) <= 1 }
+            },"a successful swap redraws the rail even when its target frames coincide")
+        }
+
         @Test func e10e11VerticalMovesInsertAfterMemoryCreateRailsAndRemoveEmptyOnes() throws {
             let ids = try setup()
             try focus(ids[0],since: flow.post(38,shift: true)); try order([ids[0]],rail: 2)
