@@ -112,6 +112,12 @@ acceptance job. The resource command has a 90-second budget, and the whole job
 has an eight-minute (480-second) timeout. The workspace switch timing artifact
 is still uploaded.
 
+The independent observer gives each AX read 100 ms. A timed-out read means the
+app did not answer, so it must not count as an absent or unfocused window. The
+system-wide focused-application read is answered by the frontmost app, and a
+20 ms limit missed busy fixtures even on an idle Mac. Deadlines are unchanged:
+a reading that arrives after its deadline still fails.
+
 For minimize and restore, the 500 ms observation deadline begins at AppKit's
 completion notification, after the Dock animation. macOS sends the AX event
 at that point; the animation itself can take longer than 500 ms. The fixture

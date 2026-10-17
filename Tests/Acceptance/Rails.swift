@@ -50,7 +50,9 @@ extension Acceptance {
             try enable()
             try focus(ids[0])
             try order(ids)
-            let ready = try eventually {
+            // Initial sizing writes every window through one app's AX queue;
+            // twenty windows can take longer than 500 ms on a slower runner.
+            let ready = try eventually(within: 2) {
                 let o = try flow.observe()
                 return ids.allSatisfy { id in o.windows.contains { $0.id == id && abs($0.frame[3]-(o.area[3]-20)) <= 1 } }
             }
