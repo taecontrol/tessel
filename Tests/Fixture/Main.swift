@@ -18,9 +18,14 @@ final class NewTabWindow: NSWindow {
 @MainActor
 final class FixtureApplication: NSApplication {
     var windowList: [NSWindow]?
+    var withholdsFocusedWindow = false
 
     override func accessibilityWindows() -> [Any]? {
         windowList ?? super.accessibilityWindows()
+    }
+
+    override func accessibilityFocusedWindow() -> Any? {
+        withholdsFocusedWindow ? nil : super.accessibilityFocusedWindow()
     }
 }
 
@@ -146,6 +151,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
                let window = NSApp.windows.first(where: { $0.styleMask.contains(.titled) }) { windows["window"] = window }
         case "reset":
             (NSApp as? FixtureApplication)?.windowList = nil
+            (NSApp as? FixtureApplication)?.withholdsFocusedWindow = false
             NSApp.unhide(nil)
             for window in windows.values where window.sheetParent != nil { window.sheetParent?.endSheet(window) }
             for window in windows.values { window.close() }
@@ -186,6 +192,15 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 return ["error": "windowList requires existing fixture windows"]
             }
             application.windowList = keys.compactMap { windows[$0] }
+        case "focusedWindow":
+            // Model AppKit publishing the selected tab's focus only after its
+            // bar has left the former root. Publishing announces the real focus.
+            guard let application = NSApp as? FixtureApplication else { return ["error": "focusedWindow requires the fixture application"] }
+            application.withholdsFocusedWindow = command["published"] as? Bool != true
+            if !application.withholdsFocusedWindow, let window = NSApp.keyWindow {
+                NSAccessibility.post(element: window, notification: .focusedWindowChanged)
+                NSAccessibility.post(element: window, notification: .mainWindowChanged)
+            }
         case "addTab":
             if let reference = windows[command["reference"] as? String ?? "tabs0"] {
                 let window = makeWindow(key: key, kind: "standard")

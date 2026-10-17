@@ -114,7 +114,10 @@ AXWindows can temporarily omit a live window during a Space move, fullscreen,
 or an app hide/unhide. The catalog revalidates known AX handles and retains sheet
 ownership. A native tab's bar keeps its AX identity when selection replaces the
 front window, so that identity retires the old tab root without retaining an
-extra window. Minimized tab entries continue to follow AppKit's published list.
+extra window. A read can find the old root without its bar before focus or the
+moved bar identifies the successor; the old root keeps its last bar identity
+while it stays listed, so the successor's later read still retires it.
+Minimized tab entries continue to follow AppKit's published list.
 The catalog carries a native front's replacement relationship into Workspaces,
 which preserves membership, arrival position, and focus history. Its next render
 reconciles visibility for the replacement CG window, including hidden groups.

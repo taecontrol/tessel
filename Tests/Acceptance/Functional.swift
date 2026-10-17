@@ -179,6 +179,23 @@ extension Acceptance {
             try #require(try converges { $0.count == 1 && $0[0].id == selected && $0[0].tabs == 3 })
         }
 
+        @Test func e05FormerNativeRootIsRetiredAfterLosingItsBarBeforeFocusMoves() throws {
+            let group = try fixture.command("open", ["kind": "tabs", "key": "tabs", "count": 3])
+            let first = try #require(group.windows["tabs0"])
+            let selected = try #require(group.windows["tabs1"])
+            try #require(try converges { $0.count == 1 && $0[0].id == first && $0[0].tabs == 3 })
+            // A read can find the former root without its bar before it can
+            // identify the successor. Hold that ordering with real AppKit tabs.
+            try fixture.command("windowList", ["keys": ["tabs0"]])
+            try fixture.command("focusedWindow", ["published": false])
+            let changed = try fixture.command("tab", ["key": "tabs1"])
+            #expect(changed.nativeTabs["tabs1"] == 3)
+            try #require(try converges { $0.count == 1 && $0[0].id == first && $0[0].tabs == 1 },
+                         "the former root must be observed without its native bar")
+            try fixture.command("focusedWindow", ["published": true])
+            try #require(try converges { $0.count == 1 && $0[0].id == selected && $0[0].tabs == 3 })
+        }
+
         @Test(arguments: ["emptyContentTabs", "contentTabs", "segmentedTabs"])
         func e05ContentTabsDoNotCountAsNativeWindowTabs(kind: String) throws {
             let reply = try fixture.command("open", ["kind": kind, "key": "content"])

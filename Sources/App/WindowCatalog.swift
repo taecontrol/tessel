@@ -88,7 +88,7 @@ private struct WindowFacts {
     let tabs: Int
     let frame: CGRect
     let parent: UInt32?
-    let nativeTabGroups: [AXUIElement]
+    var nativeTabGroups: [AXUIElement]
 
     func sharesNativeTabs(with other: WindowFacts) -> Bool {
         nativeTabGroups.contains { group in other.nativeTabGroups.contains { CFEqual(group, $0) } }
@@ -308,6 +308,14 @@ private final class AppWindows: @unchecked Sendable {
                 guard let previous = facts.first(where: { retired.contains($0.id) && window.sharesNativeTabs(with: $0) }) else { return nil }
                 return (window.id, previous.id)
             })
+            // A former root can lose its bar in a read that cannot identify the
+            // successor yet, because focus or the moved bar is not published.
+            // Keep its last bar while it stays listed; the successor's read retires it.
+            for index in next.indices where next[index].nativeTabGroups.isEmpty && !next[index].minimized {
+                if let previous = facts.first(where: { $0.id == next[index].id }) {
+                    next[index].nativeTabGroups = previous.nativeTabGroups
+                }
+            }
             let oldIDs = Set(facts.map(\.id))
             let newIDs = Set(next.map(\.id))
             facts = next
