@@ -68,8 +68,21 @@ extension Acceptance {
                 let id = try flow.open("idle\(index)", width: 0.4)
                 try flow.flow.activate(key: "idle\(index)")
                 try flow.focus(id)
-                if index.isMultiple(of: 2) { try flow.focus(id, since: flow.flow.post(38, shift: true)) }
-                if index.isMultiple(of: 4), index > 0 { try flow.focus(id, since: flow.flow.key(index / 4 + 1, send: true)) }
+                // Native focus can precede the catalog's new-window arrival.
+                // Finish each setup command before opening the next fixture.
+                try #require(try eventually { try harness.row(id)?.workspace == harness.status().workspaces?.active })
+                if index.isMultiple(of: 2) {
+                    let rail = try #require(try harness.row(id)?.rail)
+                    try flow.focus(id, since: flow.flow.post(38, shift: true))
+                    try #require(try eventually { try harness.row(id)?.rail == (index == 0 ? rail : rail + 1) })
+                }
+                if index.isMultiple(of: 4), index > 0 {
+                    let workspace = index / 4 + 1
+                    try flow.focus(id, since: flow.flow.key(workspace, send: true))
+                    try #require(try eventually {
+                        try harness.row(id)?.workspace == workspace && harness.status().workspaces?.active == workspace
+                    })
+                }
             }
             try #require(try converges { $0.count == 20 && Set($0.compactMap(\.workspace)).count == 5 && $0.contains { ($0.rail ?? 0) > 1 } })
             sleep(seconds: 1)
