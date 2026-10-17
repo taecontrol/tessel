@@ -249,13 +249,14 @@ final class Workspaces {
         } else if let newest = newWindows.last(where: { available($0) && entries[$0]?.observation.parent == nil }) {
             // Initial enumeration preserves the app's actual focused window. Later
             // creations join the end of arrival order and become visible immediately.
-            let selection = firstSnapshot && frontmost ? reportedFocus.flatMap { available($0) ? $0 : nil } ?? newest : newest
-            if firstSnapshot && !frontmost && pid != enablingFront, let current = focused, available(current) {
+            let initialEnumeration = firstSnapshot && (!railEnabled || initialApplications.contains(pid))
+            let selection = initialEnumeration && frontmost ? reportedFocus.flatMap { available($0) ? $0 : nil } ?? newest : newest
+            if initialEnumeration && !frontmost && pid != enablingFront, let current = focused, available(current) {
                 render(focusing: current, relayout: false, layoutWindows: Set(newWindows))
-            } else if firstSnapshot && !frontmost && pid != enablingFront && focused == nil {
+            } else if initialEnumeration && !frontmost && pid != enablingFront && focused == nil {
                 render(focusing: nil, relayout: false, activateDesktop: false, layoutWindows: Set(newWindows))
             } else {
-                if firstSnapshot && frontmost { rememberInitialFocus(selection) }
+                if initialEnumeration && frontmost { rememberInitialFocus(selection) }
                 else { remember(selection) }
                 render(focusing: selection, relayout: false, layoutWindows: Set(newWindows))
             }

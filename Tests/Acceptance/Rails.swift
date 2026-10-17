@@ -158,6 +158,24 @@ extension Acceptance {
             #expect(try !flow.visible(ids[2]))
             try focus(ids[4], since: flow.post(4)); try invariant(ids, sizes: sizes)
         }
+        @Test(arguments: [2,3])
+        func e05ShortRingsUseOneMostVisiblePlacementAfterTheRevealTarget(count: Int) throws {
+            let fraction = count == 2 ? 0.6 : 0.4
+            let ids = try setup(Array(repeating:fraction,count:count))
+            for id in ids.dropFirst() { try focus(id,since:flow.post(37)) }
+            let area = try flow.observe().area, w = try frame(ids[0])[2]
+            let focusedX = area[0]+area[2]-10-56-w
+            let nextRight = focusedX+w+10
+            let nextLeft = nextRight-Double(count)*(w+10)
+            try #require(nextLeft+w-area[0]>56,"the worked short ring must expose more of its next neighbor on the left")
+            try #require(try eventually {
+                let target = try frame(ids.last!), next = try frame(ids[0])
+                return abs(target[0]-focusedX)<=1 && abs(next[0]-nextLeft)<=1
+            })
+            #expect(try flow.visible(ids[0]))
+            try invariant(ids,sizes:Array(repeating:[w,area[3]-20],count:count))
+        }
+
         @Test func e05WideWindowIsCenteredAndSingleWindowIsStable() throws {
             let ids = try setup([0.3,1.0])
             try focus(ids[1], since: flow.post(37))
@@ -252,8 +270,8 @@ extension Acceptance {
             let ids = [base[0],b,base[1]], d = base[2]
             try flow.activate(other); try focus(b)
             try order([ids[0],b,ids[2],d])
-            try flow.activate(key:"w1"); try focus(ids[2])
-            try flow.activate(other); try focus(b)
+            try focus(ids[2],since:flow.post(37))
+            try focus(b,since:flow.post(4))
             if hide {
                 try other.command("hide"); try focus(ids[2])
                 try other.command("show"); try flow.activate(other); try focus(b)
@@ -263,13 +281,60 @@ extension Acceptance {
                 try other.command("restore"); try focus(b)
             }
             try order([ids[0],ids[1],ids[2],d])
-            try flow.activate(key:"w2"); try focus(d)
-            try flow.activate(other); try focus(b)
             try focus(ids[1],since: flow.post(38,shift: true)); try order([ids[1]],rail:2)
+            // Observe a completed activation after the same-focus move before
+            // starting another native minimize/restore animation.
+            try focus(ids[0],since:flow.post(40))
+            try focus(d,since:flow.post(4))
+            try focus(ids[1],since:flow.post(38))
             try other.command("minimize"); try focus(d)
             #expect(try harness.status().workspaces?.rail == 1)
             try other.command("restore"); try focus(ids[1]); try order([ids[0],ids[2],d,ids[1]])
         }
+        @Test func e17MinimizeImmediatelyAfterExternalFocusDoesNotCancelTheNativeTransition() throws {
+            let ids = try setup([0.22,0.22])
+            let other = try flow.other(), b = try open("window",width:0.22,session:other)
+            try flow.activate(other); try focus(b)
+            try order([ids[0],b,ids[1]])
+            try focus(ids[1],since:flow.post(37))
+            try flow.activate(other); try focus(b)
+            try other.command("minimize")
+            try focus(ids[1])
+            try other.command("restore"); try focus(b)
+        }
+
+        @Test func e12FirstWindowOfANewBackgroundAppInsertsAfterFocusAndTakesFocus() throws {
+            let ids = try setup([0.22,0.22])
+            kill(harness.appPID,SIGSTOP)
+            let other: FixtureSession, b: UInt32
+            do {
+                defer { kill(harness.appPID,SIGCONT) }
+                other = try flow.other()
+                b = try open("window",width:0.22,session:other)
+            }
+            try focus(b); try order([ids[0],b,ids[1]])
+            try focus(ids[1],since:flow.post(37))
+        }
+
+        @Test(arguments: ["minimize","hide","close"])
+        func e11e17EmptyRailUsesRecentFocusForMinimizeOrHideAndAdjacentRailForClose(operation: String) throws {
+            let ids = try setup([0.22,0.22])
+            let other = try flow.other(), middle = try open("window",width:0.22,session:other)
+            try flow.activate(other); try focus(middle)
+            try focus(middle,since:flow.post(38,shift:true)); try order([middle],rail:2)
+            try focus(ids[0],since:flow.post(40))
+            try focus(ids[1],since:flow.post(37))
+            try focus(ids[1],since:flow.post(38,shift:true)); try order([middle,ids[1]],rail:2)
+            try focus(ids[1],since:flow.post(38,shift:true)); try order([ids[1]],rail:3)
+            try focus(middle,since:flow.post(40))
+            try focus(ids[0],since:flow.post(40))
+            try flow.activate(other); try focus(middle)
+            try #require(try eventually { try harness.status().workspaces?.rail == 2 })
+            try other.command(operation)
+            try focus(operation == "close" ? ids[1] : ids[0])
+            try order([ids[0]],rail:1); try order([ids[1]],rail:2)
+        }
+
         @Test func e18HeightAndWidthConstraintsRemainTiledAndExplained() throws {
             let ids = try setup([0.3])
             let area = try flow.observe().area
@@ -317,7 +382,10 @@ extension Acceptance {
             let ids = try setup([0.45,0.45,0.45])
             let hung = try flow.other(), h = try open("window",width:0.4,session:hung)
             try flow.activate(hung); try focus(h)
-            try flow.activate(key:"w2"); try focus(ids[2])
+            // Walk right from H through the responsive windows. This establishes
+            // tessel's logical selection before the app is deliberately hung.
+            try focus(ids[1],since:flow.post(37))
+            try focus(ids[2],since:flow.post(37))
             try focus(ids[2],since: flow.post(38,shift:true)); try order([ids[2]],rail:2)
             try hung.command("hang")
             try focus(ids[1],since: flow.post(40),within:0.5)

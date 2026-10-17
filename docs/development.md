@@ -284,7 +284,10 @@ to the top; their CLI reason explains the constraint. A row that fits starts
 at the area's left edge. A longer row forms a ring: the last window's next
 neighbor is the first. Focus moves without scrolling when the destination is
 fully visible. Otherwise the row scrolls to reveal it with a 56-point peek;
-wide windows are centered. Completely off-screen windows go into the closet.
+wide windows are centered. The 56-point peek is the scroll target. Each window
+then uses the single ring placement exposing the most of it. In a short ring,
+that can put the next neighbor on the opposite edge, for any window count.
+Completely off-screen windows go into the closet.
 Focus, scrolling and elevator travel never resize windows.
 
 Option+H/L (`focus left|right`) wraps within the current rail. Option+K/J
@@ -298,6 +301,10 @@ except when already alone at that end. Empty rails disappear.
 New windows enter to the right of the current window. Closing selects the
 left neighbor and closes the gap. Sending still follows the window to the
 selected workspace, inserting after its current rail's remembered window.
+When a rail empties on close, move or send, its current position selects the
+rail below, or the one above if it was last. Minimize/hide instead selects the
+most recently focused available window anywhere in the workspace, even when
+that empties a rail. This preserves the workspace experiment's focus policy.
 Minimized or hidden windows leave their rail temporarily; restoring inserts
 after their former left neighbor when that rail survives, or after the current
 window otherwise. External activation selects the window's workspace and rail
