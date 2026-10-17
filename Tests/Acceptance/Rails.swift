@@ -898,7 +898,7 @@ extension Acceptance {
                 let size = index.isMultiple(of:2) ? aSize : mSize
                 let start = try flow.post(index.isMultiple(of:2) ? 40 : 38)
                 let complete = try eventually(within:max(0,0.2-(monotonicSeconds()-start))) {
-                    let observation = try flow.observe()
+                    let observation = try flow.observe(focusedOnly: true)
                     return observation.windows.contains { window in
                         window.id == target && window.visible && window.main && window.focused
                             && zip(window.frame,[area[0]+10,area[1]+10,size[0],size[1]]).allSatisfy { abs($0-$1)<=1 }
