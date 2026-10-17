@@ -173,15 +173,15 @@ let timebase: mach_timebase_info_data_t = {
     return value
 }()
 
-/// CPU time in nanoseconds and resident bytes, as the kernel accounts them.
-func resources(_ pid: pid_t) throws -> (cpuNanoseconds: UInt64, residentBytes: UInt64) {
+/// Cumulative CPU time and interrupt wakeups, plus current physical footprint.
+func resources(_ pid: pid_t) throws -> (cpuNanoseconds: UInt64, interruptWakeups: UInt64, footprintBytes: UInt64) {
     var usage = rusage_info_v0()
     let result = withUnsafeMutablePointer(to: &usage) {
         $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V0, $0) }
     }
     guard result == 0 else { throw HarnessError("cannot read resource usage of \(pid): errno \(errno)") }
     let ticks = usage.ri_user_time + usage.ri_system_time
-    return (ticks * UInt64(timebase.numer) / UInt64(timebase.denom), usage.ri_resident_size)
+    return (ticks * UInt64(timebase.numer) / UInt64(timebase.denom), usage.ri_interrupt_wkups, usage.ri_phys_footprint)
 }
 
 func writeInfoPlist(_ info: [String: Any], to url: URL) throws {

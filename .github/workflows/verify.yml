@@ -2,12 +2,6 @@ name: Verify
 on:
   pull_request:
     branches: [main]
-  workflow_dispatch:
-    inputs:
-      calibrate:
-        description: Record ten idle resource measurements
-        type: boolean
-        default: false
 permissions:
   contents: read
 concurrency:
@@ -15,32 +9,35 @@ concurrency:
   cancel-in-progress: true
 jobs:
   acceptance:
-    name: Acceptance (${{ matrix.suite }})
+    name: Acceptance
     runs-on: xcode-27
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        suite: [functional, resources]
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
       - name: Configure ephemeral certificate signing
         timeout-minutes: 2
         run: scripts/ci-signing
       - name: Build signed bundles
+        id: build
         run: scripts/build
       - name: Verify permission denial and automatic restart
         run: scripts/verify --permission
-      - name: Acceptance suite
-        run: scripts/verify --${{ matrix.suite }} ${{ inputs.calibrate && matrix.suite == 'resources' && '--calibrate-resources' || '' }}
+      - name: Functional acceptance suite
+        run: scripts/verify --functional
+      # Run even when the functional suite fails, so each run reports both.
+      - name: Resource acceptance suite (90 second budget)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        timeout-minutes: 2
+        run: |
+          SECONDS=0
+          scripts/verify --resources
+          echo "Resources suite elapsed: ${SECONDS} s (limit <= 90 s)"
+          if (( SECONDS > 90 )); then
+            echo "Resources suite exceeded the 90 second limit" >&2
+            exit 1
+          fi
       - uses: actions/upload-artifact@v4
-        if: matrix.suite == 'resources' && always()
-        with:
-          name: resource-calibration
-          path: .work/resource-calibration.json
-          if-no-files-found: ignore
-      - uses: actions/upload-artifact@v4
-        if: matrix.suite == 'functional' && always()
+        if: always()
         with:
           name: switch-calibration
           path: .work/switch-calibration.json

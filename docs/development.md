@@ -38,7 +38,9 @@ where LaunchServices cannot register them reliably.
 
 ## Verification
 
-Stop this worktree's development app before running the harness. Run:
+Stop this worktree's development app and any other tessel instance managing
+windows before running the harness. Another instance can manage the fixture
+windows and contaminate verification. Run:
 
 ```sh
 scripts/build
@@ -84,17 +86,31 @@ socket settings.
 of a test name from `Tests/Acceptance`, such as `scripts/verify e08`. The
 functional suite covers foundation E1–E12 and E15–E21; foundation E13/E14 require visual evidence of
 the permission journey.
-The resource suite covers foundation E22 with 20 fixture windows and ten 60-second idle
-measurements. CPU time comes from `proc_pid_rusage`, not elapsed wall time;
-resident memory must stay under 60 MB. Resource calibration runs only on CI.
-Mach ticks are converted with `mach_timebase_info`. The committed CPU budget is
-41.319498 ms per idle minute: three times the maximum of ten CI measurements
-(13.773166 ms). The largest resident measurement was 47.071232 MB. The budget
-file records the measurements and the source run; later CI runs enforce it.
-The memory limit was 50 MB until the workspace experiment. On the `xcode-27`
-runner, E22 then measured 49.51 MB and E36 50.00 MB in run 38996783944, while
-the same tests measured about 47 MB locally. The limit was raised to 60 MB,
-about 20% above the highest CI measurement.
+The resource suite covers foundation E22 with the default config and workspace
+E36 with 20 fixture windows across ten workspaces. Each keeps its existing setup
+and one-second settle, then measures one 20-second idle window from outside the
+app with `proc_pid_rusage` (`rusage_info_v0`). Interrupt wakeups
+(`ri_interrupt_wkups`) must not exceed 11 and user + system CPU must not exceed
+100 ms. Mach ticks are converted with `mach_timebase_info`. Physical footprint
+(`ri_phys_footprint`) must be below 30 MB both at the start and at the end of the
+window; a start failure stops without waiting. Each test prints its measurements
+and limits, and failures identify the exceeded limit.
+
+The wakeup limit targets work recurring every two seconds or less; the CPU cap
+also catches work that never sleeps. The footprint limit accounts for the app's
+own memory. The limits, spike measurements, and their rationale live in
+`Tests/Acceptance/resource-budget.json` and
+[ADR 0003](adr/0003-verify-idle-work-with-wakeups-cpu-and-footprint.md).
+Changing these limits requires an owner decision backed by new evidence.
+LaunchServices notifications can increase local CPU while the workspace
+experiment is idle (issue #15). Keep the desktop awake and stop other tessel
+instances before interpreting an outlier. Do not run `sample` during a measured
+window: it suspends the process and changes its counters.
+
+CI runs permission, functional, and resource verification sequentially in one
+acceptance job. The resource command has a 90-second budget, and the whole job
+has an eight-minute (480-second) timeout. The workspace switch timing artifact
+is still uploaded.
 
 For minimize and restore, the 500 ms observation deadline begins at AppKit's
 completion notification, after the Dock animation. macOS sends the AX event
@@ -246,8 +262,7 @@ delivery's 20 CI measurements, capped at 200 ms. Recalibrate on `xcode-27`, reta
 its run ID and measurements in that file, and rerun against the resulting budget.
 The delivery calibration recorded a 114.393042 ms maximum in run 38947144837,
 giving the 200 ms cap. Missing or inconsistent calibration data fails verification.
-Workspace E36 uses 20 windows across ten workspaces for 60 idle seconds and
-enforces the existing foundation CPU and 60 MB memory budgets.
+Workspace E36 enforces the same idle wakeup, CPU, and footprint limits as E22.
 
 Before the first public release (#6), revisit the bundle IDs, config schema,
 and read-only CLI contract. A command that changes state or exposes titles needs
