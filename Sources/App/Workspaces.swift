@@ -224,7 +224,13 @@ final class Workspaces {
         } else if frontmost, NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
                   let reportedFocus, available(reportedFocus), entries[reportedFocus]?.observation.parent == nil {
             if reportedFocus == expectedFocus { expectedFocus = nil }
-            else if change == .activation || change == .restored { followExternalFocus(reportedFocus) }
+            else if change == .activation || change == .restored {
+                // Our activation can arrive after a newer keyboard selection.
+                // Wait for its same-app presentation to acknowledge focus; a
+                // different app's activation is still an external selection.
+                let pendingHere = expectedFocus.flatMap { entries[$0]?.pid } == pid
+                if change == .restored || !pendingHere { followExternalFocus(reportedFocus) }
+            }
             else if change == .focus && reportedFocus != focused, expectedFocus == nil {
                 // AppKit promotes a hidden sibling before reporting destruction of
                 // the closing window. Let that bounded destruction snapshot win.
