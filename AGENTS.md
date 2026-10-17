@@ -59,3 +59,9 @@ the conversation is not.
 For building, launching, or verifying tessel, follow [docs/development.md](docs/development.md).
 Use the signed development bundle and isolated fixture harness described there;
 keep the local signing identity stable so rebuilds preserve Accessibility.
+
+CI verifies pull requests and nothing else. Diagnose, profile, compare
+variants, and run mutation plans on the local machine. Never dispatch a
+workflow or push temporary commits to try something on CI: each run adds noise
+to the branch's checks and costs paid runner minutes. When only CI can answer,
+such as recalibrating a resource budget, ask the owner first.
