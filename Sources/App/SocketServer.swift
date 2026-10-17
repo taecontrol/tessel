@@ -67,8 +67,11 @@ final class SnapshotStore: @unchecked Sendable {
     private let lock = NSLock()
     private var windows: [pid_t: [WindowRecord]] = [:]
     private var status: AppStatus
+    private var ready = false
 
     init(status: AppStatus) { self.status = status }
+
+    func markReady() { lock.withLock { ready = true } }
 
     func update(status: AppStatus) {
         lock.withLock { self.status = status }
@@ -80,6 +83,7 @@ final class SnapshotStore: @unchecked Sendable {
 
     func reply(to command: String) -> Reply {
         lock.withLock {
+            guard ready else { return Reply(error: "tessel is starting") }
             switch command {
             case "status": return Reply(status: status)
             case "windows":

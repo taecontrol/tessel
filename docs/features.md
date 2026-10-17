@@ -28,6 +28,12 @@ macOS moves a window that sits entirely off screen onto another display, so
 AeroSpace and Paneru hide windows by leaving a thin sliver of each one visible
 at a screen edge.
 
+tessel's workspace experiment (#2) instead keeps inactive windows in one hidden
+Space, with no sliver. It brings them to the current native desktop when shown.
+This uses private SkyLight operations; see [ADR 0002](adr/0002-hide-inactive-windows-in-a-skylight-space.md).
+Paneru combines native Spaces with virtual rows whose inactive windows are
+parked in a strip. TileMyMac uses Paneru's engine and exposes numbered rows.
+
 ## Comparison
 
 | Feature | AeroSpace | TrellisWM | TileMyMac / Paneru | Omarchy (Hyprland) | On macOS | tessel |
@@ -41,8 +47,8 @@ at a screen edge.
 | Directional focus, move, swap | Yes | — (mouse) | Left and right | Yes | Feasible | #3 |
 | Resize from the keyboard | Smart resize | — | Cycle ½, ⅔, full | Three step sizes | Feasible | Idea |
 | Balance sizes | Yes | — | — | — | Feasible | Idea |
-| Numbered workspaces | Yes, emulated | Nested spaces | Native macOS Spaces | 1–10 | Emulated, windows parked off screen | #2 |
-| Send window to workspace | Yes | — | Native Spaces | With or without following | Feasible | #2 |
+| Numbered workspaces | Yes, emulated | Nested spaces | Native Spaces plus virtual rows parked in a strip | 1–10 | Hidden Space or off-screen parking | Hidden Space (#2) |
+| Send window to workspace | Yes | — | Native Spaces and virtual rows | With or without following | Feasible | #2 |
 | Previous workspace, next and previous | Back and forth | Back and forward history | Native Spaces | Both | Feasible | Idea |
 | Move workspace to another monitor | Yes | Per display | — | By direction | Feasible | Idea |
 | Pin a workspace to a monitor | Yes | — | — | Through rules | Feasible | Idea |
@@ -51,13 +57,13 @@ at a screen edge.
 | Full screen, full width | Full screen | Frame window | Fill the screen | Both | Feasible | Idea |
 | Toggle floating and tiling | Yes | Green button | — | Yes | Feasible | Idea |
 | Per-app rules (workspace, floating) | Yes | Exclude an app | Yes (Paneru) | Yes | Feasible | Idea |
-| Gaps | Yes | — | — | Yes, with a toggle | Feasible | Idea |
+| Gaps | Yes | — | — | Yes, with a toggle | Feasible | #2 |
 | Active window border | — | — | — | Gradient border | Needs its own overlay | Idea |
 | Layout animations | — | 460 ms, drawn from snapshots | — | Bezier curves | Hard: moving windows through Accessibility is slow | Idea |
 | Overview of everything | — | Yes | — | — | Needs Screen Recording | Idea |
 | Saved views | — | Nine | — | Saved window width | Feasible | Idea |
 | Layout survives restarts | — | Yes | Yes (Paneru) | Per workspace | Feasible | Idea |
-| Cycle windows in a workspace | — | — | — | Alt+Tab | Feasible | Idea |
+| Cycle windows in a workspace | — | — | — | Alt+Tab | Feasible | #2 |
 | Transparency for other apps' windows | — | — | — | Yes | Not without disabling SIP | No |
 | Modifier plus drag to move or resize | — | Plain dragging | Swipe to slide the strip | Yes | Event tap | No: keyboard only |
 | Binding modes | Yes | — | — | — | Feasible | Idea |

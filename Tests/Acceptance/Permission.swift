@@ -18,19 +18,24 @@ extension Acceptance {
                 try? FileManager.default.removeItem(at: home)
             }
 
-            func status() throws -> Status? {
-                let result = try run([cli.path, "status", "--json"], environment: environment, timeout: 1.2)
+            func status(timeout: Double) throws -> Status? {
+                let result = try run([cli.path, "status", "--json"], environment: environment, timeout: timeout)
                 guard result.status == 0 else { return nil }
                 let value = try JSONDecoder().decode(Status.self, from: result.outputData)
                 pids.insert(value.pid)
                 return value
             }
 
-            func wait(seconds: Double, for predicate: (Status) -> Bool) throws -> Status {
-                let deadline = monotonicSeconds() + seconds
+            func wait(until deadline: Double, for predicate: (Status) -> Bool) throws -> Status {
                 while monotonicSeconds() < deadline {
-                    if let value = try status(), predicate(value) { return value }
-                    sleep(seconds: 0.025)
+                    do {
+                        if let value = try status(timeout: min(1.2, deadline - monotonicSeconds())),
+                           monotonicSeconds() <= deadline, predicate(value) { return value }
+                    } catch is ProcessTimeout {
+                        // LaunchServices can stall a read-only query during startup
+                        // or relaunch. Retry only within the original deadline.
+                    }
+                    sleep(seconds: max(0, min(0.025, deadline - monotonicSeconds())))
                 }
                 throw HarnessError("permission state did not converge within the deadline")
             }
@@ -38,8 +43,8 @@ extension Acceptance {
             let provision = root.appending(path: "scripts/ci-accessibility").path
             try run([provision, "--deny-development"], timeout: 30, check: true)
             try run(["open", "-n", "-g", "--stdout", "/dev/null", "--stderr", "/dev/null",
-                     "--env", "XDG_CONFIG_HOME=" + home.path, app.path], check: true)
-            let initial = try wait(seconds: 5) { $0.permission == "needed" }
+                     "--env", "XDG_CONFIG_HOME=" + home.path, app.path, "--args", "--test-fixture-only"], check: true)
+            let initial = try wait(until: monotonicSeconds() + 5) { $0.permission == "needed" }
             let windows = try run([cli.path, "windows", "--json"], environment: environment, timeout: 1)
             #expect(windows.status != 0)
             #expect(windows.error.contains("Accessibility permission needed"))
@@ -47,7 +52,7 @@ extension Acceptance {
 
             let started = monotonicSeconds()
             try run([provision], timeout: 30, check: true)
-            _ = try wait(seconds: 3) { $0.permission == "granted" && $0.pid != initial.pid }
+            _ = try wait(until: started + 3) { $0.permission == "granted" && $0.pid != initial.pid }
             let elapsed = monotonicSeconds() - started
             #expect(elapsed < 3)
             print(String(format: "E14: automatic restart with permission granted in %.3f s; visual evidence is separate.", elapsed))

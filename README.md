@@ -14,6 +14,11 @@ across signed rebuilds, and reloads its TOML config on save. The
 [roadmap](https://github.com/taecontrol/tessel/issues) tracks the tiling experiments;
 [docs/features.md](docs/features.md) compares the window managers that inspired them.
 
+The optional `[experiments] workspaces = true` experiment adds ten keyboard-driven
+workspaces, one tiled window at a time, with configurable gaps and shortcuts.
+Inactive windows live in a hidden Space; disabling the flag or quitting returns
+them to the current desktop. The CLI remains read-only.
+
 Build from source with Xcode 27 using [the development guide](docs/development.md).
 
 ## Requirements

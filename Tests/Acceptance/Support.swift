@@ -20,6 +20,10 @@ struct HarnessError: Error, CustomStringConvertible {
     init(_ description: String) { self.description = description }
 }
 
+struct ProcessTimeout: Error, CustomStringConvertible {
+    let description: String
+}
+
 func monotonicSeconds() -> Double {
     Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1e9
 }
@@ -89,7 +93,7 @@ func run(_ command: [String], environment: [String: String]? = nil, timeout: Dou
         kill(process.processIdentifier, SIGKILL)
         exited.wait()
         _ = reading.wait(timeout: .now() + 1)
-        throw HarnessError("\(URL(fileURLWithPath: command[0]).lastPathComponent) timed out after \(timeout) seconds")
+        throw ProcessTimeout(description: "\(URL(fileURLWithPath: command[0]).lastPathComponent) timed out after \(timeout) seconds")
     }
     _ = reading.wait(timeout: .now() + 1)
     let result = ProcessResult(status: process.terminationStatus, outputData: collected[0], errorData: collected[1])

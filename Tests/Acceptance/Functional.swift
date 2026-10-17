@@ -47,6 +47,31 @@ extension Acceptance {
 
         static func tiles(_ kind: String) -> Bool { ["standard", "noFullscreen"].contains(kind) }
 
+        @Test func observerRejectsAReplacedFixtureBeforeReadingWindows() throws {
+            let target = try FixtureSession(directory: harness.directory, number: 98)
+            let pid = target.pid
+            var replaced = false
+            defer {
+                if replaced {
+                    // The replacement exits itself. Never signal a reused PID.
+                    _ = eventually(within: 3) { kill(pid, 0) != 0 }
+                    target.disconnect()
+                } else { target.stop() }
+            }
+            _ = try harness.observer.command("observe", ["pids": [pid]])
+            try target.command("replaceProcess")
+            replaced = true
+            let refused = try eventually(within: 1) {
+                do { _ = try harness.observer.command("observe", ["pids": [pid]]) }
+                catch let error as HarnessError where error.description == "the observer accepts fixture processes only" {
+                    return true
+                }
+                return false
+            }
+            #expect(refused)
+            #expect(kill(pid, 0) == 0, "the observer must reject replaced code while its PID is still alive")
+        }
+
         @Test func e01StandardResizableWindowTilesWithReason() throws {
             try expectState(try fixture.open(), "tiled", "standard window")
         }
@@ -122,6 +147,60 @@ extension Acceptance {
             try #require(try converges { $0.count == 1 && $0[0].state == "tiled" && $0[0].tabs == 3 })
             for key in ["tabs0", "tabs1", "tabs2"] { try fixture.command("close", ["key": key]) }
             #expect(try converges { $0.isEmpty })
+        }
+
+        @Test func e05ReplacingNativeTabFrontDuringInsertionKeepsOneEntry() throws {
+            let group = try fixture.command("open", ["kind": "tabs", "key": "tabs", "count": 3])
+            try #require(try converges { $0.count == 1 && $0[0].tabs == 3 })
+            // Insertion can briefly leave AXWindows pointing at the old front
+            // while AXFocusedWindow already identifies its replacement.
+            for _ in 0..<20 {
+                let front = try #require(try harness.rows().first?.id)
+                let target = try #require((0..<3).map { "tabs\($0)" }.first { group.windows[$0] != front })
+                try fixture.command("tab", ["key": target])
+                try fixture.command("addTab", ["key": "inserted", "reference": target])
+                try #require(try converges { $0.count == 1 && $0[0].tabs == 4 })
+                try fixture.command("close", ["key": "inserted"])
+                try #require(try converges { $0.count == 1 && $0[0].tabs == 3 })
+            }
+        }
+
+        @Test func e05FocusedNativeTabReplacementSurvivesLaggingWindowList() throws {
+            let group = try fixture.command("open", ["kind": "tabs", "key": "tabs", "count": 3])
+            let first = try #require(group.windows["tabs0"])
+            let selected = try #require(group.windows["tabs1"])
+            try #require(try converges { $0.count == 1 && $0[0].id == first && $0[0].tabs == 3 })
+            // AXWindows can retain the old front while AXFocusedWindow exposes
+            // the uncached replacement. Keep that ordering stable instead of
+            // hoping a normal tab transition lands between two AX requests.
+            try fixture.command("windowList", ["keys": ["tabs0"]])
+            let changed = try fixture.command("tab", ["key": "tabs1"])
+            #expect(changed.nativeTabs["tabs1"] == 3)
+            try #require(try converges { $0.count == 1 && $0[0].id == selected && $0[0].tabs == 3 })
+            // Later reads still list the former root; it must stay retired.
+            sleep(seconds: 0.5)
+            let rows = try harness.rows()
+            #expect(rows.count == 1 && rows.first?.id == selected && rows.first?.tabs == 3)
+        }
+
+        @Test func e05FormerNativeRootIsRetiredAfterLosingItsBarBeforeFocusMoves() throws {
+            let group = try fixture.command("open", ["kind": "tabs", "key": "tabs", "count": 3])
+            let first = try #require(group.windows["tabs0"])
+            let selected = try #require(group.windows["tabs1"])
+            try #require(try converges { $0.count == 1 && $0[0].id == first && $0[0].tabs == 3 })
+            // A read can find the former root without its bar before it can
+            // identify the successor. Hold that ordering with real AppKit tabs.
+            try fixture.command("windowList", ["keys": ["tabs0"]])
+            try fixture.command("focusedWindow", ["published": false])
+            let changed = try fixture.command("tab", ["key": "tabs1"])
+            #expect(changed.nativeTabs["tabs1"] == 3)
+            try #require(try converges { $0.count == 1 && $0[0].id == first && $0[0].tabs == 1 },
+                         "the former root must be observed without its native bar")
+            try fixture.command("focusedWindow", ["published": true])
+            try #require(try converges { $0.count == 1 && $0[0].id == selected && $0[0].tabs == 3 })
+            sleep(seconds: 0.5)
+            let rows = try harness.rows()
+            #expect(rows.count == 1 && rows.first?.id == selected && rows.first?.tabs == 3)
         }
 
         @Test(arguments: ["emptyContentTabs", "contentTabs", "segmentedTabs"])
@@ -220,7 +299,7 @@ extension Acceptance {
             let window = try fixture.open(key: "background", ["background": true])
             try expectState(window, "tiled")
             sleep(seconds: 0.55)  // A settling or focus event must not replace destruction.
-            try fixture.command("close", ["key": "background"])
+            try fixture.command("close", ["key": "background", "retain": true])
             #expect(try eventually { try harness.row(window) == nil })
             let other = try FixtureSession(directory: harness.directory, number: 1)
             harness.otherFixtures.append(other)
@@ -277,7 +356,7 @@ extension Acceptance {
             let objects = try JSONSerialization.jsonObject(with: listing.outputData) as? [[String: Any]] ?? []
             let keys = objects.first { ($0["id"] as? NSNumber)?.uint32Value == window && $0["bundleId"] as? String == fixtureID }
                 .map { Set($0.keys) }
-            #expect(keys == ["id", "app", "bundleId", "state", "reason", "tabs"])
+            #expect(keys == ["id", "app", "bundleId", "state", "reason", "tabs", "workspace", "visible"])
         }
 
         @Test func e11AbsentAppFailsInUnderOneSecond() throws {

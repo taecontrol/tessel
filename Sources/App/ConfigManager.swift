@@ -1,16 +1,19 @@
 import Darwin
 import Foundation
 
-/// Foundation's schema is intentionally empty. Parse the TOML forms that can
-/// express it; any assignment or other table is an unknown-key error.
+/// Parse the experiment's bounded TOML schema before replacing any live state.
 enum ConfigParser {
     private static let horizontalWhitespace = CharacterSet(charactersIn: " \t")
+    private static let bareKeyCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
 
     static func parse(_ data: Data) throws -> Configuration {
         guard data.count <= 65_536, let text = String(data: data, encoding: .utf8) else {
             throw ConfigError(line: 1, message: "Configuration must be UTF-8 and no larger than 64 KiB")
         }
-        var seenExperiments = false
+        var configuration = Configuration()
+        var tables = Set<String>()
+        var keys = Set<String>()
+        var table = ""
         for (index, source) in text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n").enumerated() {
             let lineNumber = index + 1
             guard !source.unicodeScalars.contains(where: { ($0.value < 0x20 && $0.value != 9) || $0.value == 0x7f }) else {
@@ -18,21 +21,77 @@ enum ConfigParser {
             }
             let line = uncomment(source).trimmingCharacters(in: horizontalWhitespace)
             if line.isEmpty { continue }
-            guard line.first == "[", line.last == "]", !line.hasPrefix("[[") else {
-                throw ConfigError(line: lineNumber, message: line.contains("=") ? "Unknown configuration key" : "Invalid TOML; expected a table or key assignment")
+            if line.first == "[" {
+                guard line.last == "]", !line.hasPrefix("[["),
+                      let name = keyName(String(line.dropFirst().dropLast()).trimmingCharacters(in: horizontalWhitespace)),
+                      ["experiments", "keys", "gaps"].contains(name) else {
+                    throw ConfigError(line: lineNumber, message: "Unknown or invalid configuration table")
+                }
+                guard tables.insert(name).inserted else { throw ConfigError(line: lineNumber, message: "Duplicate \(name) table") }
+                table = name
+                continue
             }
-            let key = line.dropFirst().dropLast().trimmingCharacters(in: horizontalWhitespace)
-            guard tableName(key) == "experiments" else {
-                throw ConfigError(line: lineNumber, message: "Unknown or invalid configuration table")
+            guard let separator = assignment(in: line),
+                  let key = keyName(String(line[..<separator]).trimmingCharacters(in: horizontalWhitespace)) else {
+                throw ConfigError(line: lineNumber, message: "Invalid TOML; expected a table or key assignment")
             }
-            guard !seenExperiments else { throw ConfigError(line: lineNumber, message: "Duplicate experiments table") }
-            seenExperiments = true
+            let value = String(line[line.index(after: separator)...]).trimmingCharacters(in: horizontalWhitespace)
+            let canonical = table == "keys" ? KeyChord(key)?.name ?? key : key
+            guard keys.insert(table + "." + canonical).inserted else { throw ConfigError(line: lineNumber, message: "Duplicate configuration key") }
+            switch (table, key) {
+            case ("experiments", "workspaces"):
+                guard ["true", "false"].contains(value) else { throw ConfigError(line: lineNumber, message: "workspaces must be a boolean") }
+                configuration.experiments[key] = value == "true"
+            case ("gaps", "outer"):
+                guard let gap = number(value), gap.isFinite, gap >= 0 else { throw ConfigError(line: lineNumber, message: "outer must be a nonnegative TOML number") }
+                configuration.gaps.outer = gap
+            case ("keys", _):
+                guard let chord = KeyChord(key) else { throw ConfigError(line: lineNumber, message: "Invalid key or modifier; use alt, shift, ctrl, cmd and a letter or digit") }
+                guard let command = string(value), command.isEmpty || WorkspaceCommand(command) != nil else {
+                    throw ConfigError(line: lineNumber, message: "Unknown command; use workspace 1…10, send 1…10, focus next, or focus previous")
+                }
+                configuration.keys[chord.name] = command
+            default: throw ConfigError(line: lineNumber, message: "Unknown configuration key")
+            }
         }
-        return Configuration()
+        return configuration
     }
 
-    private static func tableName(_ value: String) -> String? {
-        if value == "experiments" { return value }
+    private static func number(_ value: String) -> Double? {
+        func matches(_ pattern: String) -> Bool {
+            value.range(of: "\\A(?:" + pattern + ")\\z", options: .regularExpression) != nil
+        }
+        let clean = value.replacingOccurrences(of: "_", with: "")
+        for (prefix, digits, radix) in [("0x", "0-9a-fA-F", 16), ("0o", "0-7", 8), ("0b", "01", 2)] {
+            if matches(prefix + "[" + digits + "](?:_?[" + digits + "])*") {
+                return Int64(clean.dropFirst(2), radix: radix).map(Double.init)
+            }
+        }
+        guard matches("[+-]?(?:0|[1-9](?:_?[0-9])*)(?:\\.[0-9](?:_?[0-9])*)?(?:[eE][+-]?[0-9](?:_?[0-9])*)?") else { return nil }
+        if !clean.contains("."), !clean.lowercased().contains("e") { return Int64(clean).map(Double.init) }
+        return Double(clean)
+    }
+
+    private static func keyName(_ value: String) -> String? {
+        if !value.isEmpty, value.unicodeScalars.allSatisfy({ bareKeyCharacters.contains($0) }) { return value }
+        return string(value)
+    }
+
+    private static func assignment(in line: String) -> String.Index? {
+        var quote: Character?
+        var escaped = false
+        for index in line.indices {
+            let character = line[index]
+            if escaped { escaped = false; continue }
+            if quote == "\"", character == "\\" { escaped = true; continue }
+            if character == quote { quote = nil }
+            else if quote == nil, character == "\"" || character == "'" { quote = character }
+            else if quote == nil, character == "=" { return index }
+        }
+        return nil
+    }
+
+    private static func string(_ value: String) -> String? {
         if value.hasPrefix("'"), value.hasSuffix("'"), value.count >= 2 {
             return String(value.dropFirst().dropLast())
         }

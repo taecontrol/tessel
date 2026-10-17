@@ -39,6 +39,12 @@ jobs:
           name: resource-calibration
           path: .work/resource-calibration.json
           if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: matrix.suite == 'functional' && always()
+        with:
+          name: switch-calibration
+          path: .work/switch-calibration.json
+          if-no-files-found: ignore
       - name: Remove ephemeral keychain
         if: always()
         run: security delete-keychain "$RUNNER_TEMP/tessel-ci.keychain-db"

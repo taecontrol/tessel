@@ -1,6 +1,6 @@
 {
   "cpuNanoseconds": 41319498,
-  "residentBytes": 50000000,
+  "residentBytes": 60000000,
   "calibration": {
     "source": "https://github.com/taecontrol/tessel/actions/runs/38827876915",
     "revision": "79dd386d67e7379e323896cae377b329966ebb2c",

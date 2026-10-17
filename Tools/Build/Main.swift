@@ -66,6 +66,7 @@ struct TesselBuild {
 
         func compile(_ folder: String, to output: URL, extra: [URL] = []) throws {
             let command = ["xcrun", "swiftc", "-parse-as-library", "-swift-version", "6", "-O", "-target", "arm64-apple-macos27.0", "-o", output.path]
+                + (folder == "Sources/App" && options.variant == "dev" ? ["-D", "TESSEL_DEVELOPMENT"] : [])
             let inputs = try (common + sources(in: folder) + extra).map(\.path)
             guard try run(command + inputs, capture: false).status == 0 else { throw Failure("Compilation of \(folder) failed.") }
         }
