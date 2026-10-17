@@ -79,7 +79,7 @@ extension Acceptance.FunctionalRails {
         kill(harness.appPID,SIGCONT); sutStopped = false
         try #require(try eventually(within:1) { try harness.status().workspaces?.gaps.outer == 11 })
         Thread.sleep(forTimeInterval:0.1)
-        #expect(try flow.observe(focusedOnly:true).frontmostFixturePID == other.pid,
+        #expect(try flow.observe().activeFixturePID == other.pid,
                 "a nonfocusing gap reload must retain native activation while its facts are delayed")
         kill(other.pid,SIGCONT); publisherStopped = false
         try focus(d,within:1)
