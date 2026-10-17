@@ -71,6 +71,14 @@ final class WindowCatalog: NSObject {
         app.present(id: id, area: area, focus: focus, completion: completion)
     }
 
+    func presentRail(pid: pid_t, id: UInt32, frame: CGRect?, position: Bool, resize: Bool, focus: Bool,
+                     completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
+        guard let app = apps[pid] else { completion(nil); return }
+        app.presentRail(id:id,target:frame,position:position,resize:resize,focus:focus,completion:completion)
+    }
+
+    func returnInside(ids: Set<UInt32>, area: CGRect) { apps.values.forEach { $0.returnInside(ids:ids,area:area) } }
+
     func cancelPresentations() { apps.values.forEach { $0.cancelPresentation() } }
 }
 
@@ -86,7 +94,7 @@ private struct WindowFacts {
     let subrole: String
     let resizable: Bool
     let tabs: Int
-    let frame: CGRect
+    var frame: CGRect
     let parent: UInt32?
     let nativeTabGroups: [AXUIElement]
 
@@ -492,6 +500,64 @@ private final class AppWindows: @unchecked Sendable {
                 }
                 publishSnapshot()
             } catch { /* Keep the last complete classification when the app is busy. */ }
+        }
+    }
+
+    func presentRail(id: UInt32, target: CGRect?, position: Bool, resize: Bool, focus: Bool,
+                     completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
+        let token = presentationLock.withLock { presentation }
+        queue.async { [self] in
+            var accepted: CGRect?
+            defer { let result = accepted; DispatchQueue.main.async { completion(result) } }
+            guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
+            do {
+                guard try canPresent(window,id:id) else { return }
+                if let target {
+                    // Resize before positioning: macOS otherwise widens windows
+                    // at the left edge to retain its minimum visible strip.
+                    if resize {
+                        // Size changes are constrained by the window's current
+                        // top edge. Stage inside the display at the target top
+                        // before sizing, then place its possibly partial frame.
+                        var safe = CGPoint(x:0,y:target.minY)
+                        try check(AXUIElementSetAttributeValue(window,kAXPositionAttribute as CFString,AXValueCreate(.cgPoint,&safe)!))
+                        var size = target.size
+                        try check(AXUIElementSetAttributeValue(window,kAXSizeAttribute as CFString,AXValueCreate(.cgSize,&size)!))
+                        constrained.remove(id)
+                        validations[id] = nil
+                    }
+                    guard presentationLock.withLock({ presentation == token }) else { return }
+                    if position {
+                        var origin = target.origin
+                        try check(AXUIElementSetAttributeValue(window,kAXPositionAttribute as CFString,AXValueCreate(.cgPoint,&origin)!))
+                    }
+                    accepted = try frame(window)
+                    if let index = facts.firstIndex(where: { $0.id == id }), let accepted { facts[index].frame = accepted }
+                }
+                guard presentationLock.withLock({ presentation == token }), try canPresent(window,id:id) else { return }
+                if focus {
+                    try check(AXUIElementSetAttributeValue(application,kAXFrontmostAttribute as CFString,kCFBooleanTrue))
+                    guard presentationLock.withLock({ presentation == token }) else { return }
+                    try check(AXUIElementSetAttributeValue(window,kAXMainAttribute as CFString,kCFBooleanTrue))
+                    guard presentationLock.withLock({ presentation == token }) else { return }
+                    try check(AXUIElementPerformAction(window,kAXRaiseAction as CFString))
+                }
+                publishSnapshot()
+            } catch { /* Another app's queue and the CLI remain independent. */ }
+        }
+    }
+
+    /// Shutdown is synchronous so a terminating process cannot abandon its
+    /// partial windows. Only caller-owned IDs are eligible; no size is written.
+    func returnInside(ids: Set<UInt32>, area: CGRect) {
+        queue.sync {
+            for id in ids.sorted() {
+                guard let window = elementsByID[id], (try? canPresent(window,id:id)) == true,
+                      let frame = try? frame(window) else { continue }
+                var point = CGPoint(x:max(area.minX,min(frame.minX,area.maxX-frame.width)),
+                                    y:max(area.minY,min(frame.minY,area.maxY-frame.height)))
+                _ = AXUIElementSetAttributeValue(window,kAXPositionAttribute as CFString,AXValueCreate(.cgPoint,&point)!)
+            }
         }
     }
 

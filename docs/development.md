@@ -267,3 +267,72 @@ Workspace E36 enforces the same idle wakeup, CPU, and footprint limits as E22.
 Before the first public release (#6), revisit the bundle IDs, config schema,
 and read-only CLI contract. A command that changes state or exposes titles needs
 an architecture decision before implementation.
+
+## Rails experiment (#17)
+
+`[experiments] rails = true` enables workspaces in rail layout, independently
+of the `workspaces` flag. Without it, the workspace experiment keeps its
+one-window layout and shortcuts. With both flags absent, tessel only observes.
+Reloading into rails forms one row per existing workspace in arrival order.
+The active workspace and focused window remain selected. Membership and rail
+positions are session state, with no persistence across restarts.
+
+A rail is a horizontal row of windows with individual widths, separated by the
+outer gap. Windows keep their current width, capped at the rail area's width,
+and take the area's height. Height-constrained windows remain tiled, aligned
+to the top; their CLI reason explains the constraint. A row that fits starts
+at the area's left edge. A longer row forms a ring: the last window's next
+neighbor is the first. Focus moves without scrolling when the destination is
+fully visible. Otherwise the row scrolls to reveal it with a 56-point peek;
+wide windows are centered. Completely off-screen windows go into the closet.
+Focus, scrolling and elevator travel never resize windows.
+
+Option+H/L (`focus left|right`) wraps within the current rail. Option+K/J
+(`focus up|down`) visits adjacent rails, stopping at either end. Each rail
+remembers its focused window and scroll position. Option+Shift+H/L
+(`move left|right`) swaps neighbors, including across the ring's end.
+Option+Shift+K/J (`move up|down`) inserts the window after the destination
+rail's remembered window and follows it. Moving beyond an end creates a rail,
+except when already alone at that end. Empty rails disappear.
+
+New windows enter to the right of the current window. Closing selects the
+left neighbor and closes the gap. Sending still follows the window to the
+selected workspace, inserting after its current rail's remembered window.
+Minimized or hidden windows leave their rail temporarily; restoring inserts
+after their former left neighbor when that rail survives, or after the current
+window otherwise. External activation selects the window's workspace and rail
+and reveals it. Dialogs float as before, sheets follow their parents, and
+native fullscreen windows have no rail or workspace.
+
+A manually moved window stays where released until the next rail render. A
+manual resize updates that window's width and repositions its right neighbors.
+Disabling rails or quitting returns all managed windows fully inside the
+visible desktop. After a crash, closet recovery still works with the flag off,
+but a partially visible window stays where it was: no persisted membership
+identifies it as a former rail window.
+
+Numeric workspace/send shortcuts keep their meanings. `focus next|previous`
+remain bindable aliases for rail traversal, with no default binding in rails.
+`[keys]` overrides merge with the layout's defaults. `windows --json` adds
+nullable one-based `rail` and `slot` fields, and `status --json` reports
+`workspaces.layout`, the nullable current `rail`, and `railCount`. The status
+item shows the workspace number and one bar per rail, highlighting the current
+one; its AX label includes the current rail and total. The map overlay belongs
+to #18, and the floating layer to #19.
+
+`Tests/Acceptance/Rails.swift` exercises #17 at the same signed CLI and
+independent AX/CG boundary as #2. The fixture accepts width fractions of the
+usable area, keeping fitting and overflowing scenarios independent of screen
+size. Run `scripts/verify FunctionalRails`; resource E29 is included in
+`scripts/verify --resources` with the unchanged ADR 0003 limits. Rails E28
+records 20 completed scrolls and elevator trips in `.work/rails-calibration.json`;
+`Tests/Acceptance/rails-budget.json` retains the authorized xcode-27 run and
+uses three times its maximum, capped at 200 ms. Timing starts at the real key
+post and ends after independent AX position, size, focus and CG visibility
+checks. Capture the app's own status button, without desktop content, with:
+
+```sh
+TESSEL_CAPTURE_WORKSPACES=1 scripts/verify captureRailsStatusItem
+```
+
+The PNGs are written to `.work/captures/E26-workspace-1-rail-{1,2}.png`.

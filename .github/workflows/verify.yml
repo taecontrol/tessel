@@ -36,11 +36,16 @@ jobs:
             echo "Resources suite exceeded the 90 second limit" >&2
             exit 1
           fi
+      - name: Capture rails status item for review
+        run: TESSEL_CAPTURE_WORKSPACES=1 scripts/verify captureRailsStatusItem
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: switch-calibration
-          path: .work/switch-calibration.json
+          path: |
+            .work/switch-calibration.json
+            .work/rails-calibration.json
+            .work/captures/E26-*.png
           if-no-files-found: ignore
       - name: Remove ephemeral keychain
         if: always()

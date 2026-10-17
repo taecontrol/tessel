@@ -356,7 +356,7 @@ extension Acceptance {
             let objects = try JSONSerialization.jsonObject(with: listing.outputData) as? [[String: Any]] ?? []
             let keys = objects.first { ($0["id"] as? NSNumber)?.uint32Value == window && $0["bundleId"] as? String == fixtureID }
                 .map { Set($0.keys) }
-            #expect(keys == ["id", "app", "bundleId", "state", "reason", "tabs", "workspace", "visible"])
+            #expect(keys == ["id", "app", "bundleId", "state", "reason", "tabs", "workspace", "visible", "rail", "slot"])
         }
 
         @Test func e11AbsentAppFailsInUnderOneSecond() throws {
