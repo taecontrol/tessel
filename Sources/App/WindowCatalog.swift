@@ -523,9 +523,9 @@ private final class AppWindows: @unchecked Sendable {
                 guard presentationLock.withLock({ presentation == token }), try canPresent(window, id: id) else { return }
                 if focus {
                     try check(AXUIElementSetAttributeValue(application, kAXFrontmostAttribute as CFString, kCFBooleanTrue))
-                    guard presentationLock.withLock({ presentation == token }) else { return }
+                    guard presentationLock.withLock({ presentation == token }), isNativeFront(window, id: id) else { return }
                     try check(AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue))
-                    guard presentationLock.withLock({ presentation == token }) else { return }
+                    guard presentationLock.withLock({ presentation == token }), isNativeFront(window, id: id) else { return }
                     try check(AXUIElementPerformAction(window, kAXRaiseAction as CFString))
                 }
                 publishSnapshot()
@@ -567,9 +567,9 @@ private final class AppWindows: @unchecked Sendable {
                 guard presentationLock.withLock({ presentation == token }), try canPresent(window,id:id) else { return }
                 if focus {
                     try check(AXUIElementSetAttributeValue(application,kAXFrontmostAttribute as CFString,kCFBooleanTrue))
-                    guard presentationLock.withLock({ presentation == token }) else { return }
+                    guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return }
                     try check(AXUIElementSetAttributeValue(window,kAXMainAttribute as CFString,kCFBooleanTrue))
-                    guard presentationLock.withLock({ presentation == token }) else { return }
+                    guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return }
                     try check(AXUIElementPerformAction(window,kAXRaiseAction as CFString))
                     // AX accepts an activation request before it necessarily
                     // becomes active. Retry once only while it is unconfirmed.
@@ -582,9 +582,9 @@ private final class AppWindows: @unchecked Sendable {
                               (try? self.value(self.application,kAXFrontmostAttribute) as? Bool) != true else { return }
                         do {
                             try self.check(AXUIElementSetAttributeValue(self.application,kAXFrontmostAttribute as CFString,kCFBooleanTrue))
-                            guard self.presentationLock.withLock({ self.presentation == token }) else { return }
+                            guard self.presentationLock.withLock({ self.presentation == token }), self.isNativeFront(window,id:id) else { return }
                             try self.check(AXUIElementSetAttributeValue(window,kAXMainAttribute as CFString,kCFBooleanTrue))
-                            guard self.presentationLock.withLock({ self.presentation == token }) else { return }
+                            guard self.presentationLock.withLock({ self.presentation == token }), self.isNativeFront(window,id:id) else { return }
                             try self.check(AXUIElementPerformAction(window,kAXRaiseAction as CFString))
                             self.publishSnapshot()
                         } catch { /* Another app and newer focus intents remain independent. */ }
@@ -639,8 +639,15 @@ private final class AppWindows: @unchecked Sendable {
         guard !hidden, try value(application, kAXHiddenAttribute) as? Bool != true,
               try value(window, kAXMinimizedAttribute) as? Bool != true,
               try value(window, "AXFullScreen") as? Bool != true else { return false }
-        // Selecting another native tab moves the group's bar to that window.
-        // Raising the former front would select it again over the user's choice.
+        return isNativeFront(window, id: id)
+    }
+
+    /// Selecting another native tab moves the group's bar to that window.
+    /// Raising or making the former front main would select it again over the
+    /// user's choice. Focus writes repeat this check: each can take long enough
+    /// on a busy system for the user to select another tab in between.
+    /// Windows without a native tab bar need no AX read.
+    private func isNativeFront(_ window: AXUIElement, id: UInt32) -> Bool {
         let groups = facts.first(where: { $0.id == id })?.nativeTabGroups ?? []
         // Its bar can leave the former root before the successor is published.
         // The retained group still identifies the real selected native window.
