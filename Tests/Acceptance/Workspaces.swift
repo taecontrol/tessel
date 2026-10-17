@@ -492,12 +492,26 @@ extension Acceptance {
             sleep(seconds: 0.5)
             #expect(try harness.status().workspaces?.active == destination)
             #expect(try !visible(b))
-            try yieldActivation(to: fixture)
-            let start = monotonicSeconds()
-            // With C still visible, AppKit may select it on a plain activation.
-            // Select B explicitly in the failed-only case; cancellation leaves
-            // both windows hidden and preserves the unchanged key-window trace.
-            try fixture.command("activate", ["key": cancelled ? "activationOnly" : "b"])
+            let start: Double
+            if cancelled {
+                try yieldActivation(to: fixture)
+                start = monotonicSeconds()
+                try fixture.command("activate", ["key": "activationOnly"])
+            } else {
+                // With C visible, AppKit can choose it during activation. Finish
+                // that handoff before selecting hidden B, keeping its activation
+                // snapshot queued until the independent AX oracle confirms B.
+                kill(harness.appPID, SIGSTOP)
+                do {
+                    defer { kill(harness.appPID, SIGCONT) }
+                    try activate(key: "activationOnly")
+                    start = monotonicSeconds()
+                    try fixture.command("tab", ["key": "b"])
+                    try #require(try eventually(within: budget) {
+                        try window(b).map { $0.focused && !$0.visible } == true
+                    }, "the external selection must actually focus hidden B before tessel resumes")
+                }
+            }
             try expectShown(b, since: start)
             #expect(try harness.status().workspaces?.active == 3)
         }
