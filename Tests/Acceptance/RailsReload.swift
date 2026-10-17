@@ -3,12 +3,13 @@ import Darwin
 import Testing
 
 extension Acceptance.FunctionalRails {
-    @Test(arguments: [true,false])
-    func e02LayoutReloadPreservesNativeFocusAwaitingPublication(rails: Bool) throws {
+    @Test(arguments: [true,false], ["layout","gaps","both"])
+    func e02LayoutReloadPreservesNativeFocusAwaitingPublication(rails: Bool, change: String) throws {
         let a = try open("known",width:0.25)
         try flow.activate(key:"known")
-        if rails { try flow.enable(); try flow.expectShown(a) }
-        else { try enable(); try focus(a) }
+        let startsInRails = change == "gaps" ? rails : !rails
+        if startsInRails { try enable(); try focus(a) }
+        else { try flow.enable(); try flow.expectShown(a) }
         let d = try fixture.open(kind:"dialog",key:"dialog")
         try #require(try eventually { try harness.row(d)?.workspace == 1 })
         try flow.activate(key:"known"); try focus(a)
@@ -20,9 +21,13 @@ extension Acceptance.FunctionalRails {
         kill(harness.appPID,SIGSTOP); sutStopped = true
         try flow.activate(key:"dialog"); try focus(d)
         kill(fixture.pid,SIGSTOP); publisherStopped = true
-        try writeConfig(rails ? config : flow.enabled)
+        try writeConfig((rails ? config : flow.enabled) + (change == "layout" ? "" : "[gaps]\nouter = 11\n"))
         kill(harness.appPID,SIGCONT); sutStopped = false
-        try #require(try eventually(within:1) { try harness.status().workspaces?.layout == (rails ? "rails" : "stack") })
+        try #require(try eventually(within:1) {
+            let status = try harness.status().workspaces
+            return status?.layout == (rails ? "rails" : "stack")
+                && status?.gaps.outer == (change == "layout" ? 10 : 11)
+        })
         kill(fixture.pid,SIGCONT); publisherStopped = false
         try focus(d,within:1)
         #expect(try harness.row(d)?.workspace == 1)
