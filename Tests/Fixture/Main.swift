@@ -188,6 +188,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 }
                 if background { window.orderBack(nil) }
             }
+        case "detachTab": windows[key]?.moveTabToNewWindow(nil)
         case "tab": windows[key]?.makeKeyAndOrderFront(nil)
         case "windowList":
             // Model AppKit's lagging AXWindows enumeration with real windows.
@@ -264,6 +265,11 @@ final class Fixture: NSObject, NSApplicationDelegate {
             if let frame = command["frame"] as? [Double], frame.count == 4 {
                 let height = NSScreen.screens.first?.frame.height ?? 0
                 windows[key]?.setFrame(NSRect(x: frame[0], y: height - frame[1] - frame[3], width: frame[2], height: frame[3]), display: true)
+            }
+        case "limitWidth":
+            if let window = windows[key], let width = command["width"] as? Double {
+                let chrome = window.frame.width - window.contentRect(forFrameRect: window.frame).width
+                window.contentMaxSize = NSSize(width:width-chrome,height:10000)
             }
         case "limitHeight":
             if let window = windows[key], let height = command["height"] as? Double {
