@@ -361,25 +361,46 @@ final class Workspaces {
 
     private func activateFinderDesktop() {
         guard let finder = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first else { return }
-        if LaunchOptions.fixtureOnly {
-            // Finder includes its desktop scroll area in AXWindows. Permit only
-            // that known non-window element; ordinary or unknown entries and
-            // failed reads must never activate an unmanaged Finder window.
-            let application = AXUIElementCreateApplication(finder.processIdentifier)
-            AXUIElementSetMessagingTimeout(application, 0.02)
-            var value: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &value) == .success,
-                  let windows = value as? [AXUIElement] else { return }
-            for window in windows {
-                AXUIElementSetMessagingTimeout(window, 0.02)
-                var role: CFTypeRef?, subrole: CFTypeRef?
-                guard AXUIElementCopyAttributeValue(window, kAXRoleAttribute as CFString, &role) == .success,
-                      role as? String == kAXScrollAreaRole else { return }
-                let result = AXUIElementCopyAttributeValue(window, kAXSubroleAttribute as CFString, &subrole)
-                guard result == .noValue || result == .attributeUnsupported else { return }
+        guard LaunchOptions.fixtureOnly else { finder.activate(); return }
+        // A busy Finder, or one answering its first AX client, can miss a
+        // short timeout. That is not evidence of an ordinary window: retry
+        // failed reads off the main thread, and let only this render activate.
+        let pid = finder.processIdentifier
+        let token = transition
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var safe: Bool?
+            for _ in 0..<3 where safe == nil { safe = Self.finderListsOnlyItsDesktop(pid) }
+            guard safe == true else { return }
+            DispatchQueue.main.async {
+                guard let self, self.status.enabled, self.transition == token, self.focused == nil,
+                      let finder = NSRunningApplication(processIdentifier: pid),
+                      finder.bundleIdentifier == "com.apple.finder" else { return }
+                finder.activate()
             }
         }
-        finder.activate()
+    }
+
+    /// Finder includes its desktop scroll area in AXWindows. Permit only that
+    /// known non-window element; ordinary or unknown entries return false and
+    /// failed reads return nil, so neither activates an unmanaged Finder window.
+    private nonisolated static func finderListsOnlyItsDesktop(_ pid: pid_t) -> Bool? {
+        let application = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(application, 0.05)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &value) == .success,
+              let windows = value as? [AXUIElement] else { return nil }
+        for window in windows {
+            AXUIElementSetMessagingTimeout(window, 0.05)
+            var role: CFTypeRef?, subrole: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(window, kAXRoleAttribute as CFString, &role) == .success else { return nil }
+            guard role as? String == kAXScrollAreaRole else { return false }
+            switch AXUIElementCopyAttributeValue(window, kAXSubroleAttribute as CFString, &subrole) {
+            case .noValue, .attributeUnsupported: continue
+            case .success: return false
+            default: return nil
+            }
+        }
+        return true
     }
 
     private func replace(_ previous: UInt32, with id: UInt32) {

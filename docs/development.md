@@ -59,8 +59,11 @@ startup crash recovery. This argument exists only in the signed `.dev` build and
 is rejected by the daily build. Before activating Finder for an empty workspace
 in fixture-only mode, tessel requires a successful AXWindows read without
 ordinary windows. Finder's desktop scroll area is allowed; unknown entries and
-failed reads block activation. Tessel inspects no window content. Local tests
-still check that managed windows disappear and report
+failed reads block activation. A failed read is retried twice off the main
+thread, because a busy Finder or one answering its first AX client can miss a
+short timeout; only the render that requested it may then activate Finder.
+Tessel inspects no window content. Local tests still check that managed
+windows disappear and report
 when the Finder desktop assertion is skipped. CI requires the full assertion.
 Full window listings, real window titles, and personal configs are never
 printed or saved. The independent AX probe verifies the running code's signed
