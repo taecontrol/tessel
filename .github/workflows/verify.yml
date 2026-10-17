@@ -11,7 +11,7 @@ jobs:
   acceptance:
     name: Acceptance
     runs-on: xcode-27
-    timeout-minutes: 8
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Configure ephemeral certificate signing

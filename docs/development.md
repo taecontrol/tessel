@@ -109,8 +109,10 @@ window: it suspends the process and changes its counters.
 
 CI runs permission, functional, and resource verification sequentially in one
 acceptance job. The resource command has a 90-second budget, and the whole job
-has an eight-minute (480-second) timeout. The workspace switch timing artifact
-is still uploaded.
+has a fifteen-minute (900-second) timeout. With the rails suite, the functional
+command takes about 245 seconds locally; `xcode-27` runners have taken 1.2 to
+1.8 times as long, so the whole job needs about 500 to 710 seconds. The
+workspace switch timing artifact is still uploaded.
 
 The independent observer gives each AX read 100 ms. A timed-out read means the
 app did not answer, so it must not count as an absent or unfocused window. The
