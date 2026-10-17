@@ -78,7 +78,9 @@ final class Workspaces {
                 if let focused { rails.select(focused) }
             }
             installKeys()
-            render(focusing: focused, relayout: true)
+            // A layout change retains the native selection. Its notification
+            // can still be queued behind an app's current AX read.
+            render(focusing: focused, relayout: true, takeFocus: false)
         }
         if !status.enabled {
             do { try closet.start() }
