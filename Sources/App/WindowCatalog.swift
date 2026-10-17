@@ -402,7 +402,10 @@ private final class AppWindows: @unchecked Sendable {
     private func publishSnapshot(replacing replacements: [UInt32: UInt32] = [:]) {
         var focused: UInt32 = 0
         if let element = try? value(application, kAXFocusedWindowAttribute), CFGetTypeID(element) == AXUIElementGetTypeID() {
-            _ = axWindowID(element as! AXUIElement, &focused)
+            let window = element as! AXUIElement
+            // Equal AX handles do not inherit each other's messaging timeout.
+            AXUIElementSetMessagingTimeout(window, 0.05)
+            _ = axWindowID(window, &focused)
         }
         let frontmost = (try? value(application, kAXFrontmostAttribute) as? Bool) == true
         let observations = facts.map { fact in
