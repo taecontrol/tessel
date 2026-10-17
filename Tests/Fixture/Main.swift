@@ -181,6 +181,11 @@ final class Fixture: NSObject, NSApplicationDelegate {
             } else {
                 let background = command["background"] as? Bool ?? false
                 let window = makeWindow(key: key, kind: kind, title: command["title"] as? String, show: !background)
+                if let fraction = command["widthFraction"] as? Double, let screen = NSScreen.screens.first {
+                    var frame = window.frame
+                    frame.size.width = ((screen.visibleFrame.width - 20) * fraction).rounded(.down)
+                    window.setFrame(frame, display: true)
+                }
                 if background { window.orderBack(nil) }
             }
         case "tab": windows[key]?.makeKeyAndOrderFront(nil)

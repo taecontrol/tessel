@@ -61,5 +61,19 @@ extension Acceptance {
             sleep(seconds: 1)
             try verifyIdleResources("E36")
         }
+        @Test func e29RailsAcrossWorkspacesKeepTheIdleResourceBudget() throws {
+            let flow = try Acceptance.FunctionalRails()
+            try flow.enable()
+            for index in 0..<20 {
+                let id = try flow.open("idle\(index)", width: 0.4)
+                try flow.flow.activate(key: "idle\(index)")
+                try flow.focus(id)
+                if index.isMultiple(of: 2) { try flow.focus(id, since: flow.flow.post(38, shift: true)) }
+                if index.isMultiple(of: 4), index > 0 { try flow.focus(id, since: flow.flow.key(index / 4 + 1, send: true)) }
+            }
+            try #require(try converges { $0.count == 20 && Set($0.compactMap(\.workspace)).count == 5 && $0.contains { ($0.rail ?? 0) > 1 } })
+            sleep(seconds: 1)
+            try verifyIdleResources("Rails E29")
+        }
     }
 }
