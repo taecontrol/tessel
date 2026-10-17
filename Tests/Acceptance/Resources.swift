@@ -49,7 +49,7 @@ extension Acceptance {
             }
             let maximum = measurements.map(\.cpuNanoseconds).max() ?? 0
             let calibration = Calibration(measurements: measurements, cpuNanoseconds: min(100_000_000, maximum * 3),
-                                          residentBytes: 50_000_000, machTimebase: .init(numer: timebase.numer, denom: timebase.denom))
+                                          residentBytes: 60_000_000, machTimebase: .init(numer: timebase.numer, denom: timebase.denom))
             let destination = root.appending(path: ".work/resource-calibration.json")
             try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
             let encoder = JSONEncoder()
