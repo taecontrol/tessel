@@ -88,10 +88,10 @@ private struct WindowFacts {
     let tabs: Int
     let frame: CGRect
     let parent: UInt32?
-    var nativeTabGroups: [AXUIElement]
+    let nativeTabGroups: [AXUIElement]
 
-    func sharesNativeTabs(with other: WindowFacts) -> Bool {
-        nativeTabGroups.contains { group in other.nativeTabGroups.contains { CFEqual(group, $0) } }
+    func shares(_ groups: [AXUIElement]) -> Bool {
+        nativeTabGroups.contains { group in groups.contains { CFEqual(group, $0) } }
     }
 
     func record(app: String, bundleId: String, hidden: Bool) -> WindowRecord {
@@ -129,6 +129,9 @@ private final class AppWindows: @unchecked Sendable {
         kAXMainWindowChangedNotification, kAXSheetCreatedNotification
     ])
     private var facts: [WindowFacts] = []
+    // The last native bar of each listed root, kept for an unfocused root that
+    // lost it and for a retired root while a listed window still holds it.
+    private var nativeBars: [UInt32: [AXUIElement]] = [:]
     private var hidden: Bool
     private var hiddenHint: Bool
     private var stopped = false
@@ -280,7 +283,7 @@ private final class AppWindows: @unchecked Sendable {
             omitted += elementsByID.values
             for window in omitted where !elements.contains(where: { CFEqual($0, window) }) {
                 let cached = facts.first { fact in elementsByID[fact.id].map { CFEqual($0, window) } == true }
-                if let cached, next.contains(where: { $0.id != cached.id && $0.sharesNativeTabs(with: cached) }) { continue }
+                if let cached, next.contains(where: { $0.id != cached.id && $0.shares(cached.nativeTabGroups) }) { continue }
                 // AppKit publishes every minimized tab, then only the selected
                 // window after restore. Its focused window is checked above.
                 let isFocused = focusedElement.map { CFEqual($0, window) } == true
@@ -300,24 +303,42 @@ private final class AppWindows: @unchecked Sendable {
             // AXWindows may still include the former tab root before the
             // focused replacement is read. Retire it using the previous bar
             // identity, before the new snapshot loses that relationship.
+            let oldIDs = Set(facts.map(\.id))
+            // A root without a bar remembers the bar it last showed, until it is
+            // focused: a background tab cannot be, but a detached window can.
+            let focusedID = focusedElement.flatMap { element in handles.first { CFEqual($0.value, element) }?.key }
+            func lastBar(_ id: UInt32) -> [AXUIElement] { id == focusedID ? [] : nativeBars[id] ?? [] }
             let retired = Set(facts.filter { cached in
-                next.contains { $0.id != cached.id && !$0.minimized && $0.sharesNativeTabs(with: cached) }
+                let bar = cached.nativeTabGroups.isEmpty ? lastBar(cached.id) : cached.nativeTabGroups
+                return next.contains { $0.id != cached.id && !$0.minimized && $0.shares(bar) }
             }.map(\.id))
-            next.removeAll { retired.contains($0.id) }
+            // AXWindows can keep listing a retired root after its successor's
+            // read. It stays retired while another window holds its last bar.
+            let stillRetired = Set(next.filter { window in
+                !oldIDs.contains(window.id) && !window.minimized && window.nativeTabGroups.isEmpty
+                    && next.contains { $0.id != window.id && !$0.minimized && $0.shares(lastBar(window.id)) }
+            }.map(\.id))
+            next.removeAll { retired.contains($0.id) || stillRetired.contains($0.id) }
             let replacements = Dictionary(uniqueKeysWithValues: next.compactMap { window -> (UInt32, UInt32)? in
-                guard let previous = facts.first(where: { retired.contains($0.id) && window.sharesNativeTabs(with: $0) }) else { return nil }
+                guard let previous = facts.first(where: {
+                    retired.contains($0.id) && window.shares($0.nativeTabGroups.isEmpty ? lastBar($0.id) : $0.nativeTabGroups)
+                })
+                else { return nil }
                 return (window.id, previous.id)
             })
-            // A former root can lose its bar in a read that cannot identify the
-            // successor yet, because focus or the moved bar is not published.
-            // Keep its last bar while it stays listed; the successor's read retires it.
-            for index in next.indices where next[index].nativeTabGroups.isEmpty && !next[index].minimized {
-                if let previous = facts.first(where: { $0.id == next[index].id }) {
-                    next[index].nativeTabGroups = previous.nativeTabGroups
-                }
-            }
-            let oldIDs = Set(facts.map(\.id))
             let newIDs = Set(next.map(\.id))
+            // A former root can also lose its bar in a read that cannot identify
+            // its successor yet, because focus or the moved bar is unpublished.
+            // Keep each root's last bar while its group is listed.
+            var bars: [UInt32: [AXUIElement]] = [:]
+            for fact in next where !fact.minimized {
+                let bar = fact.nativeTabGroups.isEmpty ? lastBar(fact.id) : fact.nativeTabGroups
+                if !bar.isEmpty { bars[fact.id] = bar }
+            }
+            for (id, groups) in nativeBars where !newIDs.contains(id) && next.contains(where: { !$0.minimized && $0.shares(groups) }) {
+                bars[id] = groups
+            }
+            nativeBars = bars
             facts = next
             elementsByID = handles.filter { newIDs.contains($0.key) }
             // The last fill result belongs to the continuing native group.

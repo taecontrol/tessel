@@ -122,8 +122,11 @@ or an app hide/unhide. The catalog revalidates known AX handles and retains shee
 ownership. A native tab's bar keeps its AX identity when selection replaces the
 front window, so that identity retires the old tab root without retaining an
 extra window. A read can find the old root without its bar before focus or the
-moved bar identifies the successor; the old root keeps its last bar identity
-while it stays listed, so the successor's later read still retires it.
+moved bar identifies the successor, and AXWindows can keep listing a retired
+root afterwards. An unfocused root without a bar keeps the bar identity it last
+showed, so the successor retires it and it stays retired while another listed
+window holds that bar. A focused window without a bar, such as a tab dragged
+out of its group, is an ordinary window.
 Minimized tab entries continue to follow AppKit's published list.
 The catalog carries a native front's replacement relationship into Workspaces,
 which preserves membership, arrival position, and focus history. Its next render

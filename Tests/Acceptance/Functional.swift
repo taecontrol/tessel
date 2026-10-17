@@ -177,6 +177,10 @@ extension Acceptance {
             let changed = try fixture.command("tab", ["key": "tabs1"])
             #expect(changed.nativeTabs["tabs1"] == 3)
             try #require(try converges { $0.count == 1 && $0[0].id == selected && $0[0].tabs == 3 })
+            // Later reads still list the former root; it must stay retired.
+            sleep(seconds: 0.5)
+            let rows = try harness.rows()
+            #expect(rows.count == 1 && rows.first?.id == selected && rows.first?.tabs == 3)
         }
 
         @Test func e05FormerNativeRootIsRetiredAfterLosingItsBarBeforeFocusMoves() throws {
@@ -194,6 +198,9 @@ extension Acceptance {
                          "the former root must be observed without its native bar")
             try fixture.command("focusedWindow", ["published": true])
             try #require(try converges { $0.count == 1 && $0[0].id == selected && $0[0].tabs == 3 })
+            sleep(seconds: 0.5)
+            let rows = try harness.rows()
+            #expect(rows.count == 1 && rows.first?.id == selected && rows.first?.tabs == 3)
         }
 
         @Test(arguments: ["emptyContentTabs", "contentTabs", "segmentedTabs"])
