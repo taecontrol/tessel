@@ -67,7 +67,8 @@ final class WindowCatalog: NSObject {
 
     func present(pid: pid_t, id: UInt32, area: CGRect?, focus: Bool,
                  completion: @escaping @MainActor @Sendable () -> Void) {
-        apps[pid]?.present(id: id, area: area, focus: focus, completion: completion)
+        guard let app = apps[pid] else { completion(); return }
+        app.present(id: id, area: area, focus: focus, completion: completion)
     }
 
     func cancelPresentations() { apps.values.forEach { $0.cancelPresentation() } }
@@ -438,6 +439,9 @@ private final class AppWindows: @unchecked Sendable {
     func present(id: UInt32, area: CGRect?, focus: Bool, completion: @escaping @MainActor @Sendable () -> Void) {
         let token = presentationLock.withLock { presentation }
         queue.async { [self] in
+            // The caller's focus intent lasts only while this write is pending,
+            // including when an AX read fails or a newer render cancels it.
+            defer { DispatchQueue.main.async { completion() } }
             guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
             do {
                 guard try canPresent(window) else { return }
@@ -458,7 +462,6 @@ private final class AppWindows: @unchecked Sendable {
                     try check(AXUIElementPerformAction(window, kAXRaiseAction as CFString))
                 }
                 publishSnapshot()
-                DispatchQueue.main.async { completion() }
             } catch { /* Keep the last complete classification when the app is busy. */ }
         }
     }

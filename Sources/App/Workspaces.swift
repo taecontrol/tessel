@@ -311,6 +311,7 @@ final class Workspaces {
         focusDecision?.cancel()
         transition += 1
         let token = transition
+        expectedFocus = nil
         catalog?.cancelPresentations()
         if let selection, available(selection) { remember(selection) } else { focused = nil }
         let workspace = status.active
@@ -339,6 +340,7 @@ final class Workspaces {
                 guard layout || takeFocus && id == focused else { continue }
                 catalog?.present(pid: candidate.pid, id: id, area: area, focus: takeFocus && id == focused) { [weak self] in
                     guard let self, self.status.enabled, self.transition == token else { return }
+                    if takeFocus && id == focused { self.expectedFocus = nil }
                     self.publish()
                 }
             }
