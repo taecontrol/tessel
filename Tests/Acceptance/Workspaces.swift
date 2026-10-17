@@ -34,9 +34,11 @@ extension Acceptance {
                          "the accepted workspaces configuration must enable the experiment")
         }
 
-        func observe(_ sessions: [FixtureSession]? = nil, finder: Bool = false, focusedOnly: Bool = false) throws -> Observation {
-            try #require(try harness.observer.command("observe", ["pids": (sessions ?? [fixture] + harness.otherFixtures).map(\.pid),
-                "finder": finder, "focusedOnly": focusedOnly]).observation)
+        func observe(_ sessions: [FixtureSession]? = nil, finder: Bool = false, focusedOnly: Bool = false, expectedPID: pid_t? = nil) throws -> Observation {
+            var arguments: [String:Any] = ["pids": (sessions ?? [fixture] + harness.otherFixtures).map(\.pid),
+                "finder": finder, "focusedOnly": focusedOnly]
+            if let expectedPID { arguments["expectedPID"] = expectedPID }
+            return try #require(try harness.observer.command("observe", arguments).observation)
         }
 
         func window(_ id: UInt32) throws -> Observation.Window? { try observe().windows.first { $0.id == id } }

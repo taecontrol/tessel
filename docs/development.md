@@ -229,6 +229,9 @@ supplies fixture visibility independently, including the empty-workspace check.
 The focused window's frame and main state are read together in one AX request;
 ordinary focused-only observations omit unrelated child controls. Sheet and full
 observations retain their parent and child relationships.
+When the destination app is known, `expectedPID` restricts focused-only AX reads
+to that app while retaining CG visibility for every fixture. An early foreground
+sample can otherwise send a timed check into a source app that has since been hidden.
 Cached LaunchServices activation metadata is read only by setup observations;
 timed checks retain the live system-wide AX focus check.
 The active number is observed through the signed app's status-item AX label
@@ -331,8 +334,8 @@ item shows the workspace number and one bar per rail, highlighting the current
 one; its AX label includes the current rail and total. The map overlay belongs
 to #18, and the floating layer to #19.
 
-`Tests/Acceptance/Rails.swift` exercises #17 at the same signed CLI and
-independent AX/CG boundary as #2. The fixture accepts width fractions of the
+`Tests/Acceptance/Rails.swift` and `RailsReload.swift` exercise #17 at the same
+signed CLI and independent AX/CG boundary as #2. The fixture accepts width fractions of the
 usable area, keeping fitting and overflowing scenarios independent of screen
 size. Run `scripts/verify FunctionalRails`; resource E29 is included in
 `scripts/verify --resources` with the unchanged ADR 0003 limits. Rails E28

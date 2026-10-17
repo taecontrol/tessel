@@ -281,9 +281,14 @@ final class Fixture: NSObject, NSApplicationDelegate {
             guard let pids = command["pids"] as? [Int32], pids.allSatisfy(FixtureProbe.isFixture) else {
                 return ["error": "the observer accepts fixture processes only"]
             }
+            let focusedOnly = command["focusedOnly"] as? Bool == true
+            let expectedPID = command["expectedPID"] as? Int32
+            if let expectedPID, !focusedOnly || !pids.contains(expectedPID) {
+                return ["error": "the focused target must belong to the observed fixture processes"]
+            }
             var reply = snapshot
             reply["observation"] = observe(pids, inspectFinder: command["finder"] as? Bool == true,
-                                           focusedOnly: command["focusedOnly"] as? Bool == true)
+                                           focusedOnly: focusedOnly, expectedPID: expectedPID)
             return reply
         case "menu":
             guard let pid = command["pid"] as? Int32,
@@ -441,7 +446,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
     }
 
     /// An independent AX/CG client; all returned window data belongs to fixtures.
-    func observe(_ pids: [pid_t], inspectFinder: Bool, focusedOnly: Bool) -> [String: Any] {
+    func observe(_ pids: [pid_t], inspectFinder: Bool, focusedOnly: Bool, expectedPID: pid_t? = nil) -> [String: Any] {
         let front = FixtureProbe.frontmostPID()
         let listed = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
         let visible = Set(listed.compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
@@ -454,7 +459,9 @@ final class Fixture: NSObject, NSApplicationDelegate {
         })
         var result: [[String: Any]] = []
         for pid in pids {
-            if focusedOnly && front != pid { continue }
+            // A command can change frontmost apps after that early snapshot.
+            // Never block a destination check on the now-hidden source's AX.
+            if focusedOnly && (front != pid || expectedPID != nil && expectedPID != pid) { continue }
             let application = AXUIElementCreateApplication(pid)
             AXUIElementSetMessagingTimeout(application, 0.02)
             var focusedID: UInt32 = 0

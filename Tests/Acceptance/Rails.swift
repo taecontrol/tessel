@@ -895,11 +895,12 @@ extension Acceptance {
             try focus(m,since:flow.post(38,shift:true)); try order([m],rail:2)
             for index in 0..<100 {
                 let target = index.isMultiple(of:2) ? ids[0] : m
+                let targetPID = index.isMultiple(of:2) ? fixture.pid : other.pid
                 let hidden = index.isMultiple(of:2) ? [m] : ids
                 let size = index.isMultiple(of:2) ? aSize : mSize
                 let start = try flow.post(index.isMultiple(of:2) ? 40 : 38)
                 let complete = try eventually(within:max(0,0.2-(monotonicSeconds()-start))) {
-                    let observation = try flow.observe(focusedOnly: true)
+                    let observation = try flow.observe(focusedOnly: true, expectedPID: targetPID)
                     return observation.windows.contains { window in
                         window.id == target && window.visible && window.main && window.focused
                             && zip(window.frame,[area[0]+10,area[1]+10,size[0],size[1]]).allSatisfy { abs($0-$1)<=1 }
@@ -937,7 +938,13 @@ extension Acceptance {
                 if destinationStopped { kill(destination.pid, SIGCONT) }
                 if sutStopped { kill(harness.appPID, SIGCONT) }
             }
-            var displaced = try frame(ids[0]); displaced[0] += 1
+            var displaced = try #require(try eventualValue {
+                let observation = try flow.observe(focusedOnly: true, expectedPID: fixture.pid)
+                return observation.windows.first {
+                    $0.id == ids[0] && $0.main && $0.focused && observation.visibleIDs.contains($0.id)
+                }?.frame
+            }, "the source's focused frame must be available before delaying activation")
+            displaced[0] += 1
             try fixture.command("move", ["key": "w0", "frame": displaced])
             // A real subscribed move schedules the source's AX read. Suspend the
             // manager with that read due, then create actual native activation.
