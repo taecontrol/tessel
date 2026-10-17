@@ -461,7 +461,7 @@ final class Workspaces {
                     self.publish()
                 }
             }
-        } else if activateDesktop {
+        } else if activateDesktop && takeFocus {
             // A plain activation focuses the desktop; reopening Finder can focus
             // a closeted window. Never use openApplication or activateAllWindows.
             activateFinderDesktop()
@@ -728,7 +728,7 @@ final class Workspaces {
                 self.publish()
             }
         }
-        if focused == nil && activateDesktop { activateFinderDesktop() }
+        if focused == nil && activateDesktop && takeFocus { activateFinderDesktop() }
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) { [weak self] in
             guard let self, self.transition == token, self.status.enabled else { return }
             if !hide.intersection(Self.onScreen()).isEmpty { self.disable(reason:"SkyLight could not hide a window") }
