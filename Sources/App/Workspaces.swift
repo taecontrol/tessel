@@ -106,7 +106,7 @@ final class Workspaces {
                         railSizing.insert(id)
                     }
                 }
-                render(focusing: focused, relayout: true)
+                render(focusing: focused, relayout: true, takeFocus: false)
             }
         }
         publish()
