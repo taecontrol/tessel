@@ -194,6 +194,9 @@ consume the fixture's timed visibility, frame, and focus checks.
 Timed checks read `AXFocusedWindow` directly, including a focused sheet's parent:
 `AXWindows` can temporarily omit a live window during a Space move. CG membership
 supplies fixture visibility independently, including the empty-workspace check.
+The focused window's frame and main state are read together in one AX request;
+ordinary focused-only observations omit unrelated child controls. Sheet and full
+observations retain their parent and child relationships.
 The active number is observed through the signed app's status-item AX label
 inside the switch deadline; CLI fields are checked afterward so process startup
 does not consume that deadline. The blocked-initial-AX regression deliberately

@@ -407,32 +407,40 @@ final class Fixture: NSObject, NSApplicationDelegate {
             var focusedElement: AXUIElement?
             if let focused = FixtureProbe.value(application, kAXFocusedWindowAttribute), CFGetTypeID(focused) == AXUIElementGetTypeID() {
                 let element = focused as! AXUIElement
+                AXUIElementSetMessagingTimeout(element, 0.02)
                 focusedElement = element
                 _ = fixtureWindowID(element, &focusedID)
             }
-            func describe(_ window: AXUIElement, parent: UInt32? = nil) {
+            let focusedSheet = focusedElement.map { FixtureProbe.value($0, kAXRoleAttribute) as? String == kAXSheetRole } ?? false
+            func describe(_ window: AXUIElement, parent: UInt32? = nil, knownID: UInt32? = nil) {
                 AXUIElementSetMessagingTimeout(window, 0.02)
-                var id: CGWindowID = 0
-                _ = fixtureWindowID(window, &id)
+                var id: CGWindowID = knownID ?? 0
+                if knownID == nil { _ = fixtureWindowID(window, &id) }
                 guard id != 0 else { return }
+                // Read the same facts in one AX message during timed switches.
+                var values: CFArray?
+                guard AXUIElementCopyMultipleAttributeValues(window,
+                    [kAXPositionAttribute, kAXSizeAttribute, kAXMainAttribute, "AXFullScreen", kAXChildrenAttribute] as CFArray,
+                    [], &values) == .success, let fields = values as? [AnyObject], fields.count == 5 else { return }
                 var position = CGPoint.zero, size = CGSize.zero
-                if let value = FixtureProbe.value(window, kAXPositionAttribute), CFGetTypeID(value) == AXValueGetTypeID() {
-                    _ = AXValueGetValue(value as! AXValue, .cgPoint, &position)
+                if CFGetTypeID(fields[0]) == AXValueGetTypeID() {
+                    _ = AXValueGetValue(fields[0] as! AXValue, .cgPoint, &position)
                 }
-                if let value = FixtureProbe.value(window, kAXSizeAttribute), CFGetTypeID(value) == AXValueGetTypeID() {
-                    _ = AXValueGetValue(value as! AXValue, .cgSize, &size)
+                if CFGetTypeID(fields[1]) == AXValueGetTypeID() {
+                    _ = AXValueGetValue(fields[1] as! AXValue, .cgSize, &size)
                 }
-                let main = FixtureProbe.value(window, kAXMainAttribute) as? Bool ?? false
+                let main = fields[2] as? Bool ?? false
                 result.append(["id": id, "frame": [position.x, position.y, size.width, size.height],
                                "visible": visible.contains(id), "main": main && front == pid,
                                "focused": focusedID == id && front == pid,
                                "parent": parent.map { $0 as Any } ?? NSNull(),
                                "order": order[id] ?? Int.max,
-                               "nativeFullscreen": FixtureProbe.value(window, "AXFullScreen") as? Bool ?? false])
-                for child in FixtureProbe.value(window, kAXChildrenAttribute) as? [AXUIElement] ?? []
-                    where FixtureProbe.value(child, kAXRoleAttribute) as? String == kAXSheetRole { describe(child, parent: id) }
+                               "nativeFullscreen": fields[3] as? Bool ?? false])
+                if !focusedOnly || focusedSheet {
+                    for child in fields[4] as? [AXUIElement] ?? []
+                        where FixtureProbe.value(child, kAXRoleAttribute) as? String == kAXSheetRole { describe(child, parent: id) }
+                }
             }
-            let focusedSheet = focusedElement.map { FixtureProbe.value($0, kAXRoleAttribute) as? String == kAXSheetRole } ?? false
             if !focusedOnly || focusedSheet {
                 for window in FixtureProbe.value(application, kAXWindowsAttribute) as? [AXUIElement] ?? [] { describe(window) }
             }
@@ -443,13 +451,14 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 if focusedSheet, let parent = FixtureProbe.value(focusedElement, kAXParentAttribute),
                    CFGetTypeID(parent) == AXUIElementGetTypeID() {
                     var id: UInt32 = 0
+                    AXUIElementSetMessagingTimeout(parent as! AXUIElement, 0.02)
                     _ = fixtureWindowID(parent as! AXUIElement, &id)
                     if id != 0 {
                         parentID = id
-                        if !result.contains(where: { $0["id"] as? UInt32 == id }) { describe(parent as! AXUIElement) }
+                        if !result.contains(where: { $0["id"] as? UInt32 == id }) { describe(parent as! AXUIElement, knownID: id) }
                     }
                 }
-                if !result.contains(where: { $0["id"] as? UInt32 == focusedID }) { describe(focusedElement, parent: parentID) }
+                if !result.contains(where: { $0["id"] as? UInt32 == focusedID }) { describe(focusedElement, parent: parentID, knownID: focusedID) }
             }
         }
         let screen = NSScreen.screens.first!
