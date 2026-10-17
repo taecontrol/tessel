@@ -1044,7 +1044,9 @@ extension Acceptance {
             }
             let maximum = samples.max()!
             let result: [String:Any] = ["measurements":samples,"nanoseconds":min(200_000_000,maximum*3),"sourceRun":ProcessInfo.processInfo.environment["GITHUB_RUN_ID"] ?? "local"]
-            try JSONSerialization.data(withJSONObject:result,options:[.prettyPrinted,.sortedKeys]).write(to:root.appending(path:".work/rails-calibration.json"))
+            let calibrationFile = root.appending(path:".work/rails-calibration.json")
+            try FileManager.default.createDirectory(at:calibrationFile.deletingLastPathComponent(),withIntermediateDirectories:true)
+            try JSONSerialization.data(withJSONObject:result,options:[.prettyPrinted,.sortedKeys]).write(to:calibrationFile)
             let budgetFile = root.appending(path:"Tests/Acceptance/rails-budget.json")
             if FileManager.default.fileExists(atPath:budgetFile.path) {
                 struct Budget: Decodable { let measurements:[UInt64]; let nanoseconds:UInt64; let sourceRun:String }
