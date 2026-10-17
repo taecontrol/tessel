@@ -18,12 +18,15 @@ jobs:
         timeout-minutes: 2
         run: scripts/ci-signing
       - name: Build signed bundles
+        id: build
         run: scripts/build
       - name: Verify permission denial and automatic restart
         run: scripts/verify --permission
       - name: Functional acceptance suite
         run: scripts/verify --functional
+      # Run even when the functional suite fails, so each run reports both.
       - name: Resource acceptance suite (90 second budget)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         timeout-minutes: 2
         run: |
           SECONDS=0
