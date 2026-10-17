@@ -64,8 +64,13 @@ still check that managed windows disappear and report
 when the Finder desktop assertion is skipped. CI requires the full assertion.
 Full window listings, real window titles, and personal configs are never
 printed or saved. The independent AX probe verifies the running code's signed
-fixture identifier before reading a window or posting a key. It reads the
-frontmost application through AX; cached LaunchServices metadata can be absent
+fixture identifier before reading a window or posting a key. It revalidates the
+running signature on every operation, retaining audit-bound Security code
+objects to avoid repeating signature construction during timed observations.
+The audit binding rejects exec and PID reuse; denied task-name access keeps
+the stateless validation path. A fixture that replaces itself with a short-lived
+system process verifies that the observer rejects it while its PID is still alive.
+The oracle reads the frontmost application through AX; cached LaunchServices metadata can be absent
 briefly during activation. Fixtures cooperate with AppKit's activation handoff
 without ordering a window during the external-activation assertions.
 The fixture protocol reserves 64 KiB per-socket reply buffers: twenty-window AX

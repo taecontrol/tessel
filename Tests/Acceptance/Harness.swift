@@ -179,6 +179,10 @@ final class FixtureSession {
     func stop() {
         kill(pid, SIGKILL)
         _ = eventually(within: 1) { kill(pid, 0) != 0 }
+        disconnect()
+    }
+
+    func disconnect() {
         close(socket)
         unlink(clientPath)
         unlink(path)

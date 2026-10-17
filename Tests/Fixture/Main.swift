@@ -301,6 +301,15 @@ final class Fixture: NSObject, NSApplicationDelegate {
             // A genuine resize notification is delivered just before AppKit blocks.
             // This makes tessel attempt a refresh against the hung application.
             windows["window"]?.setContentSize(NSSize(width: 500, height: 320))
+        case "replaceProcess":
+            // Keep the PID alive with different code to check the observer's
+            // signature boundary. The reply is sent before this queued exec.
+            guard windows.isEmpty else { return ["error": "process replacement requires an empty fixture"] }
+            DispatchQueue.main.async {
+                var arguments = [strdup("/bin/sleep"), strdup("2"), nil]
+                arguments.withUnsafeMutableBufferPointer { _ = execv("/bin/sleep", $0.baseAddress!) }
+                _exit(127)
+            }
         default: return ["error": "unknown fixture command"]
         }
         return snapshot
@@ -502,19 +511,56 @@ private struct FixedWidthFixture: SwiftUI.App {
 
 // The independent oracle reads only this repository's fixture. It never reads titles.
 enum FixtureProbe {
+    @MainActor private static var processCodes: [pid_t: SecCode] = [:]
+
     /// LaunchServices can temporarily omit live processes during activation.
     /// Validate the running code's signature instead of trusting that cache.
-    static func hasSignature(_ pid: pid_t, identifier: String) -> Bool {
-        var code: SecCode?
-        guard SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributePid: NSNumber(value: pid)] as CFDictionary, [], &code) == errSecSuccess,
-              let code else { return false }
+    @MainActor static func hasSignature(_ pid: pid_t, identifier: String) -> Bool {
+        guard let code = runningCode(pid) else { return false }
         var requirement: SecRequirement?
         guard SecRequirementCreateWithString(("identifier \"" + identifier + "\"") as CFString, [], &requirement) == errSecSuccess,
               let requirement else { return false }
-        return SecCodeCheckValidity(code, [], requirement) == errSecSuccess
+        // Revalidate every operation. Only the audit-bound code object is
+        // retained; its token rejects exec and PID reuse through the kernel.
+        let valid = SecCodeCheckValidity(code, [], requirement) == errSecSuccess
+        if !valid { processCodes.removeValue(forKey: pid) }
+        return valid
     }
 
-    static func isFixture(_ pid: pid_t) -> Bool { hasSignature(pid, identifier: "com.taecontrol.tessel.fixture") }
+    @MainActor private static func runningCode(_ pid: pid_t) -> SecCode? {
+        if let code = processCodes[pid] { return code }
+        if let code = auditBoundCode(pid) {
+            processCodes = processCodes.filter { kill($0.key, 0) == 0 }
+            if processCodes.count >= 32 { processCodes.removeAll() }
+            processCodes[pid] = code
+            return code
+        }
+        // Preserve fresh stateless validation if the process denies a task name.
+        var code: SecCode?
+        guard SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributePid: NSNumber(value: pid)] as CFDictionary, [], &code) == errSecSuccess else { return nil }
+        return code
+    }
+
+    private static func auditBoundCode(_ pid: pid_t) -> SecCode? {
+        var task: mach_port_t = 0
+        guard task_name_for_pid(mach_task_self_, pid, &task) == KERN_SUCCESS, task != 0 else { return nil }
+        defer { mach_port_deallocate(mach_task_self_, task) }
+        var token = audit_token_t()
+        let words = MemoryLayout<audit_token_t>.size / MemoryLayout<integer_t>.size
+        var count = mach_msg_type_number_t(words)
+        let result = withUnsafeMutablePointer(to: &token) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: words) {
+                task_info(task, task_flavor_t(TASK_AUDIT_TOKEN), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS, count == mach_msg_type_number_t(words) else { return nil }
+        let audit = withUnsafeBytes(of: &token) { Data($0) }
+        var code: SecCode?
+        guard SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributeAudit: audit as CFData] as CFDictionary, [], &code) == errSecSuccess else { return nil }
+        return code
+    }
+
+    @MainActor static func isFixture(_ pid: pid_t) -> Bool { hasSignature(pid, identifier: "com.taecontrol.tessel.fixture") }
 
     static func frontmostPID() -> pid_t? {
         let system = AXUIElementCreateSystemWide()

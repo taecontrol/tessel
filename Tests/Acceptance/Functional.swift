@@ -47,6 +47,31 @@ extension Acceptance {
 
         static func tiles(_ kind: String) -> Bool { ["standard", "noFullscreen"].contains(kind) }
 
+        @Test func observerRejectsAReplacedFixtureBeforeReadingWindows() throws {
+            let target = try FixtureSession(directory: harness.directory, number: 98)
+            let pid = target.pid
+            var replaced = false
+            defer {
+                if replaced {
+                    // The replacement exits itself. Never signal a reused PID.
+                    _ = eventually(within: 3) { kill(pid, 0) != 0 }
+                    target.disconnect()
+                } else { target.stop() }
+            }
+            _ = try harness.observer.command("observe", ["pids": [pid]])
+            try target.command("replaceProcess")
+            replaced = true
+            let refused = try eventually(within: 1) {
+                do { _ = try harness.observer.command("observe", ["pids": [pid]]) }
+                catch let error as HarnessError where error.description == "the observer accepts fixture processes only" {
+                    return true
+                }
+                return false
+            }
+            #expect(refused)
+            #expect(kill(pid, 0) == 0, "the observer must reject replaced code while its PID is still alive")
+        }
+
         @Test func e01StandardResizableWindowTilesWithReason() throws {
             try expectState(try fixture.open(), "tiled", "standard window")
         }
