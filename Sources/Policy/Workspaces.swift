@@ -298,7 +298,9 @@ final class Workspaces {
             let initialEnumeration = firstSnapshot && (!railEnabled || initialApplications.contains(pid))
             let selection = initialEnumeration && frontmost ? reportedFocus.flatMap { available($0) ? $0 : nil } ?? newest : newest
             if initialEnumeration && !frontmost && pid != enablingFront, let current = focused, available(current) {
-                render(focusing: current, relayout: false, takeFocus: false, layoutWindows: Set(newWindows))
+                // Discovery redraws cancel pending writes, but must finish a
+                // keyboard selection already requested before this snapshot.
+                render(focusing: current, relayout: false, takeFocus: expectedFocus == current, layoutWindows: Set(newWindows))
             } else if initialEnumeration && !frontmost && pid != enablingFront && focused == nil {
                 render(focusing: nil, relayout: false, activateDesktop: false, layoutWindows: Set(newWindows))
             } else {
@@ -311,7 +313,8 @@ final class Workspaces {
         } else if needsRender || resizedRail {
             // A hidden app's first snapshot can precede the front app's.
             // Discovering it must not activate Finder or an older selection.
-            render(focusing: focused ?? preferred(in: status.active), relayout: false, takeFocus: !firstSnapshot,
+            let selection = focused ?? preferred(in: status.active)
+            render(focusing: selection, relayout: false, takeFocus: !firstSnapshot || selection != nil && expectedFocus == selection,
                    layoutWindows: hiddenReplacements)
         } else if !replacements.isEmpty {
             if let focused, replacements.contains(focused), railPresentation?.pending.contains(focused) == true {
@@ -445,9 +448,8 @@ final class Workspaces {
         if railEnabled, let focused, let owner = entries[focused]?.pid,
            let pid = entries[id]?.pid, owner != pid {
             guard applications.isAlive(owner) else { return }
-            let token = transition
             catalog?.windowIsGone(pid: owner, id: focused) { [weak self] gone in
-                guard let self, !gone, self.status.enabled, self.transition == token,
+                guard let self, !gone, self.status.enabled,
                       self.focused == focused, self.available(id), self.appFocus[pid] == id,
                       self.applications.frontmostPID == pid else { return }
                 self.selectExternalFocus(id, layoutWindows: layoutWindows)

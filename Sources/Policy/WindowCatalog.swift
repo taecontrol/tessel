@@ -508,6 +508,7 @@ private final class AppWindows: @unchecked Sendable {
     }
 
     func windowIsGone(id: UInt32, completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+        let intent = presentationLock.withLock { focusIntent }
         queue.async { [self] in
             var gone = false
             if !stopped, let window = elementsByID[id] {
@@ -517,7 +518,10 @@ private final class AppWindows: @unchecked Sendable {
                 gone = ax.copy(.role, of: window).status == .invalidUIElement
             }
             let result = gone
-            scheduler.main.async { completion(result) }
+            scheduler.main.async { [self] in
+                guard ownsFocusIntent(intent) else { return }
+                completion(result)
+            }
         }
     }
 

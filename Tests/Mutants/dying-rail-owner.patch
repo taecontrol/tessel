@@ -1,47 +1,10 @@
 # Bug: A dying rail owner loses its adjacent-rail landing to native survivor activation while its PID still exists.
 # Fixing commit: d31cefac0a3fca12fd77e5249c727fc17db75bbe
-diff --git a/Sources/Policy/WindowCatalog.swift b/Sources/Policy/WindowCatalog.swift
-index c29c127..f29f7e9 100644
---- a/Sources/Policy/WindowCatalog.swift
-+++ b/Sources/Policy/WindowCatalog.swift
-@@ -77,11 +77,6 @@ final class WindowCatalog {
-         app.presentRail(id:id,target:frame,position:position,resize:resize,focus:focus,completion:completion)
-     }
-
--    func windowIsGone(pid: Int32, id: UInt32, completion: @escaping @MainActor @Sendable (Bool) -> Void) {
--        guard let app = apps[pid] else { completion(false); return }
--        app.windowIsGone(id: id, completion: completion)
--    }
--
-     func returnInside(ids: Set<UInt32>, area: CGRect) { apps.keys.sorted().compactMap { apps[$0] }.forEach { $0.returnInside(ids:ids,area:area) } }
-
-     func cancelPresentations(invalidatingFocus: Bool = true) {
-@@ -507,20 +502,6 @@ private final class AppWindows: @unchecked Sendable {
-         presentationLock.withLock { token == focusIntent }
-     }
-
--    func windowIsGone(id: UInt32, completion: @escaping @MainActor @Sendable (Bool) -> Void) {
--        queue.async { [self] in
--            var gone = false
--            if !stopped, let window = elementsByID[id] {
--                ax.setMessagingTimeout(window, seconds: 0.05)
--                // A timeout leaves liveness unanswered; only the closed-handle
--                // error can reject an otherwise healthy external activation.
--                gone = ax.copy(.role, of: window).status == .invalidUIElement
--            }
--            let result = gone
--            scheduler.main.async { completion(result) }
--        }
--    }
--
-     func present(id: UInt32, area: CGRect?, focus: Bool, completion: @escaping @MainActor @Sendable () -> Void) {
-         let token = presentationLock.withLock { presentation }
-         queue.async { [self] in
 diff --git a/Sources/Policy/Workspaces.swift b/Sources/Policy/Workspaces.swift
-index 75267ec..e8274b1 100644
+index 8f9e624..7c6801c 100644
 --- a/Sources/Policy/Workspaces.swift
 +++ b/Sources/Policy/Workspaces.swift
-@@ -435,25 +435,10 @@ final class Workspaces {
+@@ -443,24 +443,10 @@ final class Workspaces {
          // macOS can re-activate the already selected app when another process
          // exits. Its visible window has not been shown again or switched.
          guard id != focused || workspace != status.active || closeted.contains(id) || !layoutWindows.isEmpty else { return }
@@ -52,9 +15,8 @@ index 75267ec..e8274b1 100644
          if railEnabled, let focused, let owner = entries[focused]?.pid,
 -           let pid = entries[id]?.pid, owner != pid {
 -            guard applications.isAlive(owner) else { return }
--            let token = transition
 -            catalog?.windowIsGone(pid: owner, id: focused) { [weak self] gone in
--                guard let self, !gone, self.status.enabled, self.transition == token,
+-                guard let self, !gone, self.status.enabled,
 -                      self.focused == focused, self.available(id), self.appFocus[pid] == id,
 -                      self.applications.frontmostPID == pid else { return }
 -                self.selectExternalFocus(id, layoutWindows: layoutWindows)
