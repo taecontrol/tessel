@@ -13,6 +13,34 @@ extension Acceptance.FunctionalRails {
         try reloadPreservingFocus(rails: rails, change: change, crossApp: true)
     }
 
+    /// E2: enabling keeps the window that has native focus, even when tessel
+    /// has not yet read that focus from the app.
+    @Test(arguments: [true,false])
+    func e02EnablingKeepsNativeFocusAwaitingPublication(rails: Bool) throws {
+        let ids = try (0..<3).map { try open("w\($0)",width:0.45) }
+        try flow.activate(key:"w2")
+        try #require(try converges { Set($0.map(\.id)) == Set(ids) })
+        var sutStopped = false, fixtureStopped = false
+        defer {
+            if fixtureStopped { kill(fixture.pid,SIGCONT) }
+            if sutStopped { kill(harness.appPID,SIGCONT) }
+        }
+        kill(harness.appPID,SIGSTOP); sutStopped = true
+        try flow.activate(key:"w0"); try focus(ids[0])
+        kill(fixture.pid,SIGSTOP); fixtureStopped = true
+        try writeConfig(rails ? config : flow.enabled)
+        kill(harness.appPID,SIGCONT); sutStopped = false
+        try #require(try eventually(within:1) {
+            let status = try harness.status().workspaces
+            return status?.enabled == true && status?.layout == (rails ? "rails" : "stack")
+        })
+        kill(fixture.pid,SIGCONT); fixtureStopped = false
+        if rails { try focus(ids[0],within:1); try order(ids) }
+        else { try flow.expectShown(ids[0],within:1) }
+        Thread.sleep(forTimeInterval:0.1)
+        if rails { try focus(ids[0]) } else { try flow.expectShown(ids[0]) }
+    }
+
     private func reloadPreservingFocus(rails: Bool, change: String, crossApp: Bool) throws {
         let a = try open("known",width:0.25)
         try flow.activate(key:"known")
