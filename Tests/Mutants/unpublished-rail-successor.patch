@@ -3,9 +3,12 @@
 diff --git a/Sources/Policy/Workspaces.swift b/Sources/Policy/Workspaces.swift
 --- a/Sources/Policy/Workspaces.swift
 +++ b/Sources/Policy/Workspaces.swift
-@@ -309,11 +309,7 @@
+@@ -311,14 +311,10 @@
          } else if needsRender || resizedRail {
-             render(focusing: focused ?? preferred(in: status.active), relayout: false, layoutWindows: hiddenReplacements)
+             // A hidden app's first snapshot can precede the front app's.
+             // Discovering it must not activate Finder or an older selection.
+             render(focusing: focused ?? preferred(in: status.active), relayout: false, takeFocus: !firstSnapshot,
+                    layoutWindows: hiddenReplacements)
          } else if !replacements.isEmpty {
 -            if let focused, replacements.contains(focused), railPresentation?.pending.contains(focused) == true {
 -                // The old native root rejected this current presentation. Its

@@ -44,6 +44,25 @@ import Testing
 }
 
 @Suite @MainActor struct Enabling {
+    @Test("#2 E2; #17 E2: startup preserves a native selection made after its initial focus read",
+          arguments: [Layout.stack, .rails], WriteOrder.allCases)
+    func startupSelection(layout: Layout, writes: WriteOrder) {
+        requireScenario(Scenario.run("startup selection \(layout.rawValue)", writes: writes) { scenario in
+            let mac = scenario.mac, app = mac.launch(windows: 4)
+            app.select(2)
+            let tessel = scenario.startTessel(layout)
+            let read = mac.pause(after: .read(app))
+            if case .paused = read {} else { scenario.expect("initial focus read is captured: \(read)", false) }
+            scenario.step("select window 1 before startup publishes window 2's focus") { app.select(1) }
+            let delivered = mac.deliver(app)
+            if case .paused = delivered {} else { scenario.expect("initial snapshot is published: \(delivered)", false) }
+            scenario.settle()
+            scenario.expect("all existing windows belong to workspace 1", tessel.windows.count == 4 && tessel.windows.allSatisfy { $0.workspace == 1 })
+            scenario.expect("the newer native selection keeps focus", mac.focusedWindow == 1)
+            scenario.expect("the newer native selection is fully visible", mac.isFullyOnScreen(1))
+        })
+    }
+
     @Test("#2 E2; #17 E2: startup and enabling preserve membership, native focus, rail widths and arrival order",
           arguments: [false, true], [Layout.stack, .rails])
     func existingWindows(startup: Bool, layout: Layout) {

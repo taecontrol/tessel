@@ -298,16 +298,21 @@ final class Workspaces {
             let initialEnumeration = firstSnapshot && (!railEnabled || initialApplications.contains(pid))
             let selection = initialEnumeration && frontmost ? reportedFocus.flatMap { available($0) ? $0 : nil } ?? newest : newest
             if initialEnumeration && !frontmost && pid != enablingFront, let current = focused, available(current) {
-                render(focusing: current, relayout: false, layoutWindows: Set(newWindows))
+                render(focusing: current, relayout: false, takeFocus: false, layoutWindows: Set(newWindows))
             } else if initialEnumeration && !frontmost && pid != enablingFront && focused == nil {
                 render(focusing: nil, relayout: false, activateDesktop: false, layoutWindows: Set(newWindows))
             } else {
                 if initialEnumeration && frontmost { rememberInitialFocus(selection) }
                 else { remember(selection) }
-                render(focusing: selection, relayout: false, layoutWindows: Set(newWindows))
+                // Startup discovers a native selection; it does not request
+                // one. This read can already predate a newer user selection.
+                render(focusing: selection, relayout: false, takeFocus: !initialEnumeration, layoutWindows: Set(newWindows))
             }
         } else if needsRender || resizedRail {
-            render(focusing: focused ?? preferred(in: status.active), relayout: false, layoutWindows: hiddenReplacements)
+            // A hidden app's first snapshot can precede the front app's.
+            // Discovering it must not activate Finder or an older selection.
+            render(focusing: focused ?? preferred(in: status.active), relayout: false, takeFocus: !firstSnapshot,
+                   layoutWindows: hiddenReplacements)
         } else if !replacements.isEmpty {
             if let focused, replacements.contains(focused), railPresentation?.pending.contains(focused) == true {
                 // The old native root rejected this current presentation. Its
