@@ -1,5 +1,38 @@
 import Darwin
 import Foundation
+import Testing
+
+// TEMPORARY CI DIAGNOSTIC (CIDIAG18): IDs, frames, codes and timings only.
+enum CIDiag18 {
+    private static let lock = NSLock()
+    private static let url: URL = {
+        let directory = root.appending(path: ".work/ci/diag")
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appending(path: "tests-\(getpid()).jsonl")
+    }()
+    static func log(_ object: [String: Any]) {
+        _ = heartbeat
+        var object = object
+        object["t"] = monotonicSeconds()
+        guard let data = try? JSONSerialization.data(withJSONObject: object) else { return }
+        let line = data + Data("\n".utf8)
+        lock.lock(); defer { lock.unlock() }
+        if let handle = try? FileHandle(forWritingTo: url) { handle.seekToEndOfFile(); handle.write(line); try? handle.close() }
+        else { try? line.write(to: url) }
+    }
+    /// A sleeping thread that reports when it was not scheduled for 40 ms or more.
+    private static let heartbeat: Void = {
+        Thread.detachNewThread {
+            var last = monotonicSeconds()
+            while true {
+                usleep(10_000)
+                let now = monotonicSeconds()
+                if now - last > 0.04 { log(["stall": (now - last) * 1000, "process": "tests"]) }
+                last = now
+            }
+        }
+    }()
+}
 
 let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 let apps = root.appending(path: ".build/apps")
@@ -29,19 +62,25 @@ func monotonicSeconds() -> Double {
 }
 
 /// Polls until the predicate holds. A result that arrives after the deadline is a failure.
-func eventualValue<T>(within timeout: Double = 0.5, _ predicate: () throws -> T?) rethrows -> T? {
-    let deadline = monotonicSeconds() + timeout
+func eventualValue<T>(within timeout: Double = 0.5, fileID: String = #fileID, line: Int = #line, _ predicate: () throws -> T?) rethrows -> T? {
+    let start = monotonicSeconds() // CIDIAG18
+    let deadline = start + timeout
+    var polls = 0, outcome = "threw"
+    defer { CIDiag18.log(["wait": "\(fileID):\(line)", "test": Test.current?.name ?? "", "start": start, "timeout": timeout,
+                          "end": monotonicSeconds(), "polls": polls, "outcome": outcome]) }
     while true {
+        polls += 1
         if let result = try predicate() {
+            outcome = monotonicSeconds() <= deadline ? "met" : "late"
             return monotonicSeconds() <= deadline ? result : nil
         }
-        if monotonicSeconds() >= deadline { return nil }
+        if monotonicSeconds() >= deadline { outcome = "expired"; return nil }
         usleep(15_000)
     }
 }
 
-func eventually(within timeout: Double = 0.5, _ predicate: () throws -> Bool) rethrows -> Bool {
-    try eventualValue(within: timeout) { try predicate() ? true : nil } != nil
+func eventually(within timeout: Double = 0.5, fileID: String = #fileID, line: Int = #line, _ predicate: () throws -> Bool) rethrows -> Bool {
+    try eventualValue(within: timeout, fileID: fileID, line: line) { try predicate() ? true : nil } != nil
 }
 
 func sleep(seconds: Double) {

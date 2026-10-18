@@ -80,7 +80,9 @@ extension Acceptance {
 
         @discardableResult
         func post(_ code: Int, shift: Bool = false) throws -> Double {
-            try #require(try harness.observer.command("hotkey", ["code": code, "shift": shift]).postedAt)
+            let posted = try #require(try harness.observer.command("hotkey", ["code": code, "shift": shift]).postedAt)
+            CIDiag18.log(["key": code, "shift": shift, "posted": posted]) // CIDIAG18
+            return posted
         }
 
         func activate(_ session: FixtureSession? = nil, key: String = "window", sourceLocation: SourceLocation = #_sourceLocation) throws {
