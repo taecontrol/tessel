@@ -28,7 +28,6 @@ extension Acceptance {
                 let o = try flow.observe(focusedOnly: true)
                 return o.visibleIDs.contains(id) && o.windows.contains { $0.id == id && $0.main && ($0.focused || o.windows.contains { $0.parent == id && $0.focused }) }
             }
-            if !ready { print("CIDIAG17 focus failure id", id, "since", since as Any, "deadline", since.map { $0 + timeout } as Any, "now", monotonicSeconds()) } // CIDIAG17
             if !ready { print("Focus failure",id,"elapsed",since.map { monotonicSeconds()-$0 } as Any,try harness.status().workspaces as Any,try harness.rows(),try flow.observe()) }
             try #require(ready, "fixture \(id) must be visible, main and focused before the deadline", sourceLocation: sourceLocation)
         }
