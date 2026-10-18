@@ -1,7 +1,7 @@
 import Carbon
 
 @MainActor
-final class Hotkeys {
+final class Hotkeys: HotkeyRegistration {
     private var references: [EventHotKeyRef] = []
     private var handler: EventHandlerRef?
     private var commands: [UInt32: WorkspaceCommand] = [:]
@@ -46,5 +46,12 @@ final class Hotkeys {
         if let handler { RemoveEventHandler(handler) }
         handler = nil
         commands.removeAll()
+    }
+}
+
+@MainActor
+struct SystemHotkeys: HotkeyInstalling {
+    func install(keys: [String: String], perform: @escaping (WorkspaceCommand) -> Void) throws -> any HotkeyRegistration {
+        try Hotkeys(keys: keys, perform: perform)
     }
 }

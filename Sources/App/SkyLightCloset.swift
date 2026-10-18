@@ -5,13 +5,13 @@ import ObjectiveC
 /// The experiment's only SkyLight boundary. No private Space identifiers escape
 /// it, no native Space is switched, and no persistent recovery state is written.
 @MainActor
-final class WindowCloset {
-    struct Unavailable: Error { let reason: String }
+final class SkyLightCloset: ClosetPort {
+    typealias Unavailable = ClosetUnavailable
     private typealias Connection = @convention(c) () -> Int32
     private typealias ActiveSpace = @convention(c) (Int32) -> UInt64
     private typealias Spaces = @convention(c) (Int32, UInt32, CFArray) -> Unmanaged<CFArray>?
     private let connection: Connection
-    private let activeSpace: ActiveSpace
+    private let getActiveSpace: ActiveSpace
     private let spaces: Spaces
     private let createClass: AnyClass
     private let moveClass: AnyClass
@@ -41,7 +41,7 @@ final class WindowCloset {
             }
         }
         self.connection = unsafeBitCast(connection, to: Connection.self)
-        self.activeSpace = unsafeBitCast(activeSpace, to: ActiveSpace.self)
+        self.getActiveSpace = unsafeBitCast(activeSpace, to: ActiveSpace.self)
         self.spaces = unsafeBitCast(spaces, to: Spaces.self)
         self.createClass = createClass
         self.moveClass = moveClass
@@ -72,22 +72,10 @@ final class WindowCloset {
         move(windows, to: closet)
     }
 
-    func show(_ windows: [UInt32]) { move(windows, to: activeSpace(connection())) }
+    func show(_ windows: [UInt32]) { move(windows, to: getActiveSpace(connection())) }
 
-    /// Narrow mask 7 deliberately omits hidden Spaces. The wide mask 0xF can
-    /// still distinguish a surviving closet from a genuinely orphaned window.
-    /// Candidates have already been restricted to non-minimized primary-display
-    /// windows by the catalog; ordinary native desktops are left alone.
-    func recover(_ windows: [UInt32], offscreen: Set<UInt32>) {
-        var restore: [UInt32] = []
-        for id in windows where offscreen.contains(id) {
-            guard memberships(id, mask: 7).isEmpty else { continue }
-            let wide = memberships(id, mask: 0xF)
-            guard !wide.contains(activeSpace(connection())), !wide.contains(closet ?? 0) else { continue }
-            restore.append(id)
-        }
-        show(restore)
-    }
+    func activeSpace() -> SpaceToken { SpaceToken(adapterValue: getActiveSpace(connection())) }
+    var closetSpace: SpaceToken { SpaceToken(adapterValue: closet ?? 0) }
 
     func stop(returning windows: [UInt32]) {
         show(windows)
@@ -95,9 +83,10 @@ final class WindowCloset {
         closet = nil
     }
 
-    private func memberships(_ window: UInt32, mask: UInt32) -> [UInt64] {
+    func memberships(_ window: UInt32, scope: SpaceScope) -> [SpaceToken] {
+        let mask: UInt32 = scope == .ordinary ? 7 : 0xF
         let result = spaces(connection(), mask, [NSNumber(value: window)] as CFArray)?.takeRetainedValue()
-        return (result as? [NSNumber] ?? []).map(\.uint64Value)
+        return (result as? [NSNumber] ?? []).map { SpaceToken(adapterValue: $0.uint64Value) }
     }
 
     private func move(_ windows: [UInt32], to space: UInt64) {

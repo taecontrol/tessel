@@ -360,7 +360,7 @@ final class Harness {
         let executable = directory.appending(path: "NativeContracts")
         let shared = try FileManager.default.contentsOfDirectory(at: root.appending(path: "Sources/Shared"), includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "swift" }.sorted { $0.path < $1.path }
-        let sources = shared + [root.appending(path: "Sources/App/AXSubscriptions.swift"), root.appending(path: "Tests/Contracts/Main.swift")]
+        let sources = shared + [root.appending(path: "Sources/Policy/ElementSubscriptions.swift"), root.appending(path: "Sources/App/AXSubscriptions.swift"), root.appending(path: "Tests/Contracts/Main.swift")]
         let compiled = try run(["xcrun", "swiftc", "-parse-as-library", "-swift-version", "6", "-O", "-target", "arm64-apple-macos27.0"]
                                + sources.map(\.path) + ["-o", executable.path], timeout: 120)
         guard compiled.status == 0 else { throw HarnessError("native contracts did not compile:\n" + compiled.error) }

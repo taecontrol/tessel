@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 /// The rail policy owns ring geometry, remembered focus and stable row identity.
 /// Coordinates are relative to the rail area; the presenter owns AX and hiding.
@@ -8,7 +9,7 @@ struct Rails {
         var size: CGSize
     }
     struct Rail {
-        let identity = UUID()
+        let identity: UInt64
         var tiles: [Tile] = []
         var offset: Double = 0
         var focused: UInt32?
@@ -19,14 +20,22 @@ struct Rails {
     }
     struct Place {
         let workspace: Int
-        let rail: UUID
+        let rail: UInt64
         let left: UInt32?
     }
+    private var nextIdentity: UInt64 = 0
     var workspaces: [Int: Workspace] = [:]
     private var suspended: [UInt32: Place] = [:]
     var width: Double = 1
     var gap: Double = 10
     static let peek: Double = 56
+
+    init(width: Double = 1, gap: Double = 10) { self.width = width; self.gap = gap }
+
+    private mutating func makeRail() -> Rail {
+        nextIdentity += 1
+        return Rail(identity: nextIdentity)
+    }
 
     func location(_ id: UInt32) -> (workspace: Int, rail: Int, slot: Int)? {
         for (number,ws) in workspaces {
@@ -58,7 +67,7 @@ struct Rails {
     }
     mutating func appendInitial(_ tile: Tile, workspace: Int) {
         var ws = workspaces[workspace] ?? Workspace()
-        if ws.rails.isEmpty { ws.rails.append(Rail()) }
+        if ws.rails.isEmpty { ws.rails.append(makeRail()) }
         ws.rails[0].tiles.append(tile)
         if ws.rails[0].focused == nil { ws.rails[0].focused = tile.id }
         workspaces[workspace] = ws
@@ -66,7 +75,7 @@ struct Rails {
     mutating func insert(_ tile: Tile, workspace: Int, restoring: Bool = false) {
         var ws = workspaces[workspace] ?? Workspace()
         let previous = suspended.removeValue(forKey: tile.id)
-        if ws.rails.isEmpty { ws.rails.append(Rail()); ws.current = 0 }
+        if ws.rails.isEmpty { ws.rails.append(makeRail()); ws.current = 0 }
         var target = ws.current
         var left: UInt32?
         if restoring, let previous, previous.workspace == workspace,
@@ -121,7 +130,7 @@ struct Rails {
         guard let rail = current(workspace), let focused = rail.focused,
               let i = rail.tiles.firstIndex(where: { $0.id == focused }), rail.tiles.count > 1 else { return nil }
         let id = rail.tiles[(i+direction+rail.tiles.count)%rail.tiles.count].id
-        select(id,direction:direction)
+        self.select(id,direction:direction)
         return id
     }
     mutating func focusY(_ workspace: Int, direction: Int) -> UInt32? {
@@ -148,8 +157,8 @@ struct Rails {
         remove(id)
         var next = workspaces[p.workspace]!
         var target = direction > 0 ? (alone ? p.rail : p.rail+1) : p.rail-1
-        if target < 0 { next.rails.insert(Rail(),at:0); target = 0 }
-        if target >= next.rails.count { next.rails.append(Rail()) }
+        if target < 0 { next.rails.insert(makeRail(),at:0); target = 0 }
+        if target >= next.rails.count { next.rails.append(makeRail()) }
         insert(tile,into:&next.rails[target]); next.current = target
         workspaces[p.workspace] = next
         return true

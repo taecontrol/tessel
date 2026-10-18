@@ -1,8 +1,8 @@
-import AppKit
-import ApplicationServices
-
-@_silgen_name("_AXUIElementGetWindow")
-func axWindowID(_ element: AXUIElement, _ id: UnsafeMutablePointer<CGWindowID>) -> AXError
+import Foundation
+import CoreGraphics
+#if SWIFT_PACKAGE
+import Ports
+#endif
 
 struct WindowObservation: Sendable {
     var record: WindowRecord
@@ -14,33 +14,35 @@ struct WindowObservation: Sendable {
 enum CatalogChange: Sendable, Equatable { case snapshot, activation, focus, restored }
 
 @MainActor
-final class WindowCatalog: NSObject {
+final class WindowCatalog {
     private let workspaces: Workspaces
-    private let fixtureOnly: Bool
-    private var apps: [pid_t: AppWindows] = [:]
+    private let fixtureBundleID: String?
+    private let applications: any ApplicationPort
+    private let ax: any AccessibilityPort
+    private let scheduler: any SchedulingPort
+    private var lifecycle: (any ApplicationObservation)?
+    private var apps: [Int32: AppWindows] = [:]
 
-    init(workspaces: Workspaces, fixtureOnly: Bool) {
+    init(workspaces: Workspaces, applications: any ApplicationPort, ax: any AccessibilityPort,
+         scheduler: any SchedulingPort, fixtureBundleID: String? = nil) {
         self.workspaces = workspaces
-        self.fixtureOnly = fixtureOnly
-        super.init()
-        let center = NSWorkspace.shared.notificationCenter
-        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didActivateApplicationNotification,
-                     NSWorkspace.didHideApplicationNotification, NSWorkspace.didUnhideApplicationNotification] {
-            center.addObserver(self, selector: #selector(appChanged(_:)), name: name, object: nil)
-        }
-        center.addObserver(self, selector: #selector(appTerminated(_:)), name: NSWorkspace.didTerminateApplicationNotification, object: nil)
-        for app in NSWorkspace.shared.runningApplications { observe(app) }
+        self.applications = applications
+        self.ax = ax
+        self.scheduler = scheduler
+        self.fixtureBundleID = fixtureBundleID
+        lifecycle = applications.observe { [weak self] event, app in self?.appChanged(event, app: app) }
+        for app in applications.runningApplications { observe(app) }
     }
 
-    private func observe(_ app: NSRunningApplication) {
-        let pid = app.processIdentifier
-        guard pid != getpid(), !app.isTerminated, app.activationPolicy != .prohibited else { return }
-        guard !fixtureOnly || app.bundleIdentifier == "com.taecontrol.tessel.fixture" else { return }
-        if let existing = apps[pid] { existing.refresh(hidden: app.isHidden); return }
+    private func observe(_ app: RunningApplication) {
+        let pid = app.pid
+        guard pid != applications.ownPID, !app.terminated, !app.prohibited else { return }
+        guard fixtureBundleID == nil || app.bundleID == fixtureBundleID else { return }
+        if let existing = apps[pid] { existing.refresh(hidden: app.hidden); return }
         let generation = UUID()
-        let worker = AppWindows(pid: pid, name: app.localizedName ?? "Application", bundleId: app.bundleIdentifier ?? "",
-                                hidden: app.isHidden, generation: generation) { [weak self] rows, focused, frontmost, change, activation in
-            DispatchQueue.main.async {
+        let worker = AppWindows(pid: pid, name: app.name ?? "Application", bundleId: app.bundleID ?? "",
+                                hidden: app.hidden, generation: generation, ax: ax, scheduler: scheduler) { [weak self, scheduler] rows, focused, frontmost, change, activation in
+            scheduler.main.async {
                 guard let self, let worker = self.apps[pid], worker.generation == generation else { return }
                 // An activation can wait behind a newer keyboard selection in
                 // either queue. Its facts remain valid; its old intent does not.
@@ -52,45 +54,37 @@ final class WindowCatalog: NSObject {
         worker.start()
     }
 
-    @objc private func appChanged(_ notification: Notification) {
-        if let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
-            if notification.name == NSWorkspace.didHideApplicationNotification { apps[app.processIdentifier]?.cancelPresentation() }
-            observe(app)
-            if notification.name == NSWorkspace.didActivateApplicationNotification {
-                apps[app.processIdentifier]?.refresh(change: .activation)
-            }
+    private func appChanged(_ event: ApplicationEvent, app: RunningApplication) {
+        if event == .terminated {
+            apps.removeValue(forKey: app.pid)?.stop()
+            workspaces.remove(pid: app.pid)
+            return
         }
+        if event == .hidden { apps[app.pid]?.cancelPresentation() }
+        observe(app)
+        if event == .activated { apps[app.pid]?.refresh(change: .activation) }
     }
 
-    @objc private func appTerminated(_ notification: Notification) {
-        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
-        apps.removeValue(forKey: app.processIdentifier)?.stop()
-        workspaces.remove(pid: app.processIdentifier)
-    }
-
-    func present(pid: pid_t, id: UInt32, area: CGRect?, focus: Bool,
+    func present(pid: Int32, id: UInt32, area: CGRect?, focus: Bool,
                  completion: @escaping @MainActor @Sendable () -> Void) {
         guard let app = apps[pid] else { completion(); return }
         app.present(id: id, area: area, focus: focus, completion: completion)
     }
 
-    func presentRail(pid: pid_t, id: UInt32, frame: CGRect?, position: Bool, resize: Bool, focus: Bool,
+    func presentRail(pid: Int32, id: UInt32, frame: CGRect?, position: Bool, resize: Bool, focus: Bool,
                      completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
         guard let app = apps[pid] else { completion(nil); return }
         app.presentRail(id:id,target:frame,position:position,resize:resize,focus:focus,completion:completion)
     }
 
-    func returnInside(ids: Set<UInt32>, area: CGRect) { apps.values.forEach { $0.returnInside(ids:ids,area:area) } }
+    func returnInside(ids: Set<UInt32>, area: CGRect) { apps.keys.sorted().compactMap { apps[$0] }.forEach { $0.returnInside(ids:ids,area:area) } }
 
     func cancelPresentations(invalidatingFocus: Bool = true) {
-        apps.values.forEach { $0.cancelPresentation(invalidatingFocus: invalidatingFocus) }
+        apps.keys.sorted().compactMap { apps[$0] }.forEach { $0.cancelPresentation(invalidatingFocus: invalidatingFocus) }
     }
 }
 
 private enum AXReadError: Error { case unresponsive, gone, changed }
-
-/// Retain the callback's immutable handle while handing it to its app's queue.
-private struct AXNotificationElement: @unchecked Sendable { let value: AXUIElement }
 
 private struct WindowFacts {
     let id: UInt32
@@ -101,10 +95,10 @@ private struct WindowFacts {
     let tabs: Int
     var frame: CGRect
     let parent: UInt32?
-    let nativeTabGroups: [AXUIElement]
+    let nativeTabGroups: [AXElement]
 
-    func shares(_ groups: [AXUIElement]) -> Bool {
-        nativeTabGroups.contains { group in groups.contains { CFEqual(group, $0) } }
+    func shares(_ groups: [AXElement]) -> Bool {
+        nativeTabGroups.contains { group in groups.contains { group == $0 } }
     }
 
     func record(app: String, bundleId: String, hidden: Bool) -> WindowRecord {
@@ -113,7 +107,7 @@ private struct WindowFacts {
         if fullscreen { state = .fullscreen; reason = "native fullscreen" }
         else if minimized { state = .minimized; reason = "minimized" }
         else if hidden { state = .hidden; reason = "application hidden" }
-        else if subrole != kAXStandardWindowSubrole { state = .floats; reason = subrole }
+        else if subrole != "AXStandardWindow" { state = .floats; reason = subrole }
         else if !resizable { state = .floats; reason = "fixed size" }
         else { state = .tiled; reason = "standard window" }
         if tabs > 1 { reason += "; \(tabs) native tabs" }
@@ -125,41 +119,43 @@ private struct WindowFacts {
 /// complete snapshot, while other apps and the CLI continue independently.
 private final class AppWindows: @unchecked Sendable {
     let generation: UUID
-    private let pid: pid_t
+    private let pid: Int32
     private let name: String
     private let bundleId: String
-    private let queue: DispatchQueue
+    private let queue: any SerialLane
+    private let ax: any AccessibilityPort
+    private let scheduler: any SchedulingPort
     private let publish: @Sendable ([WindowObservation], UInt32?, Bool, CatalogChange, UUID?) -> Void
     // All mutable state below belongs to queue, including AX handles.
-    private let application: AXUIElement
-    private var observer: AXObserver?
-    private var windowSubscriptions = AXSubscriptions([
-        kAXUIElementDestroyedNotification, kAXWindowMiniaturizedNotification, kAXWindowDeminiaturizedNotification,
-        kAXWindowResizedNotification, kAXLayoutChangedNotification, kAXValueChangedNotification
+    private let application: AXElement
+    private var observer: (any AXObservation)?
+    private var windowSubscriptions = ElementSubscriptions<AXElement, AXNotification>([
+        .destroyed, .minimized, .restored,
+        .resized, .layoutChanged, .valueChanged
     ])
-    private var appSubscriptions = AXSubscriptions([
-        kAXWindowCreatedNotification, kAXFocusedWindowChangedNotification,
-        kAXMainWindowChangedNotification, kAXSheetCreatedNotification
+    private var appSubscriptions = ElementSubscriptions<AXElement, AXNotification>([
+        .windowCreated, .focusedWindowChanged,
+        .mainWindowChanged, .sheetCreated
     ])
     private var facts: [WindowFacts] = []
     // The last native bar of each listed root, kept for an unfocused root that
     // lost it and for a retired root while a listed window still holds it.
-    private var nativeBars: [UInt32: [AXUIElement]] = [:]
+    private var nativeBars: [UInt32: [AXElement]] = [:]
     private var hidden: Bool
     private var hiddenHint: Bool
     private var stopped = false
-    private var pending: DispatchWorkItem?
+    private var pending: (any ScheduledWork)?
     private var settleGeneration: UInt64 = 0
     private var failedReads = 0
-    private var elementsByID: [UInt32: AXUIElement] = [:]
+    private var elementsByID: [UInt32: AXElement] = [:]
     private var change = CatalogChange.snapshot
     private var activationToken: UUID?
-    private let presentationLock = NSLock()
+    private let presentationLock: any PolicyLock
     private var presentation = UUID()
     // Geometry can supersede queued writes without superseding a native
     // selection whose activation facts have not arrived yet.
     private var focusIntent = UUID()
-    private var railActivationCheck: (token: UUID, work: DispatchWorkItem)?
+    private var railActivationCheck: (token: UUID, work: any ScheduledWork)?
     private var constrained = Set<UInt32>()
     private struct Validation {
         let area: CGRect
@@ -168,7 +164,8 @@ private final class AppWindows: @unchecked Sendable {
     }
     private var validations: [UInt32: Validation] = [:]
 
-    init(pid: pid_t, name: String, bundleId: String, hidden: Bool, generation: UUID,
+    init(pid: Int32, name: String, bundleId: String, hidden: Bool, generation: UUID,
+         ax: any AccessibilityPort, scheduler: any SchedulingPort,
          publish: @escaping @Sendable ([WindowObservation], UInt32?, Bool, CatalogChange, UUID?) -> Void) {
         self.pid = pid
         self.name = name
@@ -177,24 +174,24 @@ private final class AppWindows: @unchecked Sendable {
         self.hiddenHint = hidden
         self.generation = generation
         self.publish = publish
-        application = AXUIElementCreateApplication(pid)
-        queue = DispatchQueue(label: "tessel.ax.\(pid)", qos: .userInitiated, autoreleaseFrequency: .workItem)
+        self.ax = ax
+        self.scheduler = scheduler
+        presentationLock = scheduler.makeLock()
+        application = ax.application(pid)
+        queue = scheduler.serialLane(label: "tessel.ax.\(pid)")
     }
 
     func start() {
         queue.async { [self] in
-            AXUIElementSetMessagingTimeout(application, 0.05)
-            var value: AXObserver?
-            let result = AXObserverCreate(pid, { _, element, notification, context in
-                guard let context else { return }
-                Unmanaged<AppWindows>.fromOpaque(context).takeUnretainedValue().changed(notification as String, element: element)
-            }, &value)
-            if result == .success, let value {
+            ax.setMessagingTimeout(application, seconds: 0.05)
+            let result = ax.observer(pid) { [weak self] notification, element in
+                self?.changed(notification, element: element)
+            }
+            if result.status == .success, let value = result.value {
                 observer = value
-                let source = AXObserverGetRunLoopSource(value)
                 // Keep the owner alive until the source has been removed at stop.
-                DispatchQueue.main.async { [self] in
-                    CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+                scheduler.main.async { [self] in
+                    value.start()
                     withExtendedLifetime(self) {}
                 }
             }
@@ -204,19 +201,18 @@ private final class AppWindows: @unchecked Sendable {
         }
     }
 
-    private func changed(_ notification: String, element: AXUIElement) {
+    private func changed(_ notification: AXNotification, element: AXElement) {
         // A closing window can still be listed by the read that follows its event.
-        let needsSettling = [kAXWindowCreatedNotification, kAXSheetCreatedNotification, kAXMainWindowChangedNotification,
-                             kAXUIElementDestroyedNotification].contains(notification)
-        let change: CatalogChange = notification == kAXWindowDeminiaturizedNotification ? .restored
-            : [kAXFocusedWindowChangedNotification, kAXMainWindowChangedNotification].contains(notification) ? .focus : .snapshot
-        if notification == kAXWindowResizedNotification {
-            let handle = AXNotificationElement(value: element)
+        let needsSettling = [.windowCreated, .sheetCreated, .mainWindowChanged,
+                             .destroyed].contains(notification)
+        let change: CatalogChange = notification == .restored ? .restored
+            : [.focusedWindowChanged, .mainWindowChanged].contains(notification) ? .focus : .snapshot
+        if notification == .resized {
+            let handle = element
             queue.async { [self] in
                 guard !validations.isEmpty else { return }
-                AXUIElementSetMessagingTimeout(handle.value, 0.05)
-                var id: UInt32 = 0
-                _ = axWindowID(handle.value, &id)
+                ax.setMessagingTimeout(handle, seconds: 0.05)
+                let id = ax.windowID(handle).value ?? 0
                 validatePresentation(id: id)
             }
         }
@@ -242,9 +238,7 @@ private final class AppWindows: @unchecked Sendable {
 
     private func scheduleRead(after milliseconds: Int) {
         pending?.cancel()
-        let item = DispatchWorkItem { [weak self] in self?.readSnapshot() }
-        pending = item
-        queue.asyncAfter(deadline: .now() + .milliseconds(milliseconds), execute: item)
+        pending = queue.after(milliseconds: milliseconds) { [weak self] in self?.readSnapshot() }
     }
 
     func stop() {
@@ -254,9 +248,8 @@ private final class AppWindows: @unchecked Sendable {
             railActivationCheck = nil
             pending?.cancel()
             if let observer {
-                let source = AXObserverGetRunLoopSource(observer)
-                DispatchQueue.main.async { [self] in
-                    CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+                scheduler.main.async { [self] in
+                    observer.stop()
                     withExtendedLifetime(self) {}
                 }
             }
@@ -270,7 +263,7 @@ private final class AppWindows: @unchecked Sendable {
         settleGeneration += 1
         let generation = settleGeneration
         for milliseconds in [50, 150, 300, 450] {
-            queue.asyncAfter(deadline: .now() + .milliseconds(milliseconds)) { [weak self] in
+            queue.after(milliseconds: milliseconds) { [weak self] in
                 guard let self, !self.stopped, self.settleGeneration == generation else { return }
                 self.readSnapshot()
             }
@@ -281,16 +274,16 @@ private final class AppWindows: @unchecked Sendable {
         guard !stopped else { return }
         updateSubscriptions([application], using: &appSubscriptions)
         do {
-            guard let windows = try value(application, kAXWindowsAttribute) as? [AXUIElement] else { return }
+            guard let windows = try value(application, .windows)?.elements else { return }
             var next: [WindowFacts] = []
-            var handles: [UInt32: AXUIElement] = [:]
+            var handles: [UInt32: AXElement] = [:]
             var elements = windows
             // Subscribe even if an animation makes this snapshot incomplete.
             // Otherwise a newly created window can finish minimizing unseen.
             defer { updateSubscriptions(elements, using: &windowSubscriptions) }
             // Read hide state alongside the windows; NSWorkspace's notification
             // can lag behind AX. Its cached value is a fallback for missing AXHidden.
-            hidden = try value(application, kAXHiddenAttribute) as? Bool ?? hiddenHint
+            hidden = try value(application, .hidden)?.bool ?? hiddenHint
             for window in windows {
                 do {
                     try inspect(window, into: &next, elements: &elements, handles: &handles)
@@ -299,20 +292,19 @@ private final class AppWindows: @unchecked Sendable {
             // AppKit can omit live windows during Space moves, fullscreen and
             // app hide/unhide. Revalidate known handles; a different native tab
             // front is identified by the bar retained from its previous root.
-            var omitted: [AXUIElement] = []
-            var focusedElement: AXUIElement?
-            if let focused = try value(application, kAXFocusedWindowAttribute), CFGetTypeID(focused) == AXUIElementGetTypeID() {
-                let element = focused as! AXUIElement
+            var omitted: [AXElement] = []
+            var focusedElement: AXElement?
+            if let element = try value(application, .focusedWindow)?.element {
                 focusedElement = element
                 omitted.append(element)
             }
             omitted += elementsByID.values
-            for window in omitted where !elements.contains(where: { CFEqual($0, window) }) {
-                let cached = facts.first { fact in elementsByID[fact.id].map { CFEqual($0, window) } == true }
+            for window in omitted where !elements.contains(where: { $0 == window }) {
+                let cached = facts.first { fact in elementsByID[fact.id].map { $0 == window } == true }
                 if let cached, next.contains(where: { $0.id != cached.id && $0.shares(cached.nativeTabGroups) }) { continue }
                 // AppKit publishes every minimized tab, then only the selected
                 // window after restore. Its focused window is checked above.
-                let isFocused = focusedElement.map { CFEqual($0, window) } == true
+                let isFocused = focusedElement.map { $0 == window } == true
                 if cached?.minimized == true && !hidden && !isFocused { continue }
                 do {
                     try inspect(window, into: &next, elements: &elements, handles: &handles, parent: cached?.parent)
@@ -321,9 +313,9 @@ private final class AppWindows: @unchecked Sendable {
             // Tab selection and insertion can replace AXWindows while the
             // focused window is being inspected. Never commit a mixed read:
             // its intermediate tab root would look like an ordinary window.
-            guard let confirmed = try value(application, kAXWindowsAttribute) as? [AXUIElement],
+            guard let confirmed = try value(application, .windows)?.elements,
                   windows.count == confirmed.count,
-                  windows.allSatisfy({ window in confirmed.contains { CFEqual(window, $0) } }) else {
+                  windows.allSatisfy({ window in confirmed.contains { window == $0 } }) else {
                 throw AXReadError.changed
             }
             // AXWindows may still include the former tab root before the
@@ -332,8 +324,8 @@ private final class AppWindows: @unchecked Sendable {
             let oldIDs = Set(facts.map(\.id))
             // A root without a bar remembers the bar it last showed, until it is
             // focused: a background tab cannot be, but a detached window can.
-            let focusedID = focusedElement.flatMap { element in handles.first { CFEqual($0.value, element) }?.key }
-            func lastBar(_ id: UInt32) -> [AXUIElement] { id == focusedID ? [] : nativeBars[id] ?? [] }
+            let focusedID = focusedElement.flatMap { element in handles.first { $0.value == element }?.key }
+            func lastBar(_ id: UInt32) -> [AXElement] { id == focusedID ? [] : nativeBars[id] ?? [] }
             let retired = Set(facts.filter { cached in
                 let bar = cached.nativeTabGroups.isEmpty ? lastBar(cached.id) : cached.nativeTabGroups
                 return next.contains { $0.id != cached.id && !$0.minimized && $0.shares(bar) }
@@ -356,7 +348,7 @@ private final class AppWindows: @unchecked Sendable {
             // A former root can also lose its bar in a read that cannot identify
             // its successor yet, because focus or the moved bar is unpublished.
             // Keep each root's last bar while its group is listed.
-            var bars: [UInt32: [AXUIElement]] = [:]
+            var bars: [UInt32: [AXElement]] = [:]
             for fact in next where !fact.minimized {
                 let bar = fact.nativeTabGroups.isEmpty ? lastBar(fact.id) : fact.nativeTabGroups
                 if !bar.isEmpty { bars[fact.id] = bar }
@@ -392,52 +384,53 @@ private final class AppWindows: @unchecked Sendable {
         }
     }
 
-    private func inspect(_ window: AXUIElement, into result: inout [WindowFacts], elements: inout [AXUIElement],
-                         handles: inout [UInt32: AXUIElement], parent: UInt32? = nil) throws {
-        if !elements.contains(where: { CFEqual($0, window) }) { elements.append(window) }
-        AXUIElementSetMessagingTimeout(window, 0.05)
-        var id: CGWindowID = 0
-        try check(axWindowID(window, &id))
+    private func inspect(_ window: AXElement, into result: inout [WindowFacts], elements: inout [AXElement],
+                         handles: inout [UInt32: AXElement], parent: UInt32? = nil) throws {
+        if !elements.contains(where: { $0 == window }) { elements.append(window) }
+        ax.setMessagingTimeout(window, seconds: 0.05)
+        let identifier = ax.windowID(window)
+        try check(identifier.status)
+        let id = identifier.value ?? 0
         guard id != 0, !result.contains(where: { $0.id == id }) else { return }
-        let minimized = try value(window, kAXMinimizedAttribute) as? Bool ?? false
-        let fullscreen = try value(window, "AXFullScreen") as? Bool ?? false
-        let subrole = try value(window, kAXSubroleAttribute) as? String ?? "AXUnknown"
-        var resizable = DarwinBoolean(false)
-        try check(AXUIElementIsAttributeSettable(window, kAXSizeAttribute as CFString, &resizable))
-        var sheets: [AXUIElement] = []
-        var tabGroups: [AXUIElement] = []
+        let minimized = try value(window, .minimized)?.bool ?? false
+        let fullscreen = try value(window, .fullscreen)?.bool ?? false
+        let subrole = try value(window, .subrole)?.string ?? "AXUnknown"
+        let resizable = ax.isSettable(.size, of: window)
+        try check(resizable.status)
+        var sheets: [AXElement] = []
+        var tabGroups: [AXElement] = []
         var visited = 0
         let tabs = try chrome(window, depth: 0, visited: &visited, sheets: &sheets, groups: &tabGroups)
         let frame = try frame(window)
         handles[id] = window
         result.append(WindowFacts(id: id, minimized: minimized, fullscreen: fullscreen, subrole: subrole,
-                                  resizable: resizable.boolValue, tabs: max(1, tabs), frame: frame, parent: parent, nativeTabGroups: tabGroups))
+                                  resizable: resizable.value ?? false, tabs: max(1, tabs), frame: frame, parent: parent, nativeTabGroups: tabGroups))
         elements.append(contentsOf: tabGroups)
         for sheet in sheets { try inspect(sheet, into: &result, elements: &elements, handles: &handles, parent: id) }
     }
 
     /// Read roles and tab counts in the window chrome, never text or titles.
     /// Bound the walk and skip content trees such as web areas and text fields.
-    private func chrome(_ element: AXUIElement, depth: Int, visited: inout Int,
-                        sheets: inout [AXUIElement], groups: inout [AXUIElement]) throws -> Int {
+    private func chrome(_ element: AXElement, depth: Int, visited: inout Int,
+                        sheets: inout [AXElement], groups: inout [AXElement]) throws -> Int {
         guard depth < 5, visited < 64 else { return 0 }
         visited += 1
-        AXUIElementSetMessagingTimeout(element, 0.05)
-        let role = try value(element, kAXRoleAttribute) as? String ?? ""
-        if role == kAXTabGroupRole {
-            let tabs = try value(element, kAXTabsAttribute) as? [AXUIElement] ?? []
+        ax.setMessagingTimeout(element, seconds: 0.05)
+        let role = try value(element, .role)?.string ?? ""
+        if role == "AXTabGroup" {
+            let tabs = try value(element, .tabs)?.elements ?? []
             guard !tabs.isEmpty else { return 0 }
-            let contents = try value(element, kAXContentsAttribute) as? [AXUIElement] ?? []
+            let contents = try value(element, .contents)?.elements ?? []
             // AppKit's native tab bar includes its tab buttons in AXContents.
             // NSTabView instead publishes the selected page's content there.
             // A native New Tab button may also occur, so count only AXTabs.
-            guard tabs.allSatisfy({ tab in contents.contains { CFEqual(tab, $0) } }) else { return 0 }
+            guard tabs.allSatisfy({ tab in contents.contains { tab == $0 } }) else { return 0 }
             groups.append(element)
             return tabs.count
         }
-        if depth > 0, role == kAXSheetRole { sheets.append(element); return 0 }
+        if depth > 0, role == "AXSheet" { sheets.append(element); return 0 }
         guard !["AXWebArea", "AXScrollArea", "AXTextArea", "AXTextField", "AXTable", "AXOutline"].contains(role) else { return 0 }
-        let children = try value(element, kAXChildrenAttribute) as? [AXUIElement] ?? []
+        let children = try value(element, .children)?.elements ?? []
         var count = 0
         for child in children.prefix(64 - visited) {
             count = max(count, try chrome(child, depth: depth + 1, visited: &visited, sheets: &sheets, groups: &groups))
@@ -445,25 +438,24 @@ private final class AppWindows: @unchecked Sendable {
         return count
     }
 
-    private func updateSubscriptions(_ elements: [AXUIElement], using subscriptions: inout AXSubscriptions) {
+    private func updateSubscriptions(_ elements: [AXElement], using subscriptions: inout ElementSubscriptions<AXElement, AXNotification>) {
         guard let observer else { return }
-        let context = Unmanaged.passUnretained(self).toOpaque()
-        subscriptions.update(elements, add: { element, name in
-            AXObserverAddNotification(observer, element, name as CFString, context)
+        subscriptions.update(elements, equal: { $0 == $1 }, add: { element, name in
+            let result = observer.add(name, to: element)
+            return result == .success || result == .notificationAlreadyRegistered || result == .notificationUnsupported
         }, remove: { element, name in
-            AXObserverRemoveNotification(observer, element, name as CFString)
+            observer.remove(name, from: element)
         })
     }
 
     private func publishSnapshot(replacing replacements: [UInt32: UInt32] = [:]) {
         var focused: UInt32 = 0
-        if let element = try? value(application, kAXFocusedWindowAttribute), CFGetTypeID(element) == AXUIElementGetTypeID() {
-            let window = element as! AXUIElement
+        if let window = try? value(application, .focusedWindow)?.element {
             // Equal AX handles do not inherit each other's messaging timeout.
-            AXUIElementSetMessagingTimeout(window, 0.05)
-            _ = axWindowID(window, &focused)
+            ax.setMessagingTimeout(window, seconds: 0.05)
+            focused = ax.windowID(window).value ?? 0
         }
-        let frontmost = (try? value(application, kAXFrontmostAttribute) as? Bool) == true
+        let frontmost = (try? value(application, .frontmost)?.bool) == true
         if frontmost {
             railActivationCheck?.work.cancel()
             railActivationCheck = nil
@@ -481,14 +473,9 @@ private final class AppWindows: @unchecked Sendable {
         activationToken = nil
     }
 
-    private func frame(_ window: AXUIElement) throws -> CGRect {
-        var point = CGPoint.zero, size = CGSize.zero
-        if let value = try value(window, kAXPositionAttribute), CFGetTypeID(value) == AXValueGetTypeID() {
-            _ = AXValueGetValue(value as! AXValue, .cgPoint, &point)
-        }
-        if let value = try value(window, kAXSizeAttribute), CFGetTypeID(value) == AXValueGetTypeID() {
-            _ = AXValueGetValue(value as! AXValue, .cgSize, &size)
-        }
+    private func frame(_ window: AXElement) throws -> CGRect {
+        let point = try value(window, .position)?.point ?? .zero
+        let size = try value(window, .size)?.size ?? .zero
         return CGRect(origin: point, size: size)
     }
 
@@ -508,25 +495,25 @@ private final class AppWindows: @unchecked Sendable {
         queue.async { [self] in
             // The caller's focus intent lasts only while this write is pending,
             // including when an AX read fails or a newer render cancels it.
-            defer { DispatchQueue.main.async { completion() } }
+            defer { scheduler.main.async { completion() } }
             guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
             do {
                 guard try canPresent(window, id: id) else { return }
                 if let area {
-                    var origin = area.origin, size = area.size
-                    try check(AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, AXValueCreate(.cgPoint, &origin)!))
-                    try check(AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, AXValueCreate(.cgSize, &size)!))
+                    let origin = area.origin, size = area.size
+                    try check(ax.set(.position, of: window, to: .point(origin)))
+                    try check(ax.set(.size, of: window, to: .size(size)))
                     if try checkSize(window, area: area) { constrained.insert(id) } else { constrained.remove(id) }
                     validations[id] = Validation(area: area, token: token, completion: completion)
-                    queue.asyncAfter(deadline: .now() + .milliseconds(100)) { [weak self] in self?.validatePresentation(id: id, token: token) }
+                    queue.after(milliseconds: 100) { [weak self] in self?.validatePresentation(id: id, token: token) }
                 }
                 guard presentationLock.withLock({ presentation == token }), try canPresent(window, id: id) else { return }
                 if focus {
-                    try check(AXUIElementSetAttributeValue(application, kAXFrontmostAttribute as CFString, kCFBooleanTrue))
+                    try check(ax.set(.frontmost, of: application, to: .bool(true)))
                     guard presentationLock.withLock({ presentation == token }), isNativeFront(window, id: id) else { return }
-                    try check(AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue))
+                    try check(ax.set(.main, of: window, to: .bool(true)))
                     guard presentationLock.withLock({ presentation == token }), isNativeFront(window, id: id) else { return }
-                    try check(AXUIElementPerformAction(window, kAXRaiseAction as CFString))
+                    try check(ax.perform(.raise, on: window))
                 }
                 publishSnapshot()
             } catch { /* Keep the last complete classification when the app is busy. */ }
@@ -544,7 +531,7 @@ private final class AppWindows: @unchecked Sendable {
     private func presentRail(id: UInt32, target: CGRect?, position: Bool, resize: Bool, focus: Bool, token: UUID,
                              failures: Int, completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
         var accepted: CGRect?, retrying = false
-        defer { if !retrying { let result = accepted; DispatchQueue.main.async { completion(result) } } }
+        defer { if !retrying { let result = accepted; scheduler.main.async { completion(result) } } }
         guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
         do {
             guard try canPresent(window,id:id) else { return }
@@ -555,48 +542,47 @@ private final class AppWindows: @unchecked Sendable {
                     // Size changes are constrained by the window's current
                     // top edge. Stage inside the display at the target top
                     // before sizing, then place its possibly partial frame.
-                    var safe = CGPoint(x:0,y:target.minY)
-                    try check(AXUIElementSetAttributeValue(window,kAXPositionAttribute as CFString,AXValueCreate(.cgPoint,&safe)!))
-                    var size = target.size
-                    try check(AXUIElementSetAttributeValue(window,kAXSizeAttribute as CFString,AXValueCreate(.cgSize,&size)!))
+                    let safe = CGPoint(x:0,y:target.minY)
+                    try check(ax.set(.position, of: window, to: .point(safe)))
+                    let size = target.size
+                    try check(ax.set(.size, of: window, to: .size(size)))
                     constrained.remove(id)
                     validations[id] = nil
                 }
                 guard presentationLock.withLock({ presentation == token }) else { return }
                 if position {
-                    var origin = target.origin
-                    try check(AXUIElementSetAttributeValue(window,kAXPositionAttribute as CFString,AXValueCreate(.cgPoint,&origin)!))
+                    let origin = target.origin
+                    try check(ax.set(.position, of: window, to: .point(origin)))
                 }
                 accepted = try frame(window)
                 if let index = facts.firstIndex(where: { $0.id == id }), let accepted { facts[index].frame = accepted }
             }
             guard presentationLock.withLock({ presentation == token }), try canPresent(window,id:id) else { return }
             if focus {
-                try check(AXUIElementSetAttributeValue(application,kAXFrontmostAttribute as CFString,kCFBooleanTrue))
+                try check(ax.set(.frontmost, of: application, to: .bool(true)))
                 guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return }
-                try check(AXUIElementSetAttributeValue(window,kAXMainAttribute as CFString,kCFBooleanTrue))
+                try check(ax.set(.main, of: window, to: .bool(true)))
                 guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return }
-                try check(AXUIElementPerformAction(window,kAXRaiseAction as CFString))
+                try check(ax.perform(.raise, on: window))
                 // AX accepts an activation request before it necessarily
                 // becomes active. Retry once only while it is unconfirmed.
                 railActivationCheck?.work.cancel()
-                let check = DispatchWorkItem { [weak self] in
+                let check = queue.after(milliseconds: 50) { [weak self] in
                     guard let self, self.railActivationCheck?.token == token else { return }
                     self.railActivationCheck = nil
                     guard !self.stopped, self.presentationLock.withLock({ self.presentation == token }),
                           (try? self.canPresent(window,id:id)) == true,
-                          (try? self.value(self.application,kAXFrontmostAttribute) as? Bool) != true else { return }
+                          (try? self.value(self.application,.frontmost)?.bool) != true else { return }
                     do {
-                        try self.check(AXUIElementSetAttributeValue(self.application,kAXFrontmostAttribute as CFString,kCFBooleanTrue))
+                        try self.check(self.ax.set(.frontmost, of: self.application, to: .bool(true)))
                         guard self.presentationLock.withLock({ self.presentation == token }), self.isNativeFront(window,id:id) else { return }
-                        try self.check(AXUIElementSetAttributeValue(window,kAXMainAttribute as CFString,kCFBooleanTrue))
+                        try self.check(self.ax.set(.main, of: window, to: .bool(true)))
                         guard self.presentationLock.withLock({ self.presentation == token }), self.isNativeFront(window,id:id) else { return }
-                        try self.check(AXUIElementPerformAction(window,kAXRaiseAction as CFString))
+                        try self.check(self.ax.perform(.raise, on: window))
                         self.publishSnapshot()
                     } catch { /* Another app and newer focus intents remain independent. */ }
                 }
                 railActivationCheck = (token,check)
-                queue.asyncAfter(deadline:.now() + .milliseconds(50),execute:check)
             }
             publishSnapshot()
         } catch AXReadError.unresponsive where target != nil && accepted == nil && failures < 4 {
@@ -605,7 +591,7 @@ private final class AppWindows: @unchecked Sendable {
             // neighbors once it answers. Back off like failed reads, while
             // no newer render supersedes this one; a hung app then costs nothing.
             retrying = true
-            queue.asyncAfter(deadline:.now() + .milliseconds(50 << (failures+1))) { [weak self] in
+            queue.after(milliseconds: 50 << (failures+1)) { [weak self] in
                 self?.presentRail(id:id,target:target,position:position,resize:resize,focus:focus,token:token,
                                   failures:failures+1,completion:completion)
             }
@@ -619,20 +605,20 @@ private final class AppWindows: @unchecked Sendable {
             for id in ids.sorted() {
                 guard let window = elementsByID[id], (try? canPresent(window,id:id)) == true,
                       let frame = try? frame(window) else { continue }
-                var point = CGPoint(x:max(area.minX,min(frame.minX,area.maxX-frame.width)),
+                let point = CGPoint(x:max(area.minX,min(frame.minX,area.maxX-frame.width)),
                                     y:max(area.minY,min(frame.minY,area.maxY-frame.height)))
-                _ = AXUIElementSetAttributeValue(window,kAXPositionAttribute as CFString,AXValueCreate(.cgPoint,&point)!)
+                _ = ax.set(.position, of: window, to: .point(point))
             }
         }
     }
 
-    private func checkSize(_ window: AXUIElement, area: CGRect) throws -> Bool {
+    private func checkSize(_ window: AXElement, area: CGRect) throws -> Bool {
         let accepted = try frame(window)
         guard accepted.width > 0, accepted.height > 0 else { throw AXReadError.unresponsive }
         let cannotFill = abs(accepted.width - area.width) > 2 || abs(accepted.height - area.height) > 2
         if cannotFill {
-            var center = CGPoint(x: area.midX - accepted.width / 2, y: area.midY - accepted.height / 2)
-            try check(AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, AXValueCreate(.cgPoint, &center)!))
+            let center = CGPoint(x: area.midX - accepted.width / 2, y: area.midY - accepted.height / 2)
+            try check(ax.set(.position, of: window, to: .point(center)))
         }
         return cannotFill
     }
@@ -645,15 +631,15 @@ private final class AppWindows: @unchecked Sendable {
               let cannotFill = try? checkSize(window, area: pending.area) else { return }
         if cannotFill { constrained.insert(id) } else { constrained.remove(id) }
         publishSnapshot()
-        DispatchQueue.main.async { pending.completion() }
+        scheduler.main.async { pending.completion() }
     }
 
     /// Native hide, minimize, and fullscreen can begin between a snapshot and a
     /// queued write. Never let an old presentation undo the user's operation.
-    private func canPresent(_ window: AXUIElement, id: UInt32) throws -> Bool {
-        guard !hidden, try value(application, kAXHiddenAttribute) as? Bool != true,
-              try value(window, kAXMinimizedAttribute) as? Bool != true,
-              try value(window, "AXFullScreen") as? Bool != true else { return false }
+    private func canPresent(_ window: AXElement, id: UInt32) throws -> Bool {
+        guard !hidden, try value(application, .hidden)?.bool != true,
+              try value(window, .minimized)?.bool != true,
+              try value(window, .fullscreen)?.bool != true else { return false }
         return isNativeFront(window, id: id)
     }
 
@@ -662,25 +648,25 @@ private final class AppWindows: @unchecked Sendable {
     /// user's choice. Focus writes repeat this check: each can take long enough
     /// on a busy system for the user to select another tab in between.
     /// Windows without a native tab bar need no AX read.
-    private func isNativeFront(_ window: AXUIElement, id: UInt32) -> Bool {
+    private func isNativeFront(_ window: AXElement, id: UInt32) -> Bool {
         let groups = facts.first(where: { $0.id == id })?.nativeTabGroups ?? []
         // Its bar can leave the former root before the successor is published.
         // The retained group still identifies the real selected native window.
         for bar in groups.isEmpty ? (nativeBars[id] ?? []) : groups {
-            AXUIElementSetMessagingTimeout(bar, 0.05)
-            if let front = try? value(bar, kAXWindowAttribute), CFGetTypeID(front) == AXUIElementGetTypeID(),
-               !CFEqual(front, window) { return false }
+            ax.setMessagingTimeout(bar, seconds: 0.05)
+            if let front = try? value(bar, .window)?.element,
+               front != window { return false }
         }
         return true
     }
 
-    private func value(_ element: AXUIElement, _ attribute: String) throws -> CFTypeRef? {
-        var result: CFTypeRef?
-        try check(AXUIElementCopyAttributeValue(element, attribute as CFString, &result))
-        return result
+    private func value(_ element: AXElement, _ attribute: AXAttribute) throws -> AXValue? {
+        let result = ax.copy(attribute, of: element)
+        try check(result.status)
+        return result.value
     }
 
-    private func check(_ error: AXError) throws {
+    private func check(_ error: AXStatus) throws {
         if error == .cannotComplete || error == .apiDisabled { throw AXReadError.unresponsive }
         if error == .invalidUIElement { throw AXReadError.gone }
     }
