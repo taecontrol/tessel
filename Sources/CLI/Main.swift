@@ -10,7 +10,7 @@ struct Main {
         }
         let reply: Reply
         do { reply = try SocketIO.request(command) }
-        catch IPCError.timeout { fail("tessel is not responding") }
+        catch let error as IPCError { fail(error.cliMessage) }
         catch { fail("tessel is not running") }
         if let error = reply.error { fail(error) }
         do {

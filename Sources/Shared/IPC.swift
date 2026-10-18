@@ -2,10 +2,6 @@ import CryptoKit
 import Darwin
 import Foundation
 
-enum IPCError: Error {
-    case unavailable, timeout, invalidMessage, unsafeEndpoint, alreadyRunning
-}
-
 struct Endpoint {
     let directory: String
     let path: String
@@ -53,19 +49,17 @@ enum SocketIO {
     }
 
     static func wait(_ fd: Int32, for events: Int16, until deadline: UInt64) throws {
-        while true {
-            let now = DispatchTime.now().uptimeNanoseconds
-            guard now < deadline else { throw IPCError.timeout }
-            var descriptor = pollfd(fd: fd, events: events, revents: 0)
-            let milliseconds = Int32(min((deadline - now) / 1_000_000 + 1, UInt64(Int32.max)))
-            let result = poll(&descriptor, 1, milliseconds)
-            if result > 0 {
-                guard descriptor.revents & events != 0 else { throw IPCError.unavailable }
-                return
-            }
-            if result == 0 { throw IPCError.timeout }
-            if errno != EINTR { throw IPCError.unavailable }
+        try SocketDeadline(until: deadline, now: { DispatchTime.now().uptimeNanoseconds }).wait {
+            readiness(fd, for: events, milliseconds: $0)
         }
+    }
+
+    private static func readiness(_ fd: Int32, for events: Int16, milliseconds: Int32) -> SocketDeadline.Readiness {
+        var descriptor = pollfd(fd: fd, events: events, revents: 0)
+        let result = poll(&descriptor, 1, milliseconds)
+        if result > 0 { return descriptor.revents & events != 0 ? .ready : .unavailable }
+        if result == 0 { return .timeout }
+        return errno == EINTR ? .interrupted : .unavailable
     }
 
     static func readLine(_ fd: Int32, limit: Int, until deadline: UInt64) throws -> Data {
@@ -108,15 +102,16 @@ enum SocketIO {
     }
 
     static func request(_ command: String) throws -> Reply {
-        let deadline = DispatchTime.now().uptimeNanoseconds + 750_000_000
+        let timing = SocketDeadline.request(now: { DispatchTime.now().uptimeNanoseconds })
+        let deadline = timing.nanoseconds
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw IPCError.unavailable }
         defer { close(fd) }
         configure(fd)
         let result = try Endpoint().withAddress { Darwin.connect(fd, $0, $1) }
+        let connection: SocketDeadline.Connection = result == 0 ? .connected : errno == EINPROGRESS ? .pending : .unavailable
+        try timing.connect(connection) { readiness(fd, for: Int16(POLLOUT), milliseconds: $0) }
         if result != 0 {
-            guard errno == EINPROGRESS else { throw IPCError.unavailable }
-            try wait(fd, for: Int16(POLLOUT), until: deadline)
             var error: Int32 = 0
             var length = socklen_t(MemoryLayout<Int32>.size)
             guard getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &length) == 0, error == 0 else { throw IPCError.unavailable }

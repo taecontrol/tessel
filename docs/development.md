@@ -398,9 +398,18 @@ live in `Tests/Acceptance/Captures.swift` and require the capture environment fl
 
 `scripts/verify --journeys` runs eight journeys. The signing-and-permission
 journey includes the disposable-runner-only permission steps under the guard
-described above. Foundation E11 (CLI failure) and E14 (permission restart) report
-elapsed time while judging only the final state within 5 s; #24 assigns real
-speed checks to the percentile latency measurement.
+described above. Foundation E11 (CLI failure) and E14 (permission restart) prove
+their timing decisions in the deterministic layer. The same journey wiring
+checks wait only for the final state within 5 s and carry no example IDs.
+
+The CLI's connect, write and read waits share a 750 ms virtual deadline;
+interrupted polls consume that same budget. An absent listener fails immediately.
+The permission monitor requests its next probe every 750 ms, with the existing
+50 ms timer tolerance, and requests relaunch immediately on a trusted answer.
+Its virtual proof bounds that scheduling share at 750 ms (800 ms with tolerance),
+excluding macOS time spent running the probe and opening the replacement app.
+An outstanding probe prevents overlap; a denied or failed probe retries on the
+next tick. The original 3 s restart promise includes those external costs.
 
 The journey steps carry these example IDs; decision examples belong to the
 deterministic policy layer and are not tagged in these files:
@@ -413,8 +422,8 @@ deterministic policy layer and are not tagged in these files:
 | Rail scroll and elevator | #17 E24, E25 |
 | Reload | File watcher wiring for save, atomic replace, chmod and delete |
 | Crash, quit and disable | #2 E28, E29, E34; #17 E3 |
-| CLI and config files | #1 E10, E11, E12; #1 U-cli-args, U-private-transport, U-read-only-transport, U-stalled-clients, U-observer-identity, U-cpu-oracle, U-notification-retries |
-| Signing and permission | #1 E13, E14, E15, E16 |
+| CLI and config files | #1 E10, E12; #1 U-cli-args, U-private-transport, U-read-only-transport, U-stalled-clients, U-observer-identity, U-cpu-oracle, U-notification-retries |
+| Signing and permission | #1 E13, E15, E16 |
 
 Latency owns #2 U-switch-budget and #17 E28 in `Tests/Acceptance/Latency.swift`.
 It records 100 workspace switches and 100 rail moves (50 scrolls and 50 elevator
@@ -458,10 +467,10 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #1 E8 | P |
 | #1 E9 | J |
 | #1 E10 | J |
-| #1 E11 | J |
+| #1 E11 | P |
 | #1 E12 | J |
 | #1 E13 | J |
-| #1 E14 | J |
+| #1 E14 | P |
 | #1 E15 | J |
 | #1 E16 | J |
 | #1 E17 | P |
