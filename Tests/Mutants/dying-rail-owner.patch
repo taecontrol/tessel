@@ -7,19 +7,19 @@ index c29c127..f29f7e9 100644
 @@ -77,11 +77,6 @@ final class WindowCatalog {
          app.presentRail(id:id,target:frame,position:position,resize:resize,focus:focus,completion:completion)
      }
- 
+
 -    func windowIsGone(pid: Int32, id: UInt32, completion: @escaping @MainActor @Sendable (Bool) -> Void) {
 -        guard let app = apps[pid] else { completion(false); return }
 -        app.windowIsGone(id: id, completion: completion)
 -    }
 -
      func returnInside(ids: Set<UInt32>, area: CGRect) { apps.keys.sorted().compactMap { apps[$0] }.forEach { $0.returnInside(ids:ids,area:area) } }
- 
+
      func cancelPresentations(invalidatingFocus: Bool = true) {
 @@ -507,20 +502,6 @@ private final class AppWindows: @unchecked Sendable {
          presentationLock.withLock { token == focusIntent }
      }
- 
+
 -    func windowIsGone(id: UInt32, completion: @escaping @MainActor @Sendable (Bool) -> Void) {
 -        queue.async { [self] in
 -            var gone = false
