@@ -37,6 +37,25 @@ struct NativeContractReply: Codable {
         let knownPID: Int32?
         let mainThread: Bool
         let minimized: Bool?
+        let focusedID: UInt32?
+        let focusedError: Int32?
+        let alivePIDs: [Int32]?
+    }
+    struct Chrome: Codable {
+        let role: String?
+        let tabs: [String]
+        let contents: [String]
+        let children: [String]
+        let tabChildren: [[String]]
+        let tabChildrenErrors: [Int32]
+        let tabChildrenAreArrays: [Bool]
+        let tabsInContents: Bool
+        let tabsError: Int32
+        let tabsIsArray: Bool
+        let contentsError: Int32
+        let contentsIsArray: Bool
+        let childrenError: Int32
+        let childrenIsArray: Bool
     }
     struct Membership: Codable {
         let id: UInt32
@@ -44,6 +63,7 @@ struct NativeContractReply: Codable {
         let all: [UInt64]
     }
     let result: Int32?
+    let writeReturnedAt: Double?
     let results: [Int32]?
     let readError: Int32?
     let listError: Int32?
@@ -51,6 +71,9 @@ struct NativeContractReply: Codable {
     let windows: [Window]?
     let window: Window?
     let focused: Window?
+    let focusedError: Int32?
+    let retainedWindows: [Window]?
+    let chrome: [Chrome]?
     let hidden: Bool?
     let frontmost: Bool?
     let visibleIDs: [UInt32]?

@@ -74,6 +74,15 @@ final class FixtureContracts: NSObject {
             NSRunningApplication(processIdentifier: pid)?.activate()
             return [:]
         case "snapshot": return snapshot(application, pid: pid)
+        case "barOwner":
+            guard let index = command["bar"] as? Int, bars.indices.contains(index) else { throw FixtureContractError("retain a native bar before reading its owner") }
+            let owner = read(bars[index], kAXWindowAttribute)
+            guard let window = element(owner.value) else { return ["readError": owner.error.rawValue] }
+            var ownerPID: pid_t = 0
+            guard AXUIElementGetPid(window, &ownerPID) == .success, ownerPID == pid else { throw FixtureContractError("native bar belongs to a different fixture") }
+            return ["readError": owner.error.rawValue, "window": describe(window)]
+        case "chrome", "publication", "activateAX":
+            return try scenario(operation, command, application: application, pid: pid)
         case "retained":
             let window = try retained(command, pid: pid)
             return ["window": describe(window)]
@@ -107,7 +116,8 @@ final class FixtureContracts: NSObject {
                 error = AXUIElementSetAttributeValue(window, attribute as CFString, value)
             default: throw FixtureContractError("unsupported contract write")
             }
-            return ["result": error.rawValue]
+            let returnedAt = Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1e9
+            return ["result": error.rawValue, "writeReturnedAt": returnedAt]
         case "timeout":
             let window = try retained(command, pid: pid)
             let timeout = command["seconds"] as? Float ?? FixtureProbe.observationTimeout
@@ -164,12 +174,17 @@ final class FixtureContracts: NSObject {
         guard known != nil || knownProcesses.contains(pid) || app.bundleIdentifier == "com.taecontrol.tessel.fixture" && FixtureProbe.isFixture(pid) else { return }
         knownProcesses.insert(pid)
         if known == nil { knownApplications[pid] = app }
-        lifecycle.append(["name": notification.name.rawValue, "pid": pid, "knownPID": known ?? pid, "mainThread": Thread.isMainThread])
+        lifecycle.append(["name": notification.name.rawValue, "pid": pid, "knownPID": known ?? pid, "mainThread": Thread.isMainThread,
+                          "alivePIDs": knownProcesses.sorted().filter { kill($0, 0) == 0 }])
     }
 
     private func received(_ name: String, element: AXUIElement) {
         guard FixtureProbe.isFixture(observedPID) else { return }
+        let application = AXUIElementCreateApplication(observedPID)
+        AXUIElementSetMessagingTimeout(application, FixtureProbe.observationTimeout)
+        let focused = read(application, kAXFocusedWindowAttribute), focus = self.element(focused.value)
         events.append(["name": name, "id": id(element), "mainThread": Thread.isMainThread,
+                       "focusedID": focus.map(id) as Any? ?? NSNull(), "focusedError": focused.error.rawValue,
                        "minimized": read(element, kAXMinimizedAttribute).value as? Bool as Any? ?? NSNull()])
     }
 
@@ -215,29 +230,29 @@ final class FixtureContracts: NSObject {
         }
     }
 
-    private func retained(_ command: [String: Any], pid: pid_t) throws -> AXUIElement {
+    func retained(_ command: [String: Any], pid: pid_t) throws -> AXUIElement {
         guard let number = command["id"] as? UInt32, let window = handles[number] else { throw FixtureContractError("retain a fixture window snapshot before this operation") }
         var owner: pid_t = 0
         guard AXUIElementGetPid(window, &owner) == .success, owner == pid else { throw FixtureContractError("retained window belongs to a different fixture") }
         return window
     }
 
-    private func snapshot(_ application: AXUIElement, pid: pid_t) -> [String: Any] {
+    func snapshot(_ application: AXUIElement, pid: pid_t) -> [String: Any] {
         let list = read(application, kAXWindowsAttribute)
         let roots = list.value as? [AXUIElement] ?? []
-        let focus = element(read(application, kAXFocusedWindowAttribute).value)
+        let focused = read(application, kAXFocusedWindowAttribute), focus = element(focused.value)
         let visible = (CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []).compactMap { item -> UInt32? in
             guard (item[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid else { return nil }
             return (item[kCGWindowNumber as String] as? NSNumber)?.uint32Value
         }
         return ["listError": list.error.rawValue, "listIsArray": list.value is [AXUIElement],
-                "windows": roots.map(describe), "focused": focus.map(describe) as Any? ?? NSNull(),
+                "windows": roots.map(describe), "focused": focus.map(describe) as Any? ?? NSNull(), "focusedError": focused.error.rawValue,
                 "hidden": read(application, kAXHiddenAttribute).value as? Bool as Any? ?? NSNull(),
                 "frontmost": read(application, kAXFrontmostAttribute).value as? Bool as Any? ?? NSNull(),
                 "visibleIDs": visible]
     }
 
-    private func describe(_ window: AXUIElement) -> [String: Any] {
+    func describe(_ window: AXUIElement) -> [String: Any] {
         AXUIElementSetMessagingTimeout(window, FixtureProbe.observationTimeout)
         var number: UInt32 = 0
         let idError = fixtureWindowID(window, &number)
@@ -289,16 +304,16 @@ final class FixtureContracts: NSObject {
                 "finderFrontmost": FixtureProbe.frontmostPID() == finder.processIdentifier]
     }
 
-    private func read(_ element: AXUIElement, _ attribute: String) -> (error: AXError, value: CFTypeRef?) {
+    func read(_ element: AXUIElement, _ attribute: String) -> (error: AXError, value: CFTypeRef?) {
         var value: CFTypeRef?
         let error = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
         return (error, value)
     }
-    private func element(_ value: CFTypeRef?) -> AXUIElement? {
+    func element(_ value: CFTypeRef?) -> AXUIElement? {
         guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
         return (value as! AXUIElement)
     }
-    private func id(_ window: AXUIElement) -> UInt32 {
+    func id(_ window: AXUIElement) -> UInt32 {
         var number: UInt32 = 0
         _ = fixtureWindowID(window, &number)
         return number

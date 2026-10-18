@@ -38,6 +38,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
     static weak var current: Fixture?
     var windows: [String: NSWindow] = [:]
     private var retainedClosedWindows: [NSWindow] = []
+    private var minimizeRecorders: [String: MinimizeRecorder] = [:]
     var socketFD: Int32 = -1
     var source: DispatchSourceRead?
     var socketPath = ""
@@ -178,6 +179,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
             for window in windows.values { window.close() }
             windows.removeAll()
             retainedClosedWindows.removeAll()
+            minimizeRecorders.removeAll()
         case "open":
             let kind = command["kind"] as? String ?? "standard"
             let count = command["count"] as? Int ?? 3
@@ -231,10 +233,12 @@ final class Fixture: NSObject, NSApplicationDelegate {
             }
         case "addTab":
             if let reference = windows[command["reference"] as? String ?? "tabs0"] {
-                let window = makeWindow(key: key, kind: "standard")
+                let activating = command["activating"] as? Bool != false
+                let window = makeWindow(key: key, kind: "standard", show: activating)
                 window.tabbingMode = .preferred
                 reference.addTabbedWindow(window, ordered: .above)
-                window.makeKeyAndOrderFront(nil)
+                if activating { window.makeKeyAndOrderFront(nil) }
+                else { reference.tabGroup?.selectedWindow = window }
             }
         case "close":
             if let window = windows.removeValue(forKey: key) {
@@ -403,6 +407,10 @@ final class Fixture: NSObject, NSApplicationDelegate {
 
     var snapshot: [String: Any] {
         ["pid": getpid(), "active": NSApp.isActive, "keyCount": keyCount, "transitionCount": transitions.count, "windows": windows.mapValues { $0.windowNumber },
+         "keyWindow": NSApp.keyWindow.map { $0.windowNumber } as Any? ?? NSNull(),
+         "mainWindow": NSApp.mainWindow.map { $0.windowNumber } as Any? ?? NSNull(),
+         "minimizeEvents": minimizeRecorders.mapValues(\.events),
+         "miniaturized": windows.mapValues(\.isMiniaturized),
          "axWindowOrder": (NSApp.accessibilityWindows() ?? []).compactMap { ($0 as? NSWindow).map { $0.windowNumber } },
          "frames": windows.mapValues { window in
              let frame = window.frame
@@ -475,6 +483,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
             window.contentViewController = controller
         }
         windows[key] = window
+        if kind == "minimize" { minimizeRecorders[key] = MinimizeRecorder(window) }
         if show { window.makeKeyAndOrderFront(nil) }
         return window
     }
