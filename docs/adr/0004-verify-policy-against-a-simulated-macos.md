@@ -63,11 +63,12 @@ bare `swift test` never launches anything.
   assumption, a registry requires one contract per assumption, known-bug
   mutants must fail the deterministic layer in CI, and a pull request that
   changes the simulator without a contract change must state its evidence.
-  Their first runs on macOS 27 contradicted 10 of 35 assumptions, which were
-  corrected before any scenario relied on them.
-- The corrected simulator exposed policy races the end-to-end suite could hit
-  only by chance: a dying app's survivor stealing the rail selection, a stale
-  focus raised at startup, and focus intents lost to redraws.
+  Their first runs on macOS 27 contradicted 10 of 35 assumptions; the
+  simulator and its scenarios were corrected with that evidence.
+- Once a race is reproduced as a schedule, it fails on every run. Correcting
+  the simulator exposed one such policy race, a dying app's survivor taking the
+  rail selection; a stale startup focus raise, first seen as an intermittent
+  journey, became a permanent scenario the same way.
 - Policy code may reach macOS only through the ports: no direct GCD, locks,
   wall clock or system calls, enforced by a purity check.
 - The simulator is a second model of macOS to maintain, about as large as the
