@@ -18,7 +18,7 @@ let package = Package(
         // SwiftPM can find undeclared neighboring modules; restrict Policy's
         // compiler clients so Simulator cannot import it even after a build.
         .target(name: "Policy", dependencies: ["Ports"], path: "Sources", exclude: ["App", "CLI", "Ports", "Shared/IPC.swift"],
-                sources: ["Policy", "Shared/Protocol.swift", "Shared/KeyChord.swift"],
+                sources: ["Policy", "Shared/Protocol.swift", "Shared/KeyChord.swift", "Shared/SocketDeadline.swift"],
                 swiftSettings: [.enableUpcomingFeature("MemberImportVisibility"), .unsafeFlags(["-allowable-client", "PolicyTests"])]),
         .target(name: "Assumptions", path: "Tests/Assumptions"),
         .target(name: "Simulator", dependencies: ["Ports", "Assumptions"], path: "Tests/Simulator"),
@@ -27,6 +27,6 @@ let package = Package(
         .testTarget(name: "CheckTests", dependencies: ["Check"], path: "Tests/CheckTests"),
     ]
     + (Context.environment["TESSEL_ACCEPTANCE"] == "1" ? [
-        .testTarget(name: "Acceptance", path: "Tests/Acceptance", exclude: ["resource-budget.json"]),
+        .testTarget(name: "Acceptance", dependencies: ["Assumptions"], path: "Tests/Acceptance", exclude: ["resource-budget.json"]),
     ] : [])
 )

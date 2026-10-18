@@ -32,9 +32,7 @@ extension Acceptance.Journeys {
             try FileManager.default.removeItem(at: harness.configFile)
             try requireFinalState("config returned to defaults after the error") { try harness.status().config.state == "defaults" }
         }
-        // OWNER-QUESTION #24: foundation E11's <1 s claim conflicts with the
-        // final-state-only margin. Report both elapsed times without a timing gate.
-        try step("#1 E11 a stalled or absent app makes the CLI fail within the margin") {
+        try step("CLI reports a stalled or absent app (wiring)") {
             @MainActor func failure() throws -> ProcessResult {
                 guard let result = try finalValue({
                     let result = try harness.invoke("windows")
@@ -45,15 +43,11 @@ extension Acceptance.Journeys {
             kill(harness.appPID, SIGSTOP)
             do {
                 defer { kill(harness.appPID, SIGCONT) }
-                let started = monotonicSeconds()
                 let result = try failure()
-                print(String(format: "#1 E11 stalled app: CLI returned in %.3f s (reported only)", monotonicSeconds() - started))
-                try #require(result.status != 0, "a stalled server must not hang the CLI")
+                try #require(result.status != 0 && result.error.contains("tessel is not responding"), "a stalled server must not hang the CLI")
             }
             harness.stopApp()
-            let started = monotonicSeconds()
             let result = try failure()
-            print(String(format: "#1 E11 absent app: CLI returned in %.3f s (reported only)", monotonicSeconds() - started))
             try #require(result.status != 0 && result.error.contains("tessel is not running"))
             try harness.startApp(fixtureReady: false)
             try requireFinalState("the same fixture observed after restarting") { try harness.row(window) != nil }
