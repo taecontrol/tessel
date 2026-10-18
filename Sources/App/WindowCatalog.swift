@@ -537,64 +537,79 @@ private final class AppWindows: @unchecked Sendable {
                      completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
         let token = presentationLock.withLock { presentation }
         queue.async { [self] in
-            var accepted: CGRect?
-            defer { let result = accepted; DispatchQueue.main.async { completion(result) } }
-            guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
-            do {
-                guard try canPresent(window,id:id) else { return }
-                if let target {
-                    // Resize before positioning: macOS otherwise widens windows
-                    // at the left edge to retain its minimum visible strip.
-                    if resize {
-                        // Size changes are constrained by the window's current
-                        // top edge. Stage inside the display at the target top
-                        // before sizing, then place its possibly partial frame.
-                        var safe = CGPoint(x:0,y:target.minY)
-                        try check(AXUIElementSetAttributeValue(window,kAXPositionAttribute as CFString,AXValueCreate(.cgPoint,&safe)!))
-                        var size = target.size
-                        try check(AXUIElementSetAttributeValue(window,kAXSizeAttribute as CFString,AXValueCreate(.cgSize,&size)!))
-                        constrained.remove(id)
-                        validations[id] = nil
-                    }
-                    guard presentationLock.withLock({ presentation == token }) else { return }
-                    if position {
-                        var origin = target.origin
-                        try check(AXUIElementSetAttributeValue(window,kAXPositionAttribute as CFString,AXValueCreate(.cgPoint,&origin)!))
-                    }
-                    accepted = try frame(window)
-                    if let index = facts.firstIndex(where: { $0.id == id }), let accepted { facts[index].frame = accepted }
-                }
-                guard presentationLock.withLock({ presentation == token }), try canPresent(window,id:id) else { return }
-                if focus {
-                    try check(AXUIElementSetAttributeValue(application,kAXFrontmostAttribute as CFString,kCFBooleanTrue))
-                    guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return }
-                    try check(AXUIElementSetAttributeValue(window,kAXMainAttribute as CFString,kCFBooleanTrue))
-                    guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return }
-                    try check(AXUIElementPerformAction(window,kAXRaiseAction as CFString))
-                    // AX accepts an activation request before it necessarily
-                    // becomes active. Retry once only while it is unconfirmed.
-                    railActivationCheck?.work.cancel()
-                    let check = DispatchWorkItem { [weak self] in
-                        guard let self, self.railActivationCheck?.token == token else { return }
-                        self.railActivationCheck = nil
-                        guard !self.stopped, self.presentationLock.withLock({ self.presentation == token }),
-                              (try? self.canPresent(window,id:id)) == true,
-                              (try? self.value(self.application,kAXFrontmostAttribute) as? Bool) != true else { return }
-                        do {
-                            try self.check(AXUIElementSetAttributeValue(self.application,kAXFrontmostAttribute as CFString,kCFBooleanTrue))
-                            guard self.presentationLock.withLock({ self.presentation == token }), self.isNativeFront(window,id:id) else { return }
-                            try self.check(AXUIElementSetAttributeValue(window,kAXMainAttribute as CFString,kCFBooleanTrue))
-                            guard self.presentationLock.withLock({ self.presentation == token }), self.isNativeFront(window,id:id) else { return }
-                            try self.check(AXUIElementPerformAction(window,kAXRaiseAction as CFString))
-                            self.publishSnapshot()
-                        } catch { /* Another app and newer focus intents remain independent. */ }
-                    }
-                    railActivationCheck = (token,check)
-                    queue.asyncAfter(deadline:.now() + .milliseconds(50),execute:check)
-                }
-                publishSnapshot()
-            } catch { /* Another app's queue and the CLI remain independent. */ }
+            presentRail(id:id,target:target,position:position,resize:resize,focus:focus,token:token,failures:0,completion:completion)
         }
+    }
+
+    private func presentRail(id: UInt32, target: CGRect?, position: Bool, resize: Bool, focus: Bool, token: UUID,
+                             failures: Int, completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
+        var accepted: CGRect?, retrying = false
+        defer { if !retrying { let result = accepted; DispatchQueue.main.async { completion(result) } } }
+        guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
+        do {
+            guard try canPresent(window,id:id) else { return }
+            if let target {
+                // Resize before positioning: macOS otherwise widens windows
+                // at the left edge to retain its minimum visible strip.
+                if resize {
+                    // Size changes are constrained by the window's current
+                    // top edge. Stage inside the display at the target top
+                    // before sizing, then place its possibly partial frame.
+                    var safe = CGPoint(x:0,y:target.minY)
+                    try check(AXUIElementSetAttributeValue(window,kAXPositionAttribute as CFString,AXValueCreate(.cgPoint,&safe)!))
+                    var size = target.size
+                    try check(AXUIElementSetAttributeValue(window,kAXSizeAttribute as CFString,AXValueCreate(.cgSize,&size)!))
+                    constrained.remove(id)
+                    validations[id] = nil
+                }
+                guard presentationLock.withLock({ presentation == token }) else { return }
+                if position {
+                    var origin = target.origin
+                    try check(AXUIElementSetAttributeValue(window,kAXPositionAttribute as CFString,AXValueCreate(.cgPoint,&origin)!))
+                }
+                accepted = try frame(window)
+                if let index = facts.firstIndex(where: { $0.id == id }), let accepted { facts[index].frame = accepted }
+            }
+            guard presentationLock.withLock({ presentation == token }), try canPresent(window,id:id) else { return }
+            if focus {
+                try check(AXUIElementSetAttributeValue(application,kAXFrontmostAttribute as CFString,kCFBooleanTrue))
+                guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return }
+                try check(AXUIElementSetAttributeValue(window,kAXMainAttribute as CFString,kCFBooleanTrue))
+                guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return }
+                try check(AXUIElementPerformAction(window,kAXRaiseAction as CFString))
+                // AX accepts an activation request before it necessarily
+                // becomes active. Retry once only while it is unconfirmed.
+                railActivationCheck?.work.cancel()
+                let check = DispatchWorkItem { [weak self] in
+                    guard let self, self.railActivationCheck?.token == token else { return }
+                    self.railActivationCheck = nil
+                    guard !self.stopped, self.presentationLock.withLock({ self.presentation == token }),
+                          (try? self.canPresent(window,id:id)) == true,
+                          (try? self.value(self.application,kAXFrontmostAttribute) as? Bool) != true else { return }
+                    do {
+                        try self.check(AXUIElementSetAttributeValue(self.application,kAXFrontmostAttribute as CFString,kCFBooleanTrue))
+                        guard self.presentationLock.withLock({ self.presentation == token }), self.isNativeFront(window,id:id) else { return }
+                        try self.check(AXUIElementSetAttributeValue(window,kAXMainAttribute as CFString,kCFBooleanTrue))
+                        guard self.presentationLock.withLock({ self.presentation == token }), self.isNativeFront(window,id:id) else { return }
+                        try self.check(AXUIElementPerformAction(window,kAXRaiseAction as CFString))
+                        self.publishSnapshot()
+                    } catch { /* Another app and newer focus intents remain independent. */ }
+                }
+                railActivationCheck = (token,check)
+                queue.asyncAfter(deadline:.now() + .milliseconds(50),execute:check)
+            }
+            publishSnapshot()
+        } catch AXReadError.unresponsive where target != nil && accepted == nil && failures < 4 {
+            // A busy or briefly hung app can time out every write of the
+            // render that moved it, leaving a stale frame over its
+            // neighbors once it answers. Back off like failed reads, while
+            // no newer render supersedes this one; a hung app then costs nothing.
+            retrying = true
+            queue.asyncAfter(deadline:.now() + .milliseconds(50 << (failures+1))) { [weak self] in
+                self?.presentRail(id:id,target:target,position:position,resize:resize,focus:focus,token:token,
+                                  failures:failures+1,completion:completion)
+            }
+        } catch { /* Another app's queue and the CLI remain independent. */ }
     }
 
     /// Shutdown is synchronous so a terminating process cannot abandon its

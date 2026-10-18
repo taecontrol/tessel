@@ -300,6 +300,10 @@ then uses the single ring placement exposing the most of it. In a short ring,
 that can put the next neighbor on the opposite edge, for any window count.
 Completely off-screen windows go into the closet.
 Focus, scrolling and elevator travel never resize windows.
+A rail write that times out against a busy or briefly hung app is retried
+after 100, 200, 400 and 800 ms, like a failed read, unless a newer render
+replaces it. An app that stays hung longer keeps its stale frame until the next
+render.
 
 Option+H/L (`focus left|right`) wraps within the current rail. Option+K/J
 (`focus up|down`) visits adjacent rails, stopping at either end. Each rail
