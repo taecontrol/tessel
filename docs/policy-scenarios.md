@@ -92,6 +92,11 @@ Content tabs flatten their selected page: an empty page contributes no contents
 or child, while a populated page exposes its static-text leaf in both AXContents
 and AXChildren. The content handles remain distinct from the tab buttons.
 
+`addTab(to:activating:)` creates a new native root on the active desktop, retaining
+the group's bar and frame. A background insertion can therefore be CG-visible
+before policy reconciles a closeted group's hidden intent; it does not inherit
+the reference root's completed Space move or activate the app.
+
 `beginFullscreenTransition(_:publishingRoot:)` chooses whether AppKit exposes
 an auxiliary display-sized `AXUnknown` root. It stays live across reads until
 `finishFullscreenTransition` removes it; `enterFullscreen` and `leaveFullscreen`

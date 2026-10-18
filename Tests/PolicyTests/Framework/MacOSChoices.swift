@@ -9,6 +9,32 @@ private final class NativeRootEvents: @unchecked Sendable {
 }
 
 @Suite @MainActor struct MacOSChoices {
+    @Test("native tab insertion publishes the new root on the active desktop even from a closeted reference", arguments: [false, true])
+    func nativeTabInsertion(_ closeted: Bool) throws {
+        let mac = SimulatedMac()
+        defer { mac.shutdown() }
+        let app = mac.launch(windows: 2)
+        app.groupTabs([1, 2], selected: 1)
+        let ax = mac.ax, application = ax.application(app.pid)
+        let reference = try #require(ax.copy(.windows, of: application).value?.elements?.first)
+        let bar = try #require(ax.copy(.children, of: reference).value?.elements?.first)
+        let frame = mac.frame(1)
+        let closet = mac.closetPort
+        try closet.start()
+        if closeted { closet.hide([1]) }
+        let cover = mac.launch(windows: 1)
+        let added = app.addTab(to: 1, activating: false)
+        let root = try #require(ax.copy(.windows, of: application).value?.elements?.first)
+        #expect(ax.windowID(root).value == added)
+        #expect(ax.copy(.children, of: root).value?.elements == [bar])
+        #expect(ax.copy(.tabs, of: bar).value?.elements?.count == 3)
+        #expect(mac.frame(added) == frame && app.focusedWindow == added)
+        #expect(mac.frontmostApp == cover.pid && mac.isVisible(added))
+        for scope in [SpaceScope.ordinary, .all] { #expect(closet.memberships(added, scope: scope) == [closet.activeSpace()]) }
+        if closeted { #expect(closet.memberships(1, scope: .all) == [closet.closetSpace]) }
+        #expect(mac.settle() == .settled)
+    }
+
     @Test("pending AX activation may complete on a focus write, a native event, or the next request", arguments: DeferredActivationCompletion.allCases)
     func deferredActivation(_ completion: DeferredActivationCompletion) throws {
         let mac = SimulatedMac()

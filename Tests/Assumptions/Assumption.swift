@@ -71,7 +71,7 @@ package enum Assumption: String, CaseIterable, Sendable {
         case .activationHiddenFocus: "Plain activation can leave an app's focused window in the closet, with AX focus still readable, and unhides a hidden app."
         case .closeFocusPromotion: "Closing a key window can promote a closeted sibling before the destruction notification is delivered."
         case .sheetFocusOwnership: "An attached sheet keeps key focus when its parent is raised or made main, while the parent owns AXMain."
-        case .nativeTabInsertion: "Adding a native tab preserves the group's bar identity, shared frame and Space while selecting the new front."
+        case .nativeTabInsertion: "Adding a native tab preserves bar identity and shared frame while selecting the new front; its new root belongs to the active desktop and may become CG-visible even when inserted into a closeted background group."
         // #17 scenarios
         case .sizeLimitChanges: "Changing an AppKit window's maximum size leaves its current frame intact and clamps the next size write."
         case .terminationActivationOrder: "A process is no longer alive when macOS promotes a surviving app before delivering the terminated process's lifecycle notification."

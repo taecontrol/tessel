@@ -142,7 +142,7 @@ extension Acceptance.Contracts {
         }
     }
 
-    @Test("native-tab-insertion: insertion preserves bar identity, frame and Space", contract(.nativeTabInsertion))
+    @Test("native-tab-insertion: insertion preserves bar and frame while publishing a new active-desktop root", contract(.nativeTabInsertion))
     func nativeTabInsertion() throws {
         let ids = try nativeTabs()
         let first = try window(ids[0]), bar = try #require(first.bar)
@@ -150,7 +150,8 @@ extension Acceptance.Contracts {
         try #require(try write(ids[0], "AXPosition", Array(frame.prefix(2))) == 0)
         try #require(try write(ids[0], "AXSize", Array(frame.suffix(2))) == 0)
         try requireFinalState("the existing tab group has distinct geometry before insertion") { try desktop.near(window(ids[0]).frame, frame) }
-        let space = try #require(try native("spaces", ["ids": [ids[0]]]).memberships?.first?.ordinary)
+        let initial = try native("spaces", ["ids": [ids[0]]])
+        let space = try #require(initial.memberships?.first?.ordinary), active = try #require(initial.activeSpace)
         let reply = try fixture.command("addTab", ["key": "inserted", "reference": "tabs0"])
         let inserted = try #require(reply.windows["inserted"])
         try requireFinalState("the inserted tab becomes the selected native root") {
@@ -179,13 +180,13 @@ extension Acceptance.Contracts {
                 && memberships.allSatisfy { $0.ordinary.isEmpty && $0.all.contains(closet) }
         }
         let added = try #require(try fixture.command("addTab", ["key": "backgroundInserted", "reference": "inserted", "activating": false]).windows["backgroundInserted"])
-        try requireFinalState("background insertion keeps the group frame and invisible Space") {
+        try requireFinalState("background insertion keeps the group frame and publishes the new root on the active desktop") {
             let state = try native()
             guard state.focused?.id == added || state.roots.contains(where: { $0.id == added }) else { return false }
             let membership = try native("spaces", ["ids": [added]])
             return state.focused?.id == added && state.frontmost == false && state.roots.first?.bar == bar && state.roots.first?.tabs == 5
-                && state.roots.first.map { desktop.near($0.frame, frame) } == true && !state.visible.contains(added)
-                && membership.memberships?.first?.ordinary.isEmpty == true && membership.memberships?.first?.all.contains(closet) == true
+                && state.roots.first.map { desktop.near($0.frame, frame) } == true && state.visible.contains(added)
+                && membership.activeSpace == active && membership.memberships?.first?.ordinary == [active] && membership.memberships?.first?.all == [active]
         }
     }
 
