@@ -21,6 +21,11 @@ package enum Assumption: String, CaseIterable, Sendable {
     case closetMoves = "closet-moves"
     case closetMembership = "closet-membership"
     case finderDesktop = "finder-desktop"
+    // #2 scenarios
+    case activationHiddenFocus = "activation-hidden-focus"
+    case closeFocusPromotion = "close-focus-promotion"
+    case sheetFocusOwnership = "sheet-focus-ownership"
+    case nativeTabInsertion = "native-tab-insertion"
 
     package var statement: String {
         switch self {
@@ -46,6 +51,11 @@ package enum Assumption: String, CaseIterable, Sendable {
         case .closetMoves: "SkyLight moves windows and their sheets between the active Space and an invisible closet without changing native focus."
         case .closetMembership: "Ordinary Space queries omit invisible closets while all-Space queries retain their opaque membership."
         case .finderDesktop: "Finder exposes its desktop as an AXScrollArea without a window ID or subrole and can activate it without reopening windows."
+        // #2 scenarios
+        case .activationHiddenFocus: "Plain activation can leave an app's focused window in the closet, with AX focus still readable, and unhides a hidden app."
+        case .closeFocusPromotion: "Closing a key window can promote a closeted sibling before the destruction notification is delivered."
+        case .sheetFocusOwnership: "An attached sheet keeps key focus when its parent is raised or made main, while the parent owns AXMain."
+        case .nativeTabInsertion: "Adding a native tab preserves the group's bar identity, shared frame and Space while selecting the new front."
         }
     }
 }

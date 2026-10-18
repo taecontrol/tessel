@@ -26,7 +26,7 @@ package enum NotificationOrder: Sendable { case focusThenMain, mainThenFocus }
 package struct SimulatedApp: Sendable {
     package let pid: Int32
     package let alias: String
-    fileprivate let mac: SimulatedMac
+    let mac: SimulatedMac
     @MainActor package var windows: [UInt32] { mac.appWindows(pid) }
     @MainActor package func select(_ window: UInt32, notifications: NotificationOrder = .focusThenMain) {
         mac.select(window, notifications: notifications)
@@ -165,6 +165,11 @@ package final class SimulatedMac: @unchecked Sendable {
     }
     func focus(_ id: UInt32, notifications: NotificationOrder = .focusThenMain) {
         guard let window = windows[id], !window.closed else { return }
+        if let sheet = windows.keys.sorted().first(where: { windows[$0]?.spec.parent == id && windows[$0]?.closed == false }) {
+            assume(.sheetFocusOwnership)
+            focus(sheet, notifications: notifications)
+            return
+        }
         if let group = window.group { groups[group]?.selected = id }
         let activated = front != window.pid
         front = window.pid
@@ -186,7 +191,7 @@ package final class SimulatedMac: @unchecked Sendable {
         }
         if apps[window.pid]?.key == id {
             apps[window.pid]?.key = nil; apps[window.pid]?.main = nil
-            if let successor { focus(successor) }
+            if let successor { assume(.closeFocusPromotion); focus(successor) }
         }
         notify(.destroyed, node: .window(id))
     }

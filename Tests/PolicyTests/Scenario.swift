@@ -57,7 +57,11 @@ enum Layout: String, CaseIterable, Sendable { case off, stack, rails }
 @MainActor private final class ConfigurationInput { var data: Data?; var unreadable = false }
 @MainActor final class PublishedRows: WindowPublishing {
     var byPID: [Int32: [WindowRecord]] = [:]
-    func update(pid: Int32, windows: [WindowRecord]?) { byPID[pid] = windows?.sorted { $0.id < $1.id } }
+    var onUpdate: ((Int32, [WindowRecord]?) -> Void)?
+    func update(pid: Int32, windows: [WindowRecord]?) {
+        byPID[pid] = windows?.sorted { $0.id < $1.id }
+        onUpdate?(pid, byPID[pid])
+    }
 }
 @MainActor final class PressedKeys: HotkeyInstalling {
     private var registration: Registration?
