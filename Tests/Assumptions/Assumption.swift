@@ -60,7 +60,7 @@ package enum Assumption: String, CaseIterable, Sendable {
         case .cgOnScreenOrder: "CG lists active-Space windows front to back, excluding hidden and minimized windows; a window entirely outside the display may remain listed."
         case .primaryScreenGeometry: "The primary screen exposes full and visible frames in bottom-origin coordinates while AX uses top-origin coordinates."
         case .closetMoves: "SkyLight moves windows and their sheets between the active Space and an invisible closet without changing native focus."
-        case .closetMembership: "Ordinary Space queries omit invisible closets while all-Space queries retain their opaque membership."
+        case .closetMembership: "Ordinary Space queries omit closets; all-Space queries may retain closet membership alongside the active Space after showing a window, until the closet is destroyed."
         case .finderDesktop: "Finder exposes its desktop as an AXScrollArea without a window ID or subrole and can activate it without reopening windows."
         // #1 scenarios
         case .backgroundWindowCreation: "Opening a window in the background posts a creation notification without changing app focus or main window."

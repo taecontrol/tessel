@@ -112,7 +112,7 @@ package final class SimulatedMac: @unchecked Sendable {
         var spec: WindowSpec
         var minimized = false, fullscreen = false, closed = false
         var minimizing = false
-        var space: UInt64 = 1
+        var spaces: Set<UInt64> = [1]
         var group: Int?
     }
     struct TabGroup { var windows: [UInt32]; var selected: UInt32 }
@@ -130,9 +130,12 @@ package final class SimulatedMac: @unchecked Sendable {
     @MainActor package var screens: any ScreenPort { Applications(mac: self) }
     @MainActor package var windowOrder: any WindowOrderPort { Applications(mac: self) }
     @MainActor package var closetPort: any ClosetPort {
+        closetPort(retainingShownMembership: true)
+    }
+    @MainActor package func closetPort(retainingShownMembership: Bool) -> any ClosetPort {
         let space = closet
         closet += 1
-        return Closet(mac: self, space: space)
+        return Closet(mac: self, space: space, retainingShownMembership: retainingShownMembership)
     }
     @MainActor package var focusedWindow: UInt32? { front.flatMap { apps[$0]?.key } }
     @MainActor package var frontmostApp: Int32? { front }
@@ -174,7 +177,7 @@ package final class SimulatedMac: @unchecked Sendable {
         assume(.axApplicationWindows)
         nextWindow += 1
         let id = nextWindow
-        windows[id] = Window(id: id, pid: pid, spec: spec, space: active)
+        windows[id] = Window(id: id, pid: pid, spec: spec, spaces: [active])
         action("\(apps[pid]!.alias) open window \(id)")
         if background { assume(.backgroundWindowCreation); zOrder.append(id) }
         else { focus(id) }
@@ -268,7 +271,7 @@ package final class SimulatedMac: @unchecked Sendable {
         assume(.nativeFullscreen)
         action("window \(id) fullscreen=\(enabled)")
         windows[id]?.fullscreen = enabled
-        windows[id]?.space = enabled ? 10_000 + UInt64(id) : 1
+        windows[id]?.spaces = [enabled ? 10_000 + UInt64(id) : 1]
         active = enabled ? 10_000 + UInt64(id) : 1
         notify(.layoutChanged, node: .window(id))
     }
@@ -318,7 +321,7 @@ package final class SimulatedMac: @unchecked Sendable {
         assume(.cgOnScreenOrder)
         let bounds = CGRect(x: geometry.frame.minX, y: 0, width: geometry.frame.width, height: geometry.frame.height)
         return zOrder.filter { id in
-            guard let w = windows[id], !w.closed, !w.minimized, w.space == active,
+            guard let w = windows[id], !w.closed, !w.minimized, w.spaces.contains(active),
                   apps[w.pid]?.hidden == false, apps[w.pid]?.terminated == false,
                   w.spec.frame.intersects(bounds) || w.spec.offDisplayMembership == .included else { return false }
             return w.group.flatMap { groups[$0]?.selected == id } ?? true

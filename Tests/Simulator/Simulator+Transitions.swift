@@ -18,7 +18,7 @@ extension SimulatedMac {
         nextWindow += 1
         let id = nextWindow
         let frame = CGRect(x: geometry.frame.minX, y: 0, width: geometry.frame.width, height: geometry.frame.height)
-        windows[id] = Window(id: id, pid: pid, spec: WindowSpec(frame: frame, subrole: "AXUnknown", resizable: false), space: active)
+        windows[id] = Window(id: id, pid: pid, spec: WindowSpec(frame: frame, subrole: "AXUnknown", resizable: false), spaces: [active])
         fullscreenRoots[window] = id
         zOrder.insert(id, at: 0)
         notify(.layoutChanged, node: .application(pid))

@@ -111,4 +111,35 @@ import Testing
         #expect(mac.windowOrder.onScreenOrder() == (membership == .included ? [outside, 1] : [1]))
         #expect(mac.settle() == .settled)
     }
+
+    @Test("shown windows may retain closet membership until destruction without remaining hidden", arguments: [false, true])
+    func closetMembership(_ retained: Bool) throws {
+        let mac = SimulatedMac()
+        defer { mac.shutdown() }
+        let app = mac.launch(windows: 1)
+        let sheet = app.open(WindowSpec(parent: 1))
+        let closet = mac.closetPort(retainingShownMembership: retained)
+        try closet.start()
+        let active = closet.activeSpace(), hidden = closet.closetSpace
+        closet.hide([1])
+        for id in [UInt32(1), sheet] {
+            #expect(closet.memberships(id, scope: .ordinary).isEmpty)
+            #expect(closet.memberships(id, scope: .all) == [hidden])
+            #expect(!mac.isVisible(id) && mac.isInCloset(id))
+        }
+        closet.show([1])
+        for id in [UInt32(1), sheet] {
+            #expect(closet.memberships(id, scope: .ordinary) == [active])
+            #expect(Set(closet.memberships(id, scope: .all)) == (retained ? [active, hidden] : [active]))
+            #expect(mac.isVisible(id) && !mac.isInCloset(id))
+        }
+        closet.stop(returning: [])
+        for id in [UInt32(1), sheet] {
+            #expect(closet.memberships(id, scope: .ordinary) == [active])
+            #expect(closet.memberships(id, scope: .all) == [active])
+            #expect(mac.isVisible(id))
+        }
+        #expect(mac.focusedWindow == sheet)
+        #expect(mac.settle() == .settled)
+    }
 }
