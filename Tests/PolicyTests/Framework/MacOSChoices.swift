@@ -25,4 +25,24 @@ import Testing
         #expect(!mac.applications.isAlive(prohibited.pid))
         withExtendedLifetime(observation) {}
     }
+
+    @Test("attached sheets expose unsupported main, minimized and fullscreen attributes")
+    func sheetAttributes() throws {
+        let mac = SimulatedMac()
+        defer { mac.shutdown() }
+        let app = mac.launch(windows: 1)
+        let id = app.open(WindowSpec(parent: 1))
+        let ax = mac.ax, application = ax.application(app.pid)
+        let parent = try #require(ax.copy(.windows, of: application).value?.elements?.first)
+        let sheet = try #require(ax.copy(.children, of: parent).value?.elements?.first)
+        #expect(ax.windowID(sheet).value == id)
+        #expect(ax.copy(.focusedWindow, of: application).value?.element == sheet)
+        #expect(ax.copy(.main, of: parent).value?.bool == true)
+        for attribute in [AXAttribute.main, .minimized, .fullscreen] {
+            let result = ax.copy(attribute, of: sheet)
+            #expect(result.status == .attributeUnsupported)
+            #expect(result.value == nil)
+        }
+        #expect(mac.settle() == .settled)
+    }
 }

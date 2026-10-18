@@ -107,6 +107,8 @@ extension Acceptance.Contracts {
         let sheet = try fixture.open(kind: "sheet", key: "sheet")
         let state = try window(sheet)
         try #require(state.role == "AXSheet" && state.subrole != "AXStandardWindow")
+        try #require(state.minimized == nil && state.minimizedError == -25205)
+        try #require(state.fullscreen == nil && state.fullscreenError == -25205)
     }
 
     @Test("ax-size-constraints: successful size writes accept clamped geometry", contract(.axSizeConstraints))
@@ -142,7 +144,8 @@ extension Acceptance.Contracts {
         let parent = try #require(try fixture.command("ping").windows["sheetParent"])
         try requireFinalState("a focused sheet leaves its parent main") {
             let state = try native()
-            return state.focused?.id == sheet && state.focused?.main == false && state.roots.first { $0.id == parent }?.main == true
+            return state.focused?.id == sheet && state.focused?.main == nil && state.focused?.mainError == -25205
+                && state.roots.first { $0.id == parent }?.main == true
         }
     }
 

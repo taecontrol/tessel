@@ -188,6 +188,10 @@ extension SimulatedMac {
         case .window(let id):
             assume(.axWindowAttributes)
             let window = windows[id]!
+            if window.spec.parent != nil, [.main, .minimized, .fullscreen].contains(attribute) {
+                if attribute == .main { assume(.axFocus) }
+                return AXResult(.attributeUnsupported)
+            }
             switch attribute {
             case .minimized: return AXResult(.success, .bool(window.minimized))
             case .fullscreen: return AXResult(.success, .bool(window.fullscreen))
