@@ -84,6 +84,54 @@ import Testing
         })
     }
 
+    @Test("#17 E16; #17 E22: external activation follows a healthy, busy or hung rail owner", arguments: ["healthy", "busy", "hung"], WriteOrder.allCases)
+    func externalFromOwner(state: String, order: WriteOrder) {
+        requireScenario(Scenario.run("external activation from \(state) owner", writes: order) { s in
+            let f = RailFixture(s, widths: [0.25]), a = f.ids[0]
+            let other = f.mac.launch(), b = other.open(WindowSpec())
+            s.settle(); f.press("move down", focus: b); f.press("focus up", focus: a)
+            if state == "busy" { f.app.busy(forMilliseconds: 1_000) }
+            if state == "hung" { f.app.hang() }
+            s.step("activate app-B without ordering its hidden window") { other.activate() }
+            s.settle(); f.focus(b)
+            s.expect("external activation selects the hidden destination rail", f.tessel.status.rail == 2)
+            s.expect("the source rail is hidden", !f.mac.isVisible(a))
+        })
+    }
+
+    @Test("#17 E16; #17 E22: owner revalidation cannot override newer keyboard or native focus", arguments: ["keyboard", "external", "same-app"], WriteOrder.allCases)
+    func supersededOwnerRead(action: String, order: WriteOrder) {
+        requireScenario(Scenario.run("owner read superseded by \(action)", writes: order) { s in
+            let f = RailFixture(s, widths: [0.25]), a = f.ids[0]
+            let other = f.mac.launch(), b = other.open(WindowSpec()), c = other.open(WindowSpec())
+            s.settle(); f.press("move down", focus: c); f.press("focus up", focus: b)
+            f.press("focus left", focus: a)
+            let third = f.mac.launch(), d = third.open(WindowSpec())
+            s.settle(); f.press("send 3", focus: d); f.press("workspace 1", focus: a)
+            other.select(c)
+            let held = f.mac.pause(after: .call("AccessibilityPort.copy AXRole window \(a) \(f.app.alias)"))
+            if case .paused = held {} else { s.expect("owner read is outstanding: \(held)", false) }
+            s.step("newer \(action) selection while the owner's AX lane is held") {
+                switch action {
+                case "keyboard": f.tessel.press("workspace 3")
+                case "external": third.activate()
+                default: other.select(b)
+                }
+            }
+            let independent = f.mac.scheduler.run()
+            if case .paused = independent {} else { s.expect("other lanes run while the owner read is held: \(independent)", false) }
+            s.expect("cached state remains readable during the owner read", f.tessel.status.enabled)
+            if action == "keyboard" {
+                f.focus(d)
+                s.expect("keyboard travel finishes before the owner answers", f.tessel.status.active == 3)
+            }
+            s.settle(); f.focus(action == "same-app" ? b : d)
+            s.expect("the newer selection owns its workspace and rail",
+                     f.tessel.status.active == (action == "same-app" ? 1 : 3) && f.tessel.status.rail == 1)
+            s.expect("the superseded destination remains hidden", !f.mac.isVisible(c))
+        })
+    }
+
     enum ActivationStep: String, CaseIterable { case activate, read, deliver, down }
 
     @Test("#17 E7; #17 E16: an activation queued before an elevator command cannot undo its newer rail selection")

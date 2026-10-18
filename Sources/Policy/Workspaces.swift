@@ -435,10 +435,25 @@ final class Workspaces {
         // macOS can re-activate the already selected app when another process
         // exits. Its visible window has not been shown again or switched.
         guard id != focused || workspace != status.active || closeted.contains(id) || !layoutWindows.isEmpty else { return }
-        // macOS promotes another app before delivering process termination.
-        // Preserve the dead rail owner so removal selects its adjacent rail.
+        // Window destruction can precede process exit and its notification.
+        // Preserve the dying rail owner so removal selects its adjacent rail.
         if railEnabled, let focused, let owner = entries[focused]?.pid,
-           owner != entries[id]?.pid, !applications.isAlive(owner) { return }
+           let pid = entries[id]?.pid, owner != pid {
+            guard applications.isAlive(owner) else { return }
+            let token = transition
+            catalog?.windowIsGone(pid: owner, id: focused) { [weak self] gone in
+                guard let self, !gone, self.status.enabled, self.transition == token,
+                      self.focused == focused, self.available(id), self.appFocus[pid] == id,
+                      self.applications.frontmostPID == pid else { return }
+                self.selectExternalFocus(id, layoutWindows: layoutWindows)
+            }
+            return
+        }
+        selectExternalFocus(id, layoutWindows: layoutWindows)
+    }
+
+    private func selectExternalFocus(_ id: UInt32, layoutWindows: Set<UInt32>) {
+        guard let workspace = entries[id]?.workspace else { return }
         status.active = workspace
         remember(id)
         // The native operation already selected this window. A queued raise
