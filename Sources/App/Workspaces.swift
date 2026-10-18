@@ -40,10 +40,13 @@ final class Workspaces {
     private var initialApplications = Set<pid_t>()
     private var publishedStatus: WorkspaceStatus?
     private(set) var status = WorkspaceStatus()
+    let system: WorkspaceSystem
     weak var catalog: WindowCatalog?
     var onChange: (() -> Void)?
 
-    init(store: SnapshotStore, trusted: Bool, configuration: Configuration, simulateMissing: Bool, simulateFailedHide: Bool) {
+    init(store: SnapshotStore, trusted: Bool, configuration: Configuration, simulateMissing: Bool, simulateFailedHide: Bool,
+         system: WorkspaceSystem = RealWorkspaceSystem()) {
+        self.system = system
         self.store = store
         self.trusted = trusted
         if trusted {
@@ -89,8 +92,8 @@ final class Workspaces {
             status.enabled = true
             status.reason = "experiment on"
             status.active = 1
-            enablingFront = NSWorkspace.shared.frontmostApplication?.processIdentifier
-            initialApplications = Set(NSWorkspace.shared.runningApplications.map(\.processIdentifier))
+            enablingFront = system.frontmostPID
+            initialApplications = Set(system.runningPIDs)
             for id in entries.keys.sorted() { assign(id, to: 1); if railEnabled && railTile(id) { addRailTile(id, initial: true) } }
             // The front app already shows its focused window. Its last read
             // can predate a newer native selection; raising it would take
@@ -152,7 +155,7 @@ final class Workspaces {
         status.reason = reason
         status.active = 1
         publish()
-        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(30)) { [weak self] in self?.publish() }
+        system.after(milliseconds: 30) { [weak self] in self?.publish() }
     }
 
     func update(pid: pid_t, observations: [WindowObservation], focused rawFocus: UInt32?, frontmost: Bool, change: CatalogChange) {
@@ -187,7 +190,7 @@ final class Workspaces {
         }
         if observations.isEmpty { store.update(pid: pid, windows: []) }
         let firstSnapshot = knownApplications.insert(pid).inserted
-        let onScreen = Self.onScreen()
+        let onScreen = onScreen()
         if let closet {
             let candidates = observations.filter {
                 primary($0) && $0.parent == nil && availableState($0.record.state)
@@ -254,7 +257,7 @@ final class Workspaces {
         }
         // Entering a native fullscreen Space is the user's operation. Keep the
         // remaining stack in its closet instead of bringing a sibling into it.
-        let front = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? (frontmost ? pid : nil)
+        let front = system.frontmostPID ?? (frontmost ? pid : nil)
         let frontFocus = front.flatMap { appFocus[$0] }
         let nativeFullscreenOwnsFront = frontFocus.map { entries[$0]?.observation.record.state == .fullscreen }
             ?? entries.contains { $0.value.pid == front && $0.value.observation.record.state == .fullscreen && onScreen.contains($0.key) }
@@ -302,10 +305,10 @@ final class Workspaces {
             // the app reports another window: a redundant raise of a native tab
             // can select it again over a tab the user has just chosen.
             let owner = focused.flatMap { entries[$0]?.pid }
-            let stillFront = owner == NSWorkspace.shared.frontmostApplication?.processIdentifier
+            let stillFront = owner == system.frontmostPID
             let focusMoved = owner.flatMap { appFocus[$0] } != focused
             render(focusing: focused, relayout: false, takeFocus: stillFront && focusMoved, layoutWindows: newlyTiled)
-        } else if frontmost, NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+        } else if frontmost, system.frontmostPID == pid,
                   let reportedFocus, available(reportedFocus), entries[reportedFocus]?.observation.parent == nil {
             if reportedFocus == expectedFocus { expectedFocus = nil }
             else if change == .activation || change == .restored {
@@ -323,11 +326,11 @@ final class Workspaces {
                 let item = DispatchWorkItem { [weak self] in
                     guard let self, self.transition == token, self.available(reportedFocus),
                           self.appFocus[pid] == reportedFocus,
-                          NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
+                          system.frontmostPID == pid else { return }
                     self.followExternalFocus(reportedFocus)
                 }
                 focusDecision = item
-                DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50), execute: item)
+                system.after(milliseconds: 50, item)
             }
         }
         publish()
@@ -359,7 +362,7 @@ final class Workspaces {
             status.active = number
             render(focusing: preferred(in: number), relayout: false)
         case .send(let number):
-            guard let front = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+            guard let front = system.frontmostPID,
                   let actual = appFocus[front], let focused, let entry = entries[focused], entry.pid == front,
                   (entries[actual]?.observation.parent ?? actual) == focused, available(focused),
                   let workspace = entry.workspace, workspace != number else { return }
@@ -418,7 +421,7 @@ final class Workspaces {
         // macOS promotes another app before delivering process termination.
         // Preserve the dead rail owner so removal selects its adjacent rail.
         if railEnabled, let focused, let owner = entries[focused]?.pid,
-           owner != entries[id]?.pid, kill(owner,0) == -1 && errno == ESRCH { return }
+           owner != entries[id]?.pid, !system.isRunning(owner) { return }
         status.active = workspace
         remember(id)
         // The native operation already selected this window. A queued raise
@@ -449,7 +452,7 @@ final class Workspaces {
         let managed = Set(entries.keys.filter { entries[$0]?.workspace != nil && available($0) })
         let hide = managed.subtracting(show)
         let newlyHidden = hide.subtracting(closeted)
-        let newlyShown = show.intersection(closeted).union(show.subtracting(Self.onScreen()))
+        let newlyShown = show.intersection(closeted).union(show.subtracting(onScreen()))
         closet.hide(newlyHidden.filter { entries[$0]?.observation.parent == nil })
         closet.show(newlyShown.filter { entries[$0]?.observation.parent == nil })
         closeted.formUnion(hide)
@@ -474,15 +477,17 @@ final class Workspaces {
         }
         // Bridged moves are asynchronous. One bounded check validates the hide;
         // nothing is scheduled once the transition has settled.
-        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) { [weak self] in
+        system.after(milliseconds: 50) { [weak self] in
             guard let self, self.transition == token, self.status.enabled else { return }
-            if !hide.intersection(Self.onScreen()).isEmpty {
+            if !hide.intersection(onScreen()).isEmpty {
                 self.disable(reason: "SkyLight could not hide a window")
             } else { self.publish() }
         }
     }
 
-    private func activateFinderDesktop() {
+    private func activateFinderDesktop() { system.activateDesktop { activateFinder() } }
+
+    private func activateFinder() {
         guard let finder = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first else { return }
         guard LaunchOptions.fixtureOnly else { finder.activate(); return }
         // A busy Finder, or one answering its first AX client, can miss a
@@ -568,7 +573,7 @@ final class Workspaces {
         // A focused dialog leaves its existing tile underneath. At startup no
         // focus history exists yet, so seed it from the visible stacking order.
         if entries[id]?.observation.record.state == .floats, let workspace = entries[id]?.workspace,
-           let tile = Self.onScreenOrder().first(where: {
+           let tile = onScreenOrder().first(where: {
                entries[$0]?.workspace == workspace && entries[$0]?.observation.record.state == .tiled
                    && entries[$0]?.observation.parent == nil
            }) {
@@ -605,13 +610,13 @@ final class Workspaces {
 
     private func primary(_ observation: WindowObservation) -> Bool {
         if railEnabled && (rails.location(observation.record.id) != nil || entries[observation.record.id]?.workspace != nil) { return true }
-        guard let screen = NSScreen.screens.first else { return false }
+        guard let screen = system.screen else { return false }
         return CGRect(x: screen.frame.minX, y: 0, width: screen.frame.width, height: screen.frame.height)
             .contains(CGPoint(x: observation.frame.midX, y: observation.frame.midY))
     }
 
     private var area: CGRect {
-        guard let screen = NSScreen.screens.first else { return .zero }
+        guard let screen = system.screen else { return .zero }
         let frame = screen.visibleFrame
         let gap = configuration.gaps.outer
         let width = max(1, frame.width - 2 * gap), height = max(1, frame.height - 2 * gap)
@@ -619,16 +624,9 @@ final class Workspaces {
                       width: width, height: height)
     }
 
-    private static func onScreen() -> Set<UInt32> { Set(onScreenOrder()) }
+    private func onScreen() -> Set<UInt32> { Set(onScreenOrder()) }
 
-    private static func onScreenOrder() -> [UInt32] {
-        // Only IDs survive this query. Drain Objective-C bridge temporaries
-        // without waiting for AppKit's next input event on the main thread.
-        autoreleasepool {
-            (CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? [])
-                .compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value }
-        }
-    }
+    private func onScreenOrder() -> [UInt32] { system.onScreenOrder() }
 
     private func publish() {
         if railEnabled && status.enabled {
@@ -636,7 +634,7 @@ final class Workspaces {
             status.railCount = ws?.rails.count ?? 0
             status.rail = status.railCount > 0 ? (ws?.current ?? 0)+1 : nil
         }
-        let visible = Self.onScreen()
+        let visible = onScreen()
         var rows: [pid_t: [WindowRecord]] = [:]
         for (id, entry) in entries {
             var row = entry.observation.record
@@ -679,7 +677,7 @@ final class Workspaces {
         catalog?.cancelPresentations(invalidatingFocus: takeFocus)
         if let selection, available(selection) { remember(selection) } else { focused = nil }
         let frames = rails.frames(status.active,area:area)
-        let screen = NSScreen.screens.first!
+        let screen = system.screen!
         let bounds = CGRect(x:screen.frame.minX,y:0,width:screen.frame.width,height:screen.frame.height)
         var show = Set(frames.filter { $0.value.intersects(bounds) }.keys)
         show.formUnion(entries.keys.filter {
@@ -690,7 +688,7 @@ final class Workspaces {
         }
         let managed = Set(entries.keys.filter { entries[$0]?.workspace != nil && available($0) })
         let hide = managed.subtracting(show)
-        let newlyShown = show.intersection(closeted).union(show.subtracting(Self.onScreen()))
+        let newlyShown = show.intersection(closeted).union(show.subtracting(onScreen()))
         closet.hide(hide.subtracting(closeted).filter { entries[$0]?.observation.parent == nil })
         closet.show(newlyShown.filter { entries[$0]?.observation.parent == nil })
         closeted.formUnion(hide); closeted.subtract(show)
@@ -735,9 +733,9 @@ final class Workspaces {
             }
         }
         if focused == nil && activateDesktop && takeFocus { activateFinderDesktop() }
-        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) { [weak self] in
+        system.after(milliseconds: 50) { [weak self] in
             guard let self, self.transition == token, self.status.enabled else { return }
-            if !hide.intersection(Self.onScreen()).isEmpty { self.disable(reason:"SkyLight could not hide a window") }
+            if !hide.intersection(onScreen()).isEmpty { self.disable(reason:"SkyLight could not hide a window") }
             else { self.publish() }
         }
     }

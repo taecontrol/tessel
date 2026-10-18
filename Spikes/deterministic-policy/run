@@ -1,0 +1,25 @@
+#!/bin/bash
+# SPIKE (deterministic policy). Compiles the real Workspaces/Rails policy with
+# the simulated macOS, once as checked out and once with 6b80843 reverted,
+# then runs every schedule. Usage: Spikes/deterministic-policy/run [REPETITIONS]
+set -euo pipefail
+root=$(cd "$(dirname "$0")/../.." && pwd)
+spike="$root/Spikes/deterministic-policy"
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+cp "$root/Sources/App/Workspaces.swift" "$work/Workspaces.swift"
+cp "$root/Sources/App/Workspaces.swift" "$work/Workspaces-prefix.swift"
+# Revert only the fix's code; its comment lines do not affect behavior.
+git -C "$root" show 6b80843 -- Sources/App/Workspaces.swift \
+    | sed 's|Sources/App/Workspaces.swift|Workspaces-prefix.swift|g' \
+    | patch --quiet -R -d "$work" -p1
+for variant in Workspaces Workspaces-prefix; do
+    xcrun swiftc -parse-as-library -swift-version 6 -O -target arm64-apple-macos27.0 \
+        "$work/$variant.swift" "$root/Sources/App/Rails.swift" "$root/Sources/App/WorkspaceSystem.swift" \
+        "$root/Sources/Shared/Protocol.swift" "$root/Sources/Shared/KeyChord.swift" \
+        "$spike/Simulation.swift" "$spike/Scenario.swift" -o "$work/$variant"
+done
+echo "== with 6b80843 (current policy)"
+"$work/Workspaces" "${1:-0}"
+echo "== 6b80843 reverted"
+"$work/Workspaces-prefix" "${1:-0}"
