@@ -608,9 +608,11 @@ extension Acceptance {
             }
             let ids = try setup([0.25])
             let dialog = try fixture.open(kind:"dialog",key:"dialog")
-            try focus(dialog)
+            // Native focus can precede the catalog arrivals that select the
+            // dialog and then B; each must be the workspace's latest focus.
+            try focus(dialog); try #require(try eventually { try harness.row(dialog)?.workspace == 1 })
             let original = try frame(dialog)
-            let b = try open("new",width:0.25); try focus(b)
+            let b = try open("new",width:0.25); try focus(b); try order([ids[0],b])
             try focus(b,since:flow.key(2,send:true))
             try focus(dialog,since:flow.key(1))
             #expect(try flow.visible(ids[0]))
