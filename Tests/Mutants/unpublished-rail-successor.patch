@@ -3,11 +3,12 @@
 diff --git a/Sources/Policy/Workspaces.swift b/Sources/Policy/Workspaces.swift
 --- a/Sources/Policy/Workspaces.swift
 +++ b/Sources/Policy/Workspaces.swift
-@@ -311,14 +311,10 @@
+@@ -313,15 +313,11 @@
          } else if needsRender || resizedRail {
              // A hidden app's first snapshot can precede the front app's.
              // Discovering it must not activate Finder or an older selection.
-             render(focusing: focused ?? preferred(in: status.active), relayout: false, takeFocus: !firstSnapshot,
+             let selection = focused ?? preferred(in: status.active)
+             render(focusing: selection, relayout: false, takeFocus: !firstSnapshot || selection != nil && expectedFocus == selection,
                     layoutWindows: hiddenReplacements)
          } else if !replacements.isEmpty {
 -            if let focused, replacements.contains(focused), railPresentation?.pending.contains(focused) == true {
