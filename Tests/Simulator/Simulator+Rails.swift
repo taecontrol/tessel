@@ -77,7 +77,7 @@ extension SimulatedMac {
 
     @MainActor package func isInCloset(_ id: UInt32) -> Bool {
         assume(.closetMembership)
-        guard let space = windows[id]?.space else { return false }
-        return space >= 2 && space < 10_000
+        guard let spaces = windows[id]?.spaces else { return false }
+        return !spaces.isEmpty && spaces.allSatisfy { $0 >= 2 && $0 < 10_000 }
     }
 }

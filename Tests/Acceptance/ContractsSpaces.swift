@@ -48,10 +48,17 @@ extension Acceptance.Contracts {
                 && state.memberships?.first?.all == [closet]
         }
         try native("closetShow", ["ids": [id]])
-        try requireFinalState("ordinary membership returns to the unchanged active Space") {
+        try requireFinalState("shown windows have ordinary active membership and may retain the invisible membership") {
             let state = try native("spaces", ["ids": [id]])
-            return state.activeSpace == active && state.memberships?.first?.ordinary.contains(active) == true
-                && state.memberships?.first?.all.contains(closet) == false
+            let all = Set(state.memberships?.first?.all ?? [])
+            return state.activeSpace == active && state.memberships?.first?.ordinary == [active]
+                && (all == [active] || all == [active, closet])
+        }
+        try native("closetStop")
+        try requireFinalState("destroying the closet removes its retained membership") {
+            let state = try native("spaces", ["ids": [id]])
+            return state.activeSpace == active && state.memberships?.first?.ordinary == [active]
+                && state.memberships?.first?.all == [active]
         }
     }
 

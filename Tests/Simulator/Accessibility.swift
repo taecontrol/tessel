@@ -197,6 +197,10 @@ extension SimulatedMac {
         case .window(let id):
             assume(.axWindowAttributes)
             let window = windows[id]!
+            if window.spec.parent != nil, [.main, .minimized, .fullscreen].contains(attribute) {
+                if attribute == .main { assume(.axFocus) }
+                return AXResult(.attributeUnsupported)
+            }
             switch attribute {
             case .minimized: return AXResult(.success, .bool(window.minimized))
             case .fullscreen: return AXResult(.success, .bool(window.fullscreen))
@@ -281,7 +285,9 @@ extension SimulatedMac {
             selectFromAX(id)
         case (.window(let id), .position, .point(let point)):
             assume(.windowGeometryWrites)
-            applyPosition(id, point)
+            var accepted = point
+            if windows[id]?.spec.positionAcceptance == .rightEdgeStrip { accepted.x = min(point.x, geometry.frame.maxX - 40) }
+            applyPosition(id, accepted)
         case (.window(let id), .size, .size(let size)):
             assume(.axSizeConstraints)
             guard windows[id]?.spec.resizable == true else { return .other(-25200) }

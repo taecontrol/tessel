@@ -7,11 +7,31 @@ extension Acceptance.Contracts {
         let a = try fixture.open(key: "a"), b = try fixture.open(key: "b")
         try desktop.activate(key: "b")
         _ = try window(a)
+        let screen = try #require(try native("screen").screen)
+        let display = [screen[0], 0, screen[2], screen[3]]
+        var fullscreenTransition = false
+        var watchedRoot: UInt32?
+        try watch(["AXWindowCreated"])
         func sample() throws -> NativeContractReply {
             let state = try native()
             try #require(state.listError == 0 || state.listError == -25204, "native transition returned unmodeled AXWindows error \(state.listError ?? 1)")
             if state.listError == 0 && state.listIsArray == true {
-                try #require(Set(state.roots.map(\.id)).isSubset(of: [0, a, b]), "native transition returned an unknown fixture root")
+                let extra = state.roots.filter { ![0, a, b].contains($0.id) }
+                try #require(extra.isEmpty || fullscreenTransition && extra.count == 1,
+                             "only a fullscreen transition may publish one auxiliary fixture root")
+                for root in extra {
+                    try #require(root.role == "AXWindow" && root.roleError == 0 && root.subrole == "AXUnknown" && root.subroleError == 0)
+                    try #require(root.frameError == 0 && desktop.near(root.frame, display) && !root.sizeSettable && root.settableError == 0)
+                    try #require(root.fullscreen == false && root.fullscreenError == 0 && root.minimized == false && root.minimizedError == 0)
+                    try #require(root.main == false && root.mainError == 0 && root.sheets.isEmpty && root.bar == nil)
+                    if watchedRoot == nil {
+                        try expectEvent("AXWindowCreated", id: root.id)
+                        let results = try native("watch", ["id": root.id, "notifications": ["AXUIElementDestroyed"]]).results
+                        try #require(results == [0] || results == [-25202])
+                        if results == [0] { watchedRoot = root.id }
+                        else { try watch(["AXWindowCreated"]) }
+                    }
+                }
                 try #require(state.roots.allSatisfy { $0.id == 0 || $0.roleError == 0 || $0.roleError == -25202 || $0.roleError == -25204 })
             }
             return state
@@ -27,6 +47,8 @@ extension Acceptance.Contracts {
             }
         }
         for fullscreen in [true, false] {
+            try desktop.activate(key: "b")
+            fullscreenTransition = true
             try fixture.command("fullscreen", ["key": "b", "waitForTransition": false])
             try requireFinalState("the fullscreen transition returns a modeled list and final flag") {
                 let state = try sample()
@@ -35,6 +57,10 @@ extension Acceptance.Contracts {
             }
         }
         try requireFinalState("ordinary AXWindows recovers after native transitions") { Set(try sample().roots.map(\.id)) == Set([a, b]) }
+        fullscreenTransition = false
+        _ = try sample()
+        // Only this root is watched; a destroyed handle no longer exposes its CG ID.
+        if watchedRoot != nil { try expectEvent("AXUIElementDestroyed") }
     }
 
     @Test("closed-window-handles: ID lookups and attributes report different errors after native close", contract(.closedWindowHandles))
@@ -199,13 +225,14 @@ extension Acceptance.Contracts {
         let screen = try #require(try native("screen").screen)
         let outside = [screen[0] + screen[2] + 100, position[1]]
         try #require(try write(id, "AXPosition", outside) == 0)
-        try requireFinalState("the AX position write accepts the requested point independently of size") {
+        let clamped = [screen[0] + screen[2] - 40, position[1]]
+        try requireFinalState("the successful position write accepts the point or leaves the modeled 40-point strip") {
             let frame = try native().roots.first { $0.id == id }?.frame ?? []
-            return desktop.near(frame, outside + size)
+            return desktop.near(frame, outside + size) || desktop.near(frame, clamped + size)
         }
     }
 
-    @Test("cg-on-screen-order: native stacking excludes hidden, minimized and off-screen windows", contract(.cgOnScreenOrder))
+    @Test("cg-on-screen-order: native stacking excludes hidden and minimized windows and may retain off-display windows", contract(.cgOnScreenOrder))
     func cgOnScreenOrder() throws {
         let a = try fixture.open(key: "a"), b = try fixture.open(kind: "unconstrained", key: "b")
         try desktop.activate(key: "b")
@@ -226,9 +253,9 @@ extension Acceptance.Contracts {
             let frame = try fixture.command("ping").frames?["b"] ?? []
             return frame.count == 4 && frame[0] >= screen[0] + screen[2]
         }
-        try requireFinalState("CG excludes a native window with no display intersection") {
+        try requireFinalState("CG keeps native stacking with either modeled off-display membership") {
             let state = try native()
-            return !state.visible.contains(b)
+            return state.visibleIDs == [a, b] || state.visibleIDs == [a]
         }
     }
 

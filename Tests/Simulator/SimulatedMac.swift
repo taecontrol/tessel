@@ -3,6 +3,9 @@ import CoreGraphics
 import Ports
 import Assumptions
 
+package enum PositionAcceptance: String, CaseIterable, Sendable { case requested, rightEdgeStrip }
+package enum OffDisplayMembership: String, CaseIterable, Sendable { case included, omitted }
+
 package struct WindowSpec: Sendable {
     package var frame: CGRect
     package var subrole: String
@@ -10,11 +13,16 @@ package struct WindowSpec: Sendable {
     package var minimumSize: CGSize
     package var maximumSize: CGSize
     package var parent: UInt32?
+    package var positionAcceptance: PositionAcceptance
+    package var offDisplayMembership: OffDisplayMembership
     package init(frame: CGRect = CGRect(x: 40, y: 60, width: 451, height: 400), subrole: String = "AXStandardWindow",
                  resizable: Bool = true, minimumSize: CGSize = CGSize(width: 1, height: 1),
-                 maximumSize: CGSize = CGSize(width: 100_000, height: 100_000), parent: UInt32? = nil) {
+                 maximumSize: CGSize = CGSize(width: 100_000, height: 100_000), parent: UInt32? = nil,
+                 positionAcceptance: PositionAcceptance = .rightEdgeStrip, offDisplayMembership: OffDisplayMembership = .included) {
         self.frame = frame; self.subrole = subrole; self.resizable = resizable
         self.minimumSize = minimumSize; self.maximumSize = maximumSize; self.parent = parent
+        self.positionAcceptance = positionAcceptance
+        self.offDisplayMembership = offDisplayMembership
     }
 }
 
@@ -22,6 +30,9 @@ package enum WindowListReply: Sendable {
     case complete, omitting([UInt32]), zeroIDs([UInt32]), failure(AXStatus), nonArray, includingClosed([UInt32])
 }
 package enum NotificationOrder: Sendable { case focusThenMain, mainThenFocus }
+package enum ProhibitedNotifications: String, CaseIterable, Sendable {
+    case delivered, launchOnly, terminationOnly, omitted
+}
 
 package struct SimulatedApp: Sendable {
     package let pid: Int32
@@ -66,6 +77,7 @@ package final class SimulatedMac: @unchecked Sendable {
     var apps: [Int32: AppState] = [:]
     var windows: [UInt32: Window] = [:]
     var groups: [Int: TabGroup] = [:]
+    var fullscreenRoots: [UInt32: UInt32] = [:]
     var front: Int32?
     var zOrder: [UInt32] = []
     var active: UInt64 = 1
@@ -84,6 +96,7 @@ package final class SimulatedMac: @unchecked Sendable {
     struct AppState {
         let pid: Int32, alias: String, bundleID: String
         var hidden = false, terminated = false, prohibited = false, hung = false
+        var prohibitedNotifications = ProhibitedNotifications.omitted
         var busyUntil = 0
         var omitHiddenWindows = false
         var key: UInt32?, main: UInt32?
@@ -99,7 +112,7 @@ package final class SimulatedMac: @unchecked Sendable {
         var spec: WindowSpec
         var minimized = false, fullscreen = false, closed = false
         var minimizing = false
-        var space: UInt64 = 1
+        var spaces: Set<UInt64> = [1]
         var group: Int?
     }
     struct TabGroup { var windows: [UInt32]; var selected: UInt32 }
@@ -117,9 +130,12 @@ package final class SimulatedMac: @unchecked Sendable {
     @MainActor package var screens: any ScreenPort { Applications(mac: self) }
     @MainActor package var windowOrder: any WindowOrderPort { Applications(mac: self) }
     @MainActor package var closetPort: any ClosetPort {
+        closetPort(retainingShownMembership: true)
+    }
+    @MainActor package func closetPort(retainingShownMembership: Bool) -> any ClosetPort {
         let space = closet
         closet += 1
-        return Closet(mac: self, space: space)
+        return Closet(mac: self, space: space, retainingShownMembership: retainingShownMembership)
     }
     @MainActor package var focusedWindow: UInt32? { front.flatMap { apps[$0]?.key } }
     @MainActor package var frontmostApp: Int32? { front }
@@ -140,16 +156,18 @@ package final class SimulatedMac: @unchecked Sendable {
     }
     @MainActor package func shutdown() { scheduler.shutdown() }
 
-    @MainActor @discardableResult package func launch(windows count: Int = 0, prohibited: Bool = false) -> SimulatedApp {
+    @MainActor @discardableResult package func launch(windows count: Int = 0, prohibited: Bool = false,
+                                                     prohibitedNotifications: ProhibitedNotifications = .omitted) -> SimulatedApp {
         assume(.applicationLifecycle)
         let pid = nextPID; nextPID += 1
         let alias = "app-" + String(UnicodeScalar(65 + Int(pid - 100))!)
         var state = AppState(pid: pid, alias: alias, bundleID: "org.example.\(alias.lowercased())")
         state.prohibited = prohibited
+        state.prohibitedNotifications = prohibitedNotifications
         apps[pid] = state
         action("launch \(alias) pid=\(pid)")
         for _ in 0..<count { _ = open(pid, spec: WindowSpec()) }
-        post(.launched, pid: pid)
+        if !prohibited || [.delivered, .launchOnly].contains(prohibitedNotifications) { post(.launched, pid: pid) }
         return app(pid)
     }
     @MainActor func app(_ pid: Int32) -> SimulatedApp { SimulatedApp(pid: pid, alias: apps[pid]!.alias, mac: self) }
@@ -159,7 +177,7 @@ package final class SimulatedMac: @unchecked Sendable {
         assume(.axApplicationWindows)
         nextWindow += 1
         let id = nextWindow
-        windows[id] = Window(id: id, pid: pid, spec: spec, space: active)
+        windows[id] = Window(id: id, pid: pid, spec: spec, spaces: [active])
         action("\(apps[pid]!.alias) open window \(id)")
         if background { assume(.backgroundWindowCreation); zOrder.append(id) }
         else { focus(id) }
@@ -245,13 +263,15 @@ package final class SimulatedMac: @unchecked Sendable {
         apps[pid]?.terminated = true
         for id in windows.keys.sorted() where windows[id]?.pid == pid { windows[id]?.closed = true }
         if front == pid { front = nil }
-        post(.terminated, pid: pid)
+        if apps[pid]?.prohibited == false || [.delivered, .terminationOnly].contains(apps[pid]!.prohibitedNotifications) {
+            post(.terminated, pid: pid)
+        }
     }
     @MainActor func fullscreen(_ id: UInt32, enabled: Bool) {
         assume(.nativeFullscreen)
         action("window \(id) fullscreen=\(enabled)")
         windows[id]?.fullscreen = enabled
-        windows[id]?.space = enabled ? 10_000 + UInt64(id) : 1
+        windows[id]?.spaces = [enabled ? 10_000 + UInt64(id) : 1]
         active = enabled ? 10_000 + UInt64(id) : 1
         notify(.layoutChanged, node: .window(id))
     }
@@ -301,9 +321,9 @@ package final class SimulatedMac: @unchecked Sendable {
         assume(.cgOnScreenOrder)
         let bounds = CGRect(x: geometry.frame.minX, y: 0, width: geometry.frame.width, height: geometry.frame.height)
         return zOrder.filter { id in
-            guard let w = windows[id], !w.closed, !w.minimized, w.space == active,
+            guard let w = windows[id], !w.closed, !w.minimized, w.spaces.contains(active),
                   apps[w.pid]?.hidden == false, apps[w.pid]?.terminated == false,
-                  w.spec.frame.intersects(bounds) else { return false }
+                  w.spec.frame.intersects(bounds) || w.spec.offDisplayMembership == .included else { return false }
             return w.group.flatMap { groups[$0]?.selected == id } ?? true
         }
     }

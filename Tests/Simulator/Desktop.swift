@@ -73,6 +73,7 @@ extension SimulatedMac {
     @MainActor struct Closet: ClosetPort {
         let mac: SimulatedMac
         let space: UInt64
+        let retainingShownMembership: Bool
         func start() throws {
             mac.assume(.closetMoves)
             mac.scheduler.call("ClosetPort.start")
@@ -92,21 +93,32 @@ extension SimulatedMac {
             mac.assume(.closetMoves)
             mac.scheduler.call("ClosetPort.stop returning=\(windows)")
             move(windows, to: mac.active)
+            for id in mac.windows.keys.sorted() { mac.windows[id]?.spaces.remove(space) }
             mac.closetStarted = false
         }
         private func move(_ ids: [UInt32], to space: UInt64) {
             guard mac.scheduler.isActive else { return }
             for id in ids {
-                for member in mac.groupMembers(id) { mac.windows[member]?.space = space }
-                for child in mac.windows.keys.sorted() where mac.windows[child]?.spec.parent == id { mac.windows[child]?.space = space }
+                let children = mac.windows.keys.sorted().filter { mac.windows[$0]?.spec.parent == id }
+                for member in mac.groupMembers(id) + children {
+                    guard let window = mac.windows[member] else { continue }
+                    var memberships: Set<UInt64> = [space]
+                    if space == mac.active && retainingShownMembership {
+                        mac.assume(.closetMembership)
+                        memberships.formUnion(window.spaces.filter { $0 >= 2 && $0 < 10_000 })
+                    }
+                    mac.windows[member]?.spaces = memberships
+                }
             }
         }
         func memberships(_ window: UInt32, scope: SpaceScope) -> [SpaceToken] {
             mac.assume(.closetMembership)
             mac.scheduler.call("ClosetPort.memberships window \(window) scope=\(scope)")
-            guard let space = mac.windows[window]?.space else { return [] }
-            if case .ordinary = scope, space >= 2 && space < 10_000 { return [] }
-            return [SpaceToken(adapterValue: space)]
+            let spaces = mac.windows[window]?.spaces ?? []
+            return spaces.sorted().filter { space in
+                if case .ordinary = scope { return space < 2 || space >= 10_000 }
+                return true
+            }.map { SpaceToken(adapterValue: $0) }
         }
         func activeSpace() -> SpaceToken {
             mac.assume(.closetMembership)

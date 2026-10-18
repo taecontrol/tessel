@@ -13,15 +13,24 @@ extension Acceptance.Contracts {
                 return metadata.alive == true && metadata.listed == true && metadata.bundleMatches == true
                     && metadata.regular == !prohibited && metadata.prohibited == prohibited && metadata.terminated == false
             }
-            try requireFinalState("the fixture launch notification with prohibited=\(prohibited)") {
-                try native("lifecycle").lifecycle?.contains { $0.pid == pid && $0.name == "NSWorkspaceDidLaunchApplicationNotification" && $0.mainThread } == true
+            if !prohibited {
+                try requireFinalState("the regular fixture launch notification") {
+                    try native("lifecycle").lifecycle?.contains { $0.pid == pid && $0.name == "NSWorkspaceDidLaunchApplicationNotification" && $0.mainThread } == true
+                }
             }
             try target.command("quit")
             try requireFinalState("native fixture termination") { kill(pid, 0) != 0 }
             target.disconnect()
             harness.otherFixtures.removeAll { $0 === target }
-            try requireFinalState("the fixture termination notification with prohibited=\(prohibited)") {
-                try native("lifecycle").lifecycle?.contains { $0.pid == pid && $0.name == "NSWorkspaceDidTerminateApplicationNotification" && $0.mainThread } == true
+            if !prohibited {
+                try requireFinalState("the regular fixture termination notification") {
+                    try native("lifecycle").lifecycle?.contains { $0.pid == pid && $0.name == "NSWorkspaceDidTerminateApplicationNotification" && $0.mainThread } == true
+                }
+            }
+            let events = try #require(try native("lifecycle").lifecycle).filter { $0.pid == pid }
+            for name in ["NSWorkspaceDidLaunchApplicationNotification", "NSWorkspaceDidTerminateApplicationNotification"] {
+                let matching = events.filter { $0.name == name }
+                try #require(matching.count <= 1 && matching.allSatisfy { $0.mainThread && $0.knownPID == pid })
             }
         }
     }
@@ -98,6 +107,8 @@ extension Acceptance.Contracts {
         let sheet = try fixture.open(kind: "sheet", key: "sheet")
         let state = try window(sheet)
         try #require(state.role == "AXSheet" && state.subrole != "AXStandardWindow")
+        try #require(state.minimized == nil && state.minimizedError == -25205)
+        try #require(state.fullscreen == nil && state.fullscreenError == -25205)
     }
 
     @Test("ax-size-constraints: successful size writes accept clamped geometry", contract(.axSizeConstraints))
@@ -133,7 +144,8 @@ extension Acceptance.Contracts {
         let parent = try #require(try fixture.command("ping").windows["sheetParent"])
         try requireFinalState("a focused sheet leaves its parent main") {
             let state = try native()
-            return state.focused?.id == sheet && state.focused?.main == false && state.roots.first { $0.id == parent }?.main == true
+            return state.focused?.id == sheet && state.focused?.main == nil && state.focused?.mainError == -25205
+                && state.roots.first { $0.id == parent }?.main == true
         }
     }
 

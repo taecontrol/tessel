@@ -44,7 +44,7 @@ extension SimulatedMac {
         }
         nextWindow += 1
         let added = nextWindow
-        windows[added] = Window(id: added, pid: window.pid, spec: window.spec, space: window.space, group: group)
+        windows[added] = Window(id: added, pid: window.pid, spec: window.spec, spaces: window.spaces, group: group)
         groups[group]?.windows.append(added)
         zOrder.insert(added, at: 0)
         action("add native tab window \(added) to window \(id)")
