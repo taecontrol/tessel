@@ -45,6 +45,17 @@ Its focused run reproduces all six original failures: quit and crash under
 three write orders select window 1 instead of the adjacent rail's window 2
 when termination arrives late and the dying PID still exists at promotion.
 
+Fresh review found two further ordering regressions, fixed in 790be60:
+
+| Mutant | Killing test |
+| --- | --- |
+| [owner-check-geometry.patch](owner-check-geometry.patch) | #17 E16: `RailOrderingRegressions.ownerReadSurvivesGapReload` follows external focus after a gap redraw while owner AX revalidation is outstanding |
+| [background-discovery-focus.patch](background-discovery-focus.patch) | #2 E2 / #17 E2: `RailOrderingRegressions.initialBackgroundReadPreservesKeyboardFocus` completes a pending keyboard selection across background discovery in stack and rails |
+
+The dying-owner mutant now reverts the revalidation call without deleting its
+unused worker methods, so changes to their cancellation guard cannot make the
+historical bug's patch obsolete.
+
 ## Architecture guards
 
 | Mutant | Required failure | Time (s) |

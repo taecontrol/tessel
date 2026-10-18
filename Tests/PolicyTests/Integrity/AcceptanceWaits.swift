@@ -7,6 +7,14 @@ enum AcceptanceWaits {
         let spelling: String
     }
 
+    static func margins(in source: String) -> [String] {
+        let code = PolicyPurity.codeOnly(source) as NSString
+        let declarations = try! NSRegularExpression(pattern: #"\b(?:let|var)\s+margin(?:\s*:\s*Double)?\s*=\s*([^\n;]+)"#)
+        return declarations.matches(in: code as String, range: NSRange(location: 0, length: code.length)).map {
+            code.substring(with: $0.range(at: 1)).trimmingCharacters(in: .whitespaces)
+        }
+    }
+
     static func violations(in source: String) -> [Violation] {
         let code = PolicyPurity.codeOnly(source) as NSString
         // Retired spellings stay guarded so a shorter deadline cannot return.
@@ -65,7 +73,17 @@ enum AcceptanceWaits {
             return Violation(line: code.substring(to: match.range.location).filter { $0 == "\n" }.count + 1,
                              spelling: "\(name) omits \(label): margin and inherits a legacy default")
         }
-        return (explicit + implicit).sorted { $0.line < $1.line }
+        // The final-state owner and the hotkey safety retry build their
+        // deadlines directly; argument-label checks cannot see these limits.
+        let deadlines = try! NSRegularExpression(pattern: #"\bmonotonicSeconds\s*\(\s*\)\s*\+\s*([^\n;]+)"#)
+        let direct: [Violation] = deadlines.matches(in: code as String, range: NSRange(location: 0, length: code.length)).compactMap { match in
+            let limit = code.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespaces)
+            guard limit != "margin" else { return nil }
+            return Violation(line: code.substring(to: match.range.location).filter { $0 == "\n" }.count + 1,
+                             spelling: "state deadline uses \(limit) instead of margin")
+        }
+        let margin = margins(in: source).filter { Double($0) != 5 }.map { Violation(line: 1, spelling: "final-state margin must be 5 s, found \($0)") }
+        return (explicit + implicit + direct + margin).sorted { $0.line < $1.line }
     }
 
     private static func nonStateProcess(_ arguments: String) -> Bool {
@@ -132,7 +150,9 @@ enum AcceptanceWaits {
                        "eventualValue { 1 }", "eventually({ true })", "converges { $0.isEmpty }", "run([cli.path])",
                        "run(command(timeout: margin))", "run([cli.path], check: try run([cli.path], timeout: margin).status == 0)",
                        "func run(_ command: [String], timeout: Double = 1) {}",
-                       "exited.wait(timeout: .now() + timeout)", "setTimeout(socket, seconds: timeout)"] {
+                       "exited.wait(timeout: .now() + timeout)", "setTimeout(socket, seconds: timeout)",
+                       "let margin = 0.5", "let deadline = monotonicSeconds() + 0.5",
+                       "let retryDeadline = monotonicSeconds() + remaining"] {
             #expect(!AcceptanceWaits.violations(in: source).isEmpty, "Accepted \(source)")
         }
         for source in ["eventually(within: margin) { true }", "wait(timeout: .now() + margin)", "setTimeout(socket, seconds: margin)",
@@ -141,6 +161,7 @@ enum AcceptanceWaits {
                        "run(commands.map { $0 }, timeout: margin)",
                        "func run(_ command: [String], timeout: Double = margin) throws -> ProcessResult { exited.wait(timeout: .now() + timeout) }",
                        "init(path: String, timeout: Double) throws { setTimeout(socket, seconds: timeout) }",
+                       "let margin = 5.0", "let deadline = monotonicSeconds() + margin",
                        "// focus(1, since: start)\nlet text = \"within: 0.5\""] {
             #expect(AcceptanceWaits.violations(in: source).isEmpty, "Rejected \(source)")
         }
@@ -150,7 +171,9 @@ enum AcceptanceWaits {
     @Test("E17: only latency judges real-system elapsed time")
     func sourceWaits() throws {
         var current: [String] = []
-        for file in try IntegritySources.files(in: "Tests/Acceptance") where URL(fileURLWithPath: file.path).lastPathComponent != "Latency.swift" {
+        let files = try IntegritySources.files(in: "Tests/Acceptance").filter { URL(fileURLWithPath: $0.path).lastPathComponent != "Latency.swift" }
+        #expect(files.flatMap { AcceptanceWaits.margins(in: $0.source) }.count == 1, "Real-system waits must declare one shared 5 s margin")
+        for file in files {
             for violation in AcceptanceWaits.violations(in: file.source) {
                 let message = "\(file.path):\(violation.line): \(violation.spelling)"
                 current.append(message)

@@ -10,8 +10,9 @@ struct AssumptionRegistry {
     }
     static func ids(in source: String, call: String) -> Set<String> {
         let expression = try! NSRegularExpression(pattern: "\\b" + call + #"\s*\(\s*\.([A-Za-z_][A-Za-z_0-9]*)\s*\)"#)
-        let text = source as NSString
-        return Set(expression.matches(in: source, range: NSRange(location: 0, length: text.length)).map { text.substring(with: $0.range(at: 1)) })
+        let code = PolicyPurity.codeOnly(source)
+        let text = code as NSString
+        return Set(expression.matches(in: code, range: NSRange(location: 0, length: text.length)).map { text.substring(with: $0.range(at: 1)) })
     }
     static func check(declared: Set<String>, behaviors: Set<String>, contracts: Set<String>) -> Findings {
         Findings(missingBehaviors: declared.subtracting(behaviors).sorted(), missingContracts: declared.subtracting(contracts).sorted(),
@@ -28,6 +29,13 @@ struct AssumptionRegistry {
         let missing = AssumptionRegistry.check(declared: ["unused"], behaviors: [], contracts: ["unused"])
         #expect(missing.missingBehaviors == ["unused"])
         #expect(AssumptionRegistry.ids(in: "assume(.axReadDelivery)\ncontract(.axReadDelivery)", call: "assume") == ["axReadDelivery"])
+        for call in ["assume", "contract"] {
+            for source in ["// \(call)(.axReadDelivery)", "/* \(call)(.axReadDelivery) */",
+                           "let text = \"\(call)(.axReadDelivery)\"", "let raw = #\"\(call)(.axReadDelivery)\"#"] {
+                #expect(AssumptionRegistry.ids(in: source, call: call).isEmpty, "Non-code registered an assumption: \(source)")
+            }
+            #expect(AssumptionRegistry.ids(in: "// \(call)(.removed)\n\(call)(.axReadDelivery)", call: call) == ["axReadDelivery"])
+        }
     }
 
     @Test("E11: every simulator assumption has exactly its registered contract ID")

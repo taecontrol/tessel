@@ -100,6 +100,11 @@ import Testing
     func enabling(layout: Layout) {
         let schedules = EnablingScenarios.schedules
         #expect(schedules.count == 12)
+        let causalOrders = Set(schedules.map(\.steps))
+        #expect(causalOrders.count == 4)
+        for order in causalOrders {
+            #expect(Set(schedules.filter { $0.steps == order }.map(\.writes)) == Set(WriteOrder.allCases))
+        }
         for schedule in schedules { requireScenario(EnablingScenarios.run(schedule, layout: layout)) }
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 import Ports
 import Simulator
 import Testing
@@ -9,6 +10,30 @@ private final class BatonValues: @unchecked Sendable {
 }
 
 @Suite @MainActor struct PortScheduling {
+    @Test("successful AX reads and writes allow a timer to overtake their replies", arguments: [false, true])
+    func successfulAXCallsCostTime(writes: Bool) {
+        let mac = SimulatedMac()
+        defer { mac.shutdown() }
+        let app = mac.launch(windows: 1)
+        let ax = mac.ax
+        let application = ax.application(app.pid)
+        let window = ax.copy(.windows, of: application).value!.elements!.first!
+        let values = BatonValues()
+        let start = mac.scheduler.now
+        mac.scheduler.serialLane(label: "test.successful-ax").async {
+            for _ in 0..<2 {
+                values.status = writes ? ax.set(.position, of: window, to: .point(CGPoint(x: 40, y: 60)))
+                    : ax.copy(.position, of: window).status
+            }
+            values.events.append("AX returned")
+        }
+        mac.scheduler.main.after(milliseconds: 1) { values.events.append("timer") }
+        #expect(mac.settle() == .settled)
+        #expect(values.status == .success)
+        #expect(values.events == ["timer", "AX returned"])
+        #expect(mac.scheduler.now > start + 1)
+    }
+
     @Test("main port calls yield to a ready worker without reentering main")
     func mainYield() {
         let scheduler = BatonScheduler()

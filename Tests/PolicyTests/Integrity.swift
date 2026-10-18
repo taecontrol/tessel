@@ -21,7 +21,8 @@ import Testing
     func rejectsForbiddenOperations() {
         let examples = [
             "import AppKit", "sleep(1)", "Date()", "Thread.current", "Task {}",
-            "DispatchSemaphore(value: 0)", "DispatchQueue.main.async {}", "NSLock()", "kill(7, 0)"
+            "DispatchSemaphore(value: 0)", "DispatchQueue.main.async {}", "NSLock()", "kill(7, 0)",
+            "NSDate().timeIntervalSince1970", "NSDate.timeIntervalSinceReferenceDate", "ProcessInfo.processInfo.systemUptime"
         ]
         for example in examples {
             #expect(!PolicyPurity.violations(in: example).isEmpty, "Checker accepted \(example)")
@@ -38,7 +39,7 @@ enum PolicyPurity {
     struct Violation { let line: Int; let rule: String }
     private static let rules = [
         ("sleep", #"\b(?:sleep|usleep|nanosleep)\s*\("#),
-        ("wall clock", #"\bDate\s*(?:\(|\.)|\b(?:DispatchTime|ContinuousClock|SuspendingClock|CFAbsoluteTimeGetCurrent|CACurrentMediaTime|clock_gettime\w*|gettimeofday|mach_absolute_time|mach_continuous_time)\b"#),
+        ("wall clock", #"\b(?:Date|NSDate)\s*(?:\(|\.)|\bProcessInfo\s*\.\s*processInfo\s*\.\s*systemUptime\b|\b(?:DispatchTime|ContinuousClock|SuspendingClock|CFAbsoluteTimeGetCurrent|CACurrentMediaTime|clock_gettime\w*|gettimeofday|mach_absolute_time|mach_continuous_time)\b"#),
         ("Thread", #"\bThread\b"#),
         ("Task", #"\bTask\b"#),
         ("semaphore", #"\b(?:DispatchSemaphore|sem_\w+)\b"#),
