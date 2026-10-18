@@ -144,13 +144,6 @@ enum ExampleLayers {
         let stray = ExampleLayers.stray(in: map.layers, tags: tags)
         #expect(stray.isEmpty, "\(stray.joined(separator: "\n"))")
         let missing = ExampleLayers.missing(in: map.layers, tags: tags)
-        let policy = missing.filter { map.layers[$0] == .policy }
-        let other = missing.filter { map.layers[$0] != .policy }
-        #expect(other.isEmpty, "Mapped IDs without tests: \(other.joined(separator: ", "))")
-        if !policy.isEmpty {
-            withKnownIssue("Scenario migration is missing: \(policy.joined(separator: ", "))") {
-                #expect(policy.isEmpty, "Mapped P IDs without scenarios: \(policy.joined(separator: ", "))")
-            }
-        }
+        #expect(missing.isEmpty, "Mapped IDs without tests: \(missing.joined(separator: ", "))")
     }
 }
