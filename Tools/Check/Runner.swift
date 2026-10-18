@@ -27,7 +27,11 @@ struct CheckRunner {
         case .determinism(let count):
             var digest: String?
             for index in 1...count {
-                let result = try execute(["swift", "test"])
+                // Optimize the snapshot once; every replay still runs the full
+                // suite and assertions in a fresh process with its own hash seed.
+                var arguments = ["swift", "test", "-c", "release"]
+                if index > 1 { arguments.append("--skip-build") }
+                let result = try execute(arguments)
                 print(String(format: "determinism run %d/%d: exit %d (%.3f s)", index, count, result.status, result.seconds))
                 do { digest = try CheckDecisions.digest(status: result.status, output: result.output, expected: digest) }
                 catch { throw CheckFailure("run \(index): \(error)\n" + tail(result.output)) }
