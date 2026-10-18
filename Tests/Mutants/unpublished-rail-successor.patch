@@ -1,0 +1,18 @@
+# Bug: An unpublished native tab replacement abandons its current rail presentation.
+# Fixing commit: 28093c6898187f8600e1a7a0fbab4a3243a725ae
+diff --git a/Sources/Policy/Workspaces.swift b/Sources/Policy/Workspaces.swift
+--- a/Sources/Policy/Workspaces.swift
++++ b/Sources/Policy/Workspaces.swift
+@@ -309,11 +309,7 @@
+         } else if needsRender || resizedRail {
+             render(focusing: focused ?? preferred(in: status.active), relayout: false, layoutWindows: hiddenReplacements)
+         } else if !replacements.isEmpty {
+-            if let focused, replacements.contains(focused), railPresentation?.pending.contains(focused) == true {
+-                // The old native root rejected this current presentation. Its
+-                // successor owns the unfinished position and focus intent.
+-                render(focusing: focused, relayout: false)
+-            } else if frontmost, front == pid, let reportedFocus, replacements.contains(reportedFocus), available(reportedFocus) {
++            if frontmost, front == pid, let reportedFocus, replacements.contains(reportedFocus), available(reportedFocus) {
+                 followExternalFocus(reportedFocus, layoutWindows: hiddenReplacements)
+             } else if !hiddenReplacements.isEmpty {
+                 render(focusing: focused, relayout: false, takeFocus: false)

@@ -80,14 +80,20 @@ struct CheckRunner {
     }
 
     private func copyTracked(_ paths: [String], to directory: URL) throws {
-        for path in paths {
-            let source = root.appending(path: path), destination = directory.appending(path: path)
-            guard FileManager.default.fileExists(atPath: source.path) else { continue }
-            try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let clone = try execute(["/bin/cp", "-c", source.path, destination.path])
+        let groups = Dictionary(grouping: paths) { ($0 as NSString).deletingLastPathComponent }
+        for parent in groups.keys.sorted() {
+            let files = groups[parent]!.filter { FileManager.default.fileExists(atPath: root.appending(path: $0).path) }
+            guard !files.isEmpty else { continue }
+            let destination = directory.appending(path: parent)
+            try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+            // Spawn once per directory rather than once per small source file.
+            let clone = try execute(["/bin/cp", "-c"] + files.map { root.appending(path: $0).path } + [destination.path])
             if clone.status != 0 {
-                if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
-                try FileManager.default.copyItem(at: source, to: destination)
+                for path in files {
+                    let source = root.appending(path: path), target = directory.appending(path: path)
+                    if FileManager.default.fileExists(atPath: target.path) { try FileManager.default.removeItem(at: target) }
+                    try FileManager.default.copyItem(at: source, to: target)
+                }
             }
         }
     }

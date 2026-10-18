@@ -47,8 +47,10 @@ Bare `swift test` runs the deterministic scenarios, simulator framework and
 integrity checks, and tooling tests. It compiles no Acceptance target, launches
 no app or fixture, creates no windows and needs no Accessibility permission.
 The tests run in seconds after compilation and print total test time plus one
-SHA-256 `trace digest:` line. `swift run tessel-check determinism --runs 100`
-requires every run to pass with the same digest.
+SHA-256 `trace digest:` line. `swift run tessel-check determinism --runs 20`
+requires every run to pass with the same digest. Separate processes vary
+Swift's hash seed, which is what can reorder an unsorted iteration; the digest
+test also runs its fixed catalog of 25 scenarios twice within each process. CI runs 3.
 
 The production catalog, Workspaces, Rails, closet recovery and config reload run
 against a simulated macOS behind small platform ports. Its virtual clock proves
