@@ -29,9 +29,14 @@ on the development machine (2026-10-18).
 | [unpublished-rail-successor.patch](unpublished-rail-successor.patch) | 28093c6 | #17 E19: `RailNativeWindows.unpublishedSuccessor` completes the still-current successor focus | 41.918 |
 
 The two 647500d paths are separate mutants so one cannot mask missing coverage
-of the other. The 9783347 native-front check now lives in `isNativeFront`, shared
-by initial presentation checks and repeated focus writes; its semantic revert
-disables that predicate and restores the redundant classification raise.
+of the other. The zero-ID mutant also removes the subsequent closed-handle
+revalidation: on macOS 27 a closed handle's ID lookup can report
+`illegalArgument`, while its attributes report `invalidUIElement`. The keeper
+still rejects losing a live zero-ID row; foundation E8 separately rejects
+retaining a closed one. The 9783347 native-front check now lives in
+`isNativeFront`, shared by initial presentation checks and repeated focus
+writes; its semantic revert disables that predicate and restores the redundant
+classification raise.
 The 97f790d revert removes both the retired-root bar retention and the later
 enumeration guard; its failures identify the extra catalog row directly.
 
@@ -54,12 +59,19 @@ prove that recovery needs another read; they do not reproduce a closed row
 remaining listed. The patch is excluded from the active `.patch` set.
 
 Coverage finding: #1 E8 lists retained closed AX handles, but the simulator
-immediately invalidates them, and the current catalog revalidates them. The
-scenario never makes the first read after destruction time out and then lets
-the app recover without another notification. #1 E21 leaves the affected app
+immediately invalidates their attributes, and the current catalog revalidates
+them. The scenario never makes the first read after destruction time out and
+then lets the app recover without another notification. #1 E21 leaves the affected app
 hung and closes windows only in a healthy app; #2 E8's failed-read case later
 supplies a new activation. The historical close-after-timeout behavior therefore
 survives its intended example. No candidate survived the entire suite.
+
+After the S8 signed macOS 27.0.1 probe corrected closed ID lookups to return
+`illegalArgument` and ID 0, this semantic revert was retried against the repaired
+catalog. All six E8 cases (three write orders, listed and omitted handles) still
+passed in 0.176 s. The observed closes invalidated their attributes on the first
+sample and had no timeouts. No extra delayed-close behavior was invented to
+kill this candidate; it remains excluded.
 
 Preserved here for the next coverage investigation, outside patch discovery:
 
@@ -92,12 +104,19 @@ diff --git a/Sources/Policy/WindowCatalog.swift b/Sources/Policy/WindowCatalog.s
 
 ## Runtime budget
 
-Final fresh-copy check: **347.71 s (5 min 47.71 s)** for eight known
+S6 fresh-copy check: **347.71 s (5 min 47.71 s)** for eight known
 bugs and two architecture guards. Tracked copies batch `cp -c` by parent
 directory. A 116-file copy benchmark took 8.181 s with 116 processes and
 1.981 s with 28 processes. Each mutant still gets its own tracked copy,
 patch application and bare `swift test`.
 
-This leaves about 12 s under the six-minute target on this run. Measure the
+That run left about 12 s under the six-minute target. Measure the
 whole check when adding a patch. Exploratory candidate runs stay local;
 CI runs only the retained known bugs and guards.
+
+S8 reran all ten patches after closed-handle revalidation: all were killed,
+with 298.707 s summed across the per-mutant timings. The updated zero-ID
+mutant took 30.034 s and the omitted-minimized-window mutant took 34.821 s.
+After merging the contracts/timing slices and consolidating the closed-handle
+contract, all ten were killed again (302.513 s summed per-mutant time).
+Zero-ID took 31.043 s and omitted-minimized-window took 32.435 s.

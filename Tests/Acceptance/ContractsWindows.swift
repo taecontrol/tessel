@@ -37,19 +37,50 @@ extension Acceptance.Contracts {
         try requireFinalState("ordinary AXWindows recovers after native transitions") { Set(try sample().roots.map(\.id)) == Set([a, b]) }
     }
 
-    @Test("closed-window-handles: retained AX handles become invalid after native close", contract(.closedWindowHandles))
+    @Test("closed-window-handles: ID lookups and attributes report different errors after native close", contract(.closedWindowHandles))
     func closedWindowHandles() throws {
-        let id = try fixture.open()
-        _ = try window(id)
-        try watch(["AXUIElementDestroyed"], id: id)
-        try fixture.command("close", ["retain": true])
-        try expectEvent("AXUIElementDestroyed")
-        try requireFinalState("the closed retained AX handle becomes invalid") {
-            try native("retained", ["id": id]).window?.roleError == -25202
+        for retain in [false, true] {
+            try native("reset")
+            try fixture.command("reset")
+            let id = try fixture.open()
+            let before = try window(id)
+            try #require(before.idError == 0 && before.roleError == 0 && before.minimizedError == 0 && before.frameError == 0)
+            try #require(before.minimized == false)
+            // The catalog replaces its cached proxy on each complete AXWindows read.
+            for _ in 0..<2 {
+                let current = try native("reacquire", ["id": id])
+                try #require(current.equal == true && current.window?.id == id && current.window?.idError == 0)
+            }
+            try watch(["AXUIElementDestroyed"], id: id)
+            try fixture.command("close", ["retain": retain])
+            let closedAt = monotonicSeconds()
+            try expectEvent("AXUIElementDestroyed")
+            func invalid(_ window: NativeContractReply.Window) -> Bool {
+                window.idError == -25201 && window.id == 0 && window.roleError == -25202
+                    && window.minimizedError == -25202 && window.frameError == -25202
+            }
+            func empty(_ state: NativeContractReply) -> Bool {
+                state.listError == 0 && state.listIsArray == true && state.roots.isEmpty
+            }
+            var reads = 0
+            try requireFinalState("the closed retained AX handle becomes invalid and both window lists omit it") {
+                let listed = try native()
+                let retained = try native("retained", ["id": id]).window
+                let confirmed = try native()
+                reads += 1
+                return retained.map(invalid) == true && empty(listed) && empty(confirmed)
+            }
+            let first = monotonicSeconds() - closedAt
+            for _ in 0..<20 {
+                let listed = try native()
+                let retained = try #require(try native("retained", ["id": id]).window)
+                try #require(invalid(retained))
+                let confirmed = try native()
+                try #require(empty(listed) && empty(confirmed))
+            }
+            print(String(format: "closed handle retain=%@ first=%.3f s reads=%d+20 idError=-25201 id=0 role=-25202 minimized=-25202 position=-25202 lists=empty/empty",
+                         String(retain), first, reads))
         }
-        let state = try native()
-        try #require(state.listError == 0 && state.listIsArray == true)
-        try #require(state.roots.allSatisfy { $0.id == 0 || $0.id == id }, "a closed native root may disappear or remain listed")
     }
 
     @Test("minimize-restore: Dock operations update AX, CG, notifications and successor focus", contract(.minimizeRestore))

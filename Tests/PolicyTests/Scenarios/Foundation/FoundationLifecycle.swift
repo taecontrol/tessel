@@ -31,9 +31,10 @@ import Testing
         })
     }
 
-    @Test("#1 E8: a background close with a retained AX handle and an app quit publish before 500 virtual ms", arguments: WriteOrder.allCases)
-    func closedAndQuit(_ writes: WriteOrder) {
-        requireScenario(Scenario.run("destruction and termination notifications", writes: writes) { scenario in
+    @Test("#1 E8: a background close with a retained AX handle and an app quit publish before 500 virtual ms",
+          arguments: WriteOrder.allCases, [false, true])
+    func closedAndQuit(_ writes: WriteOrder, stillListed: Bool) {
+        requireScenario(Scenario.run("destruction and termination notifications, closed handle listed=\(stillListed)", writes: writes) { scenario in
             let mac = scenario.mac
             let app = mac.launch(windows: 1)
             let tessel = scenario.startTessel()
@@ -41,7 +42,7 @@ import Testing
             let id = app.open(background: true)
             scenario.settle()
             FoundationProof.row(id, in: tessel, state: .tiled, reason: "standard window", scenario: scenario)
-            app.publishNextWindowLists(Array(repeating: .includingClosed([id]), count: 20))
+            if stillListed { app.publishNextWindowLists(Array(repeating: .includingClosed([id]), count: 20)) }
             let closedAt = mac.scheduler.now
             scenario.step("close the background window without a focus notification") { app.close(id) }
             scenario.settle()

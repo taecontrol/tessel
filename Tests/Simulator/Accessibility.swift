@@ -61,11 +61,14 @@ extension SimulatedMac {
             mac.scheduler.call("AccessibilityPort.\(operation) \(handle.name)")
             return handle
         }
-        private func unavailable(_ handle: Handle) -> AXStatus? {
+        private func unavailable(_ handle: Handle, readingWindowID: Bool = false) -> AXStatus? {
             guard mac.scheduler.isActive else { return .cannotComplete }
             guard let pid = mac.pid(handle.node), let app = mac.apps[pid], !app.terminated else { return .invalidUIElement }
             if app.hung || app.busyUntil > mac.scheduler.now { return .cannotComplete }
-            if case .window(let id) = handle.node, mac.windows[id]?.closed != false { return .invalidUIElement }
+            if case .window(let id) = handle.node {
+                guard let window = mac.windows[id] else { return .invalidUIElement }
+                if window.closed && !readingWindowID { return .invalidUIElement }
+            }
             return nil
         }
         private func finish(_ handle: Handle, operation: String, status: AXStatus, value: String = "", point: PausePoint? = nil) {
@@ -134,10 +137,15 @@ extension SimulatedMac {
             mac.assume(.axWindowAttributes)
             guard let handle = handle(element, operation: "windowID") else { return AXResult(.cannotComplete) }
             let result: AXResult<UInt32>
-            if let error = unavailable(handle) { result = AXResult(error) }
+            if let error = unavailable(handle, readingWindowID: true) { result = AXResult(error) }
             else if case .window(let id) = handle.node {
-                let zero = mac.windows[id].flatMap { mac.apps[$0.pid]?.zeroIDs.contains(id) } == true
-                result = AXResult(.success, zero ? 0 : id)
+                if mac.windows[id]?.closed == true {
+                    mac.assume(.closedWindowHandles)
+                    result = AXResult(.other(-25201), 0)
+                } else {
+                    let zero = mac.windows[id].flatMap { mac.apps[$0.pid]?.zeroIDs.contains(id) } == true
+                    result = AXResult(.success, zero ? 0 : id)
+                }
             } else if handle.node == .desktop { result = AXResult(.success, 0) }
             else { mac.scheduler.failUnmodeled("AccessibilityPort.windowID \(mac.name(handle.node))"); result = AXResult(.cannotComplete) }
             finish(handle, operation: "windowID", status: result.status, value: result.value.map(String.init) ?? "nil")

@@ -52,7 +52,7 @@ package enum Assumption: String, CaseIterable, Sendable {
         case .axMessagingTimeout: "AX calls to a hung app fail with cannotComplete after the handle's messaging timeout."
         case .axReadDelivery: "An AX reply describes state captured by that call, even when delivery happens later."
         case .transientWindowLists: "AXWindows may omit live handles, expose zero IDs, fail or change between successive reads during native transitions."
-        case .closedWindowHandles: "A closed window can remain listed, but its retained AX handle becomes invalid."
+        case .closedWindowHandles: "On macOS 27, a closed AppKit window's retained AX handle returns illegalArgument with CG ID 0, while attribute reads return invalidUIElement, even when the NSWindow is retained."
         case .minimizeRestore: "Minimize and restore change AX and CG state, with notifications after the Dock operation and a selectable successor."
         case .nativeFullscreen: "A native fullscreen window occupies a separate Space and leaves ordinary desktop visibility until exit."
         case .nativeTabIdentity: "Native tabs share a frame and retain their AX bar identity across selected roots, while minimized tabs are listed separately."

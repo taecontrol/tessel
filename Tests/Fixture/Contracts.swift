@@ -77,6 +77,13 @@ final class FixtureContracts: NSObject {
         case "retained":
             let window = try retained(command, pid: pid)
             return ["window": describe(window)]
+        case "reacquire":
+            let previous = try retained(command, pid: pid)
+            guard let current = (read(application, kAXWindowsAttribute).value as? [AXUIElement])?.first(where: { CFEqual($0, previous) }) else {
+                throw FixtureContractError("the retained fixture window is no longer listed")
+            }
+            handles[id(current)] = current
+            return ["window": describe(current), "equal": CFEqual(current, previous)]
         case "capture":
             let window = try retained(command, pid: pid)
             captured = ["position": read(window, kAXPositionAttribute).value,
@@ -232,7 +239,8 @@ final class FixtureContracts: NSObject {
 
     private func describe(_ window: AXUIElement) -> [String: Any] {
         AXUIElementSetMessagingTimeout(window, FixtureProbe.observationTimeout)
-        let number = id(window)
+        var number: UInt32 = 0
+        let idError = fixtureWindowID(window, &number)
         if number != 0, handles[number] == nil { handles[number] = window }
         let role = read(window, kAXRoleAttribute), subrole = read(window, kAXSubroleAttribute)
         let position = read(window, kAXPositionAttribute), size = read(window, kAXSizeAttribute)
@@ -250,7 +258,8 @@ final class FixtureContracts: NSObject {
             if let index = bars.firstIndex(where: { CFEqual($0, native.0) }) { bar = index }
             else { bar = bars.count; bars.append(native.0) }
         }
-        return ["id": number, "role": role.value as? String as Any? ?? NSNull(), "roleError": role.error.rawValue,
+        return ["id": number, "idError": idError.rawValue,
+                "role": role.value as? String as Any? ?? NSNull(), "roleError": role.error.rawValue,
                 "subrole": subrole.value as? String as Any? ?? NSNull(), "subroleError": subrole.error.rawValue,
                 "frame": frame(position: position.value, size: size.value), "frameError": position.error.rawValue,
                 "minimized": minimized.value as? Bool as Any? ?? NSNull(), "minimizedError": minimized.error.rawValue,
