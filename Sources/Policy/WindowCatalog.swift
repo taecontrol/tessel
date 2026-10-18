@@ -305,8 +305,11 @@ private final class AppWindows: @unchecked Sendable {
                 // AppKit publishes every minimized tab, then only the selected
                 // window after restore. Its focused window is checked above.
                 let isFocused = focusedElement.map { $0 == window } == true
-                if cached?.minimized == true && !hidden && !isFocused { continue }
                 do {
+                    // Only restored background tabs disappear from AXWindows.
+                    // A still-minimized omitted handle remains a live window.
+                    if cached?.minimized == true && !hidden && !isFocused,
+                       try value(window, .minimized)?.bool == false { continue }
                     try inspect(window, into: &next, elements: &elements, handles: &handles, parent: cached?.parent)
                 } catch AXReadError.gone { continue }
             }
@@ -391,7 +394,13 @@ private final class AppWindows: @unchecked Sendable {
         let identifier = ax.windowID(window)
         try check(identifier.status)
         let id = identifier.value ?? 0
-        guard id != 0, !result.contains(where: { $0.id == id }) else { return }
+        if id == 0 {
+            // Losing a known handle's CG ID is an incomplete read, not closure.
+            // Keep its complete snapshot and use the bounded read retries.
+            if elementsByID.values.contains(where: { $0 == window }) { throw AXReadError.changed }
+            return
+        }
+        guard !result.contains(where: { $0.id == id }) else { return }
         let minimized = try value(window, .minimized)?.bool ?? false
         let fullscreen = try value(window, .fullscreen)?.bool ?? false
         let subrole = try value(window, .subrole)?.string ?? "AXUnknown"
