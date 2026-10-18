@@ -40,7 +40,7 @@ package enum Assumption: String, CaseIterable, Sendable {
 
     package var statement: String {
         switch self {
-        case .applicationLifecycle: "Application metadata and lifecycle notifications describe launch, termination, activation policy and process liveness."
+        case .applicationLifecycle: "Application metadata describes activation policy and liveness; regular apps notify launch and termination, while prohibited apps may omit either notification."
         case .applicationActivation: "Activation changes the frontmost app without ordering all its windows, and notification delivery may lag."
         case .applicationVisibility: "App hide changes AXHidden and CG visibility, while AXWindows may omit hidden windows."
         case .axApplicationWindows: "AXWindows lists ordinary roots in app order, including minimized windows but excluding attached sheets."

@@ -13,15 +13,24 @@ extension Acceptance.Contracts {
                 return metadata.alive == true && metadata.listed == true && metadata.bundleMatches == true
                     && metadata.regular == !prohibited && metadata.prohibited == prohibited && metadata.terminated == false
             }
-            try requireFinalState("the fixture launch notification with prohibited=\(prohibited)") {
-                try native("lifecycle").lifecycle?.contains { $0.pid == pid && $0.name == "NSWorkspaceDidLaunchApplicationNotification" && $0.mainThread } == true
+            if !prohibited {
+                try requireFinalState("the regular fixture launch notification") {
+                    try native("lifecycle").lifecycle?.contains { $0.pid == pid && $0.name == "NSWorkspaceDidLaunchApplicationNotification" && $0.mainThread } == true
+                }
             }
             try target.command("quit")
             try requireFinalState("native fixture termination") { kill(pid, 0) != 0 }
             target.disconnect()
             harness.otherFixtures.removeAll { $0 === target }
-            try requireFinalState("the fixture termination notification with prohibited=\(prohibited)") {
-                try native("lifecycle").lifecycle?.contains { $0.pid == pid && $0.name == "NSWorkspaceDidTerminateApplicationNotification" && $0.mainThread } == true
+            if !prohibited {
+                try requireFinalState("the regular fixture termination notification") {
+                    try native("lifecycle").lifecycle?.contains { $0.pid == pid && $0.name == "NSWorkspaceDidTerminateApplicationNotification" && $0.mainThread } == true
+                }
+            }
+            let events = try #require(try native("lifecycle").lifecycle).filter { $0.pid == pid }
+            for name in ["NSWorkspaceDidLaunchApplicationNotification", "NSWorkspaceDidTerminateApplicationNotification"] {
+                let matching = events.filter { $0.name == name }
+                try #require(matching.count <= 1 && matching.allSatisfy { $0.mainThread && $0.knownPID == pid })
             }
         }
     }

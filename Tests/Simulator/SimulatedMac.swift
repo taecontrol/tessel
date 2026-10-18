@@ -22,6 +22,9 @@ package enum WindowListReply: Sendable {
     case complete, omitting([UInt32]), zeroIDs([UInt32]), failure(AXStatus), nonArray, includingClosed([UInt32])
 }
 package enum NotificationOrder: Sendable { case focusThenMain, mainThenFocus }
+package enum ProhibitedNotifications: String, CaseIterable, Sendable {
+    case delivered, launchOnly, terminationOnly, omitted
+}
 
 package struct SimulatedApp: Sendable {
     package let pid: Int32
@@ -84,6 +87,7 @@ package final class SimulatedMac: @unchecked Sendable {
     struct AppState {
         let pid: Int32, alias: String, bundleID: String
         var hidden = false, terminated = false, prohibited = false, hung = false
+        var prohibitedNotifications = ProhibitedNotifications.omitted
         var busyUntil = 0
         var omitHiddenWindows = false
         var key: UInt32?, main: UInt32?
@@ -140,16 +144,18 @@ package final class SimulatedMac: @unchecked Sendable {
     }
     @MainActor package func shutdown() { scheduler.shutdown() }
 
-    @MainActor @discardableResult package func launch(windows count: Int = 0, prohibited: Bool = false) -> SimulatedApp {
+    @MainActor @discardableResult package func launch(windows count: Int = 0, prohibited: Bool = false,
+                                                     prohibitedNotifications: ProhibitedNotifications = .omitted) -> SimulatedApp {
         assume(.applicationLifecycle)
         let pid = nextPID; nextPID += 1
         let alias = "app-" + String(UnicodeScalar(65 + Int(pid - 100))!)
         var state = AppState(pid: pid, alias: alias, bundleID: "org.example.\(alias.lowercased())")
         state.prohibited = prohibited
+        state.prohibitedNotifications = prohibitedNotifications
         apps[pid] = state
         action("launch \(alias) pid=\(pid)")
         for _ in 0..<count { _ = open(pid, spec: WindowSpec()) }
-        post(.launched, pid: pid)
+        if !prohibited || [.delivered, .launchOnly].contains(prohibitedNotifications) { post(.launched, pid: pid) }
         return app(pid)
     }
     @MainActor func app(_ pid: Int32) -> SimulatedApp { SimulatedApp(pid: pid, alias: apps[pid]!.alias, mac: self) }
@@ -245,7 +251,9 @@ package final class SimulatedMac: @unchecked Sendable {
         apps[pid]?.terminated = true
         for id in windows.keys.sorted() where windows[id]?.pid == pid { windows[id]?.closed = true }
         if front == pid { front = nil }
-        post(.terminated, pid: pid)
+        if apps[pid]?.prohibited == false || [.delivered, .terminationOnly].contains(apps[pid]!.prohibitedNotifications) {
+            post(.terminated, pid: pid)
+        }
     }
     @MainActor func fullscreen(_ id: UInt32, enabled: Bool) {
         assume(.nativeFullscreen)
