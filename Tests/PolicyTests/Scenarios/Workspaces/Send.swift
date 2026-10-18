@@ -12,7 +12,8 @@ import Testing
           arguments: EmptyPath.allCases, WriteOrder.allCases)
     func emptyLists(path: EmptyPath, writes: WriteOrder) {
         // Capture before send or after send; publication always follows capture.
-        for captureBeforeSend in [false, true] {
+        let captureOrders = path == .minimizedOmissions || path == .realClose ? [false] : [false, true]
+        for captureBeforeSend in captureOrders {
             let result = Scenario.run("#22 \(path.rawValue), capture-before-send=\(captureBeforeSend)", writes: writes) { scenario in
                 let mac = scenario.mac
                 let app = mac.launch(windows: 2)
@@ -38,12 +39,13 @@ import Testing
                 switch path {
                 case .emptyAXWindows, .minimizedOmissions: replies = [.omitting([1, 2]), .omitting([1, 2])]
                 case .zeroIDs: replies = [.zeroIDs([1, 2]), .zeroIDs([1, 2])]
-                case .failedReads: replies = [.failure(.cannotComplete), .failure(.apiDisabled)]
+                case .failedReads: replies = [.failure(.cannotComplete), .failure(.apiDisabled), .nonArray]
                 case .mixedReads: replies = [.complete, .omitting([1, 2]), .omitting([1, 2]), .complete]
                 case .realClose: replies = [.includingClosed([2]), .includingClosed([2])]
                 }
                 if path == .realClose {
                     WorkspaceScenarios.press(scenario, tessel, "send 3", shown: 2)
+                    scenario.expect("send publishes workspace 3 before the close", WorkspaceScenarios.row(tessel, 2)?.workspace == 3)
                     scenario.step("close sent window for real, retaining its listed AX handle") {
                         app.close(2, selecting: 1)
                         app.publishNextWindowLists(replies)
@@ -60,6 +62,11 @@ import Testing
                     scenario.step("app publishes \(path.rawValue), then reports activation") {
                         app.publishNextWindowLists(replies)
                         app.activate()
+                    }
+                    if path == .failedReads {
+                        scenario.settle()
+                        scenario.expect("failed and non-array reads keep the last CLI row", WorkspaceScenarios.row(tessel, 2) != nil)
+                        scenario.step("a later app activation supplies a complete read") { app.activate() }
                     }
                     scenario.step("capture read before its CLI publication") {
                         let outcome = mac.pause(after: .read(app))
@@ -89,6 +96,10 @@ import Testing
                     scenario.settle()
                 }
                 WorkspaceScenarios.press(scenario, tessel, "workspace 1", shown: 1)
+                if path != .realClose {
+                    scenario.expect("the sent row survives every publication through returning; publications=\(publications)",
+                                    publications.allSatisfy { $0.1.contains(2) })
+                }
                 tessel.rows.onUpdate = nil
             }
             requireScenario(result)

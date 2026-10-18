@@ -3,6 +3,7 @@ import CoreGraphics
 import Ports
 
 extension SimulatedApp {
+    @MainActor package var focusedWindow: UInt32? { mac.apps[pid]?.key }
     @MainActor package func activate() { mac.activate(pid) }
     @MainActor package func selectTabInBackground(_ id: UInt32) { mac.selectBackgroundTab(id) }
     @MainActor @discardableResult package func addTab(to id: UInt32, activating: Bool = true) -> UInt32 {
