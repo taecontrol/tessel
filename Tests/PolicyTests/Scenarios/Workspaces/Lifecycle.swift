@@ -4,6 +4,40 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct WorkspaceLifecycle {
+    @Test("#2 E15: closing after focus validation was captured still keeps the workspace", arguments: WriteOrder.allCases)
+    func closeDuringValidation(writes: WriteOrder) {
+        requireScenario(Scenario.run("promotion → validation capture → close → validation delivery", writes: writes) { scenario in
+            let mac = scenario.mac
+            let app = mac.launch(windows: 3)
+            let tessel = scenario.startTessel(.stack)
+            scenario.settle()
+            WorkspaceScenarios.press(scenario, tessel, "send 3", shown: 3)
+            WorkspaceScenarios.press(scenario, tessel, "workspace 1", shown: 2)
+            WorkspaceScenarios.press(scenario, tessel, "focus previous", shown: 1)
+            app.select(3)
+            let captured = mac.pause(after: .read(app))
+            if case .paused = captured {} else { scenario.expect("promotion read captured: \(captured)", false) }
+            let delivered = mac.deliver(app)
+            if case .paused = delivered {} else { scenario.expect("promotion delivered: \(delivered)", false) }
+            scenario.step("let the settling snapshot read the source identity") {
+                let outcome = mac.pause(after: .call("AccessibilityPort.windowID window 1 app-A"))
+                if case .paused = outcome {} else { scenario.expect("settling identity read reached: \(outcome)", false) }
+            }
+            scenario.step("capture the source's confirmation reply before its main hop") {
+                mac.scheduler.resume()
+                let identity = mac.pause(after: .call("AccessibilityPort.windowID window 1 app-A"))
+                if case .paused = identity {} else { scenario.expect("source validation reached: \(identity)", false) }
+                mac.scheduler.resume()
+                let delivery = mac.pause(after: .call("MainLane.async"))
+                if case .paused = delivery {} else { scenario.expect("validation main hop reached: \(delivery)", false) }
+            }
+            scenario.step("source closes after its successful validation read") { app.close(1) }
+            scenario.settle()
+            scenario.expect("a close invalidates the captured validation", tessel.status.active == 1)
+            WorkspaceScenarios.shown(scenario, 2)
+        })
+    }
+
     @Test("#2 E15: close never follows native focus into another workspace; deliberate selection still does",
           arguments: [false, true], WriteOrder.allCases)
     func closeFocus(last: Bool, writes: WriteOrder) {
