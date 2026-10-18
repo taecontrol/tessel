@@ -39,10 +39,13 @@ final class WindowCatalog: NSObject {
         if let existing = apps[pid] { existing.refresh(hidden: app.isHidden); return }
         let generation = UUID()
         let worker = AppWindows(pid: pid, name: app.localizedName ?? "Application", bundleId: app.bundleIdentifier ?? "",
-                                hidden: app.isHidden, generation: generation) { [weak self] rows, focused, frontmost, change in
+                                hidden: app.isHidden, generation: generation) { [weak self] rows, focused, frontmost, change, activation in
             DispatchQueue.main.async {
-                guard let self, self.apps[pid]?.generation == generation else { return }
-                self.workspaces.update(pid: pid, observations: rows, focused: focused, frontmost: frontmost, change: change)
+                guard let self, let worker = self.apps[pid], worker.generation == generation else { return }
+                // An activation can wait behind a newer keyboard selection in
+                // either queue. Its facts remain valid; its old intent does not.
+                let received: CatalogChange = change == .activation && !worker.ownsFocusIntent(activation) ? .snapshot : change
+                self.workspaces.update(pid: pid, observations: rows, focused: focused, frontmost: frontmost, change: received)
             }
         }
         apps[pid] = worker
@@ -71,7 +74,17 @@ final class WindowCatalog: NSObject {
         app.present(id: id, area: area, focus: focus, completion: completion)
     }
 
-    func cancelPresentations() { apps.values.forEach { $0.cancelPresentation() } }
+    func presentRail(pid: pid_t, id: UInt32, frame: CGRect?, position: Bool, resize: Bool, focus: Bool,
+                     completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
+        guard let app = apps[pid] else { completion(nil); return }
+        app.presentRail(id:id,target:frame,position:position,resize:resize,focus:focus,completion:completion)
+    }
+
+    func returnInside(ids: Set<UInt32>, area: CGRect) { apps.values.forEach { $0.returnInside(ids:ids,area:area) } }
+
+    func cancelPresentations(invalidatingFocus: Bool = true) {
+        apps.values.forEach { $0.cancelPresentation(invalidatingFocus: invalidatingFocus) }
+    }
 }
 
 private enum AXReadError: Error { case unresponsive, gone, changed }
@@ -86,7 +99,7 @@ private struct WindowFacts {
     let subrole: String
     let resizable: Bool
     let tabs: Int
-    let frame: CGRect
+    var frame: CGRect
     let parent: UInt32?
     let nativeTabGroups: [AXUIElement]
 
@@ -116,7 +129,7 @@ private final class AppWindows: @unchecked Sendable {
     private let name: String
     private let bundleId: String
     private let queue: DispatchQueue
-    private let publish: @Sendable ([WindowObservation], UInt32?, Bool, CatalogChange) -> Void
+    private let publish: @Sendable ([WindowObservation], UInt32?, Bool, CatalogChange, UUID?) -> Void
     // All mutable state below belongs to queue, including AX handles.
     private let application: AXUIElement
     private var observer: AXObserver?
@@ -140,8 +153,13 @@ private final class AppWindows: @unchecked Sendable {
     private var failedReads = 0
     private var elementsByID: [UInt32: AXUIElement] = [:]
     private var change = CatalogChange.snapshot
+    private var activationToken: UUID?
     private let presentationLock = NSLock()
     private var presentation = UUID()
+    // Geometry can supersede queued writes without superseding a native
+    // selection whose activation facts have not arrived yet.
+    private var focusIntent = UUID()
+    private var railActivationCheck: (token: UUID, work: DispatchWorkItem)?
     private var constrained = Set<UInt32>()
     private struct Validation {
         let area: CGRect
@@ -151,7 +169,7 @@ private final class AppWindows: @unchecked Sendable {
     private var validations: [UInt32: Validation] = [:]
 
     init(pid: pid_t, name: String, bundleId: String, hidden: Bool, generation: UUID,
-         publish: @escaping @Sendable ([WindowObservation], UInt32?, Bool, CatalogChange) -> Void) {
+         publish: @escaping @Sendable ([WindowObservation], UInt32?, Bool, CatalogChange, UUID?) -> Void) {
         self.pid = pid
         self.name = name
         self.bundleId = bundleId
@@ -206,9 +224,15 @@ private final class AppWindows: @unchecked Sendable {
     }
 
     func refresh(hidden: Bool? = nil, settle: Bool = false, change: CatalogChange = .snapshot) {
+        let activation = change == .activation ? presentationLock.withLock { focusIntent } : nil
         queue.async { [self] in
             guard !stopped else { return }
             if let hidden { self.hiddenHint = hidden }
+            if change == .activation {
+                self.activationToken = activation
+                self.railActivationCheck?.work.cancel()
+                self.railActivationCheck = nil
+            }
             if change == .activation || self.change != .activation && change != .snapshot { self.change = change }
             if settle { beginSettling() }
             failedReads = 0
@@ -226,6 +250,8 @@ private final class AppWindows: @unchecked Sendable {
     func stop() {
         queue.async { [self] in
             stopped = true
+            railActivationCheck?.work.cancel()
+            railActivationCheck = nil
             pending?.cancel()
             if let observer {
                 let source = AXObserverGetRunLoopSource(observer)
@@ -438,6 +464,10 @@ private final class AppWindows: @unchecked Sendable {
             _ = axWindowID(window, &focused)
         }
         let frontmost = (try? value(application, kAXFrontmostAttribute) as? Bool) == true
+        if frontmost {
+            railActivationCheck?.work.cancel()
+            railActivationCheck = nil
+        }
         let observations = facts.map { fact in
             var record = fact.record(app: name, bundleId: bundleId, hidden: hidden)
             if record.state == .tiled, constrained.contains(fact.id) {
@@ -446,8 +476,9 @@ private final class AppWindows: @unchecked Sendable {
             }
             return WindowObservation(record: record, frame: fact.frame, parent: fact.parent, replaces: replacements[fact.id])
         }
-        publish(observations, focused == 0 ? nil : focused, frontmost, change)
+        publish(observations, focused == 0 ? nil : focused, frontmost, change, activationToken)
         change = .snapshot
+        activationToken = nil
     }
 
     private func frame(_ window: AXUIElement) throws -> CGRect {
@@ -461,8 +492,15 @@ private final class AppWindows: @unchecked Sendable {
         return CGRect(origin: point, size: size)
     }
 
-    func cancelPresentation() {
-        presentationLock.withLock { presentation = UUID() }
+    func cancelPresentation(invalidatingFocus: Bool = true) {
+        presentationLock.withLock {
+            presentation = UUID()
+            if invalidatingFocus { focusIntent = UUID() }
+        }
+    }
+
+    func ownsFocusIntent(_ token: UUID?) -> Bool {
+        presentationLock.withLock { token == focusIntent }
     }
 
     func present(id: UInt32, area: CGRect?, focus: Bool, completion: @escaping @MainActor @Sendable () -> Void) {
@@ -485,13 +523,106 @@ private final class AppWindows: @unchecked Sendable {
                 guard presentationLock.withLock({ presentation == token }), try canPresent(window, id: id) else { return }
                 if focus {
                     try check(AXUIElementSetAttributeValue(application, kAXFrontmostAttribute as CFString, kCFBooleanTrue))
-                    guard presentationLock.withLock({ presentation == token }) else { return }
+                    guard presentationLock.withLock({ presentation == token }), isNativeFront(window, id: id) else { return }
                     try check(AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue))
-                    guard presentationLock.withLock({ presentation == token }) else { return }
+                    guard presentationLock.withLock({ presentation == token }), isNativeFront(window, id: id) else { return }
                     try check(AXUIElementPerformAction(window, kAXRaiseAction as CFString))
                 }
                 publishSnapshot()
             } catch { /* Keep the last complete classification when the app is busy. */ }
+        }
+    }
+
+    func presentRail(id: UInt32, target: CGRect?, position: Bool, resize: Bool, focus: Bool,
+                     completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
+        let token = presentationLock.withLock { presentation }
+        queue.async { [self] in
+            presentRail(id:id,target:target,position:position,resize:resize,focus:focus,token:token,failures:0,completion:completion)
+        }
+    }
+
+    private func presentRail(id: UInt32, target: CGRect?, position: Bool, resize: Bool, focus: Bool, token: UUID,
+                             failures: Int, completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
+        var accepted: CGRect?, retrying = false
+        defer { if !retrying { let result = accepted; DispatchQueue.main.async { completion(result) } } }
+        guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
+        do {
+            guard try canPresent(window,id:id) else { return }
+            if let target {
+                // Resize before positioning: macOS otherwise widens windows
+                // at the left edge to retain its minimum visible strip.
+                if resize {
+                    // Size changes are constrained by the window's current
+                    // top edge. Stage inside the display at the target top
+                    // before sizing, then place its possibly partial frame.
+                    var safe = CGPoint(x:0,y:target.minY)
+                    try check(AXUIElementSetAttributeValue(window,kAXPositionAttribute as CFString,AXValueCreate(.cgPoint,&safe)!))
+                    var size = target.size
+                    try check(AXUIElementSetAttributeValue(window,kAXSizeAttribute as CFString,AXValueCreate(.cgSize,&size)!))
+                    constrained.remove(id)
+                    validations[id] = nil
+                }
+                guard presentationLock.withLock({ presentation == token }) else { return }
+                if position {
+                    var origin = target.origin
+                    try check(AXUIElementSetAttributeValue(window,kAXPositionAttribute as CFString,AXValueCreate(.cgPoint,&origin)!))
+                }
+                accepted = try frame(window)
+                if let index = facts.firstIndex(where: { $0.id == id }), let accepted { facts[index].frame = accepted }
+            }
+            guard presentationLock.withLock({ presentation == token }), try canPresent(window,id:id) else { return }
+            if focus {
+                try check(AXUIElementSetAttributeValue(application,kAXFrontmostAttribute as CFString,kCFBooleanTrue))
+                guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return }
+                try check(AXUIElementSetAttributeValue(window,kAXMainAttribute as CFString,kCFBooleanTrue))
+                guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return }
+                try check(AXUIElementPerformAction(window,kAXRaiseAction as CFString))
+                // AX accepts an activation request before it necessarily
+                // becomes active. Retry once only while it is unconfirmed.
+                railActivationCheck?.work.cancel()
+                let check = DispatchWorkItem { [weak self] in
+                    guard let self, self.railActivationCheck?.token == token else { return }
+                    self.railActivationCheck = nil
+                    guard !self.stopped, self.presentationLock.withLock({ self.presentation == token }),
+                          (try? self.canPresent(window,id:id)) == true,
+                          (try? self.value(self.application,kAXFrontmostAttribute) as? Bool) != true else { return }
+                    do {
+                        try self.check(AXUIElementSetAttributeValue(self.application,kAXFrontmostAttribute as CFString,kCFBooleanTrue))
+                        guard self.presentationLock.withLock({ self.presentation == token }), self.isNativeFront(window,id:id) else { return }
+                        try self.check(AXUIElementSetAttributeValue(window,kAXMainAttribute as CFString,kCFBooleanTrue))
+                        guard self.presentationLock.withLock({ self.presentation == token }), self.isNativeFront(window,id:id) else { return }
+                        try self.check(AXUIElementPerformAction(window,kAXRaiseAction as CFString))
+                        self.publishSnapshot()
+                    } catch { /* Another app and newer focus intents remain independent. */ }
+                }
+                railActivationCheck = (token,check)
+                queue.asyncAfter(deadline:.now() + .milliseconds(50),execute:check)
+            }
+            publishSnapshot()
+        } catch AXReadError.unresponsive where target != nil && accepted == nil && failures < 4 {
+            // A busy or briefly hung app can time out every write of the
+            // render that moved it, leaving a stale frame over its
+            // neighbors once it answers. Back off like failed reads, while
+            // no newer render supersedes this one; a hung app then costs nothing.
+            retrying = true
+            queue.asyncAfter(deadline:.now() + .milliseconds(50 << (failures+1))) { [weak self] in
+                self?.presentRail(id:id,target:target,position:position,resize:resize,focus:focus,token:token,
+                                  failures:failures+1,completion:completion)
+            }
+        } catch { /* Another app's queue and the CLI remain independent. */ }
+    }
+
+    /// Shutdown is synchronous so a terminating process cannot abandon its
+    /// partial windows. Only caller-owned IDs are eligible; no size is written.
+    func returnInside(ids: Set<UInt32>, area: CGRect) {
+        queue.sync {
+            for id in ids.sorted() {
+                guard let window = elementsByID[id], (try? canPresent(window,id:id)) == true,
+                      let frame = try? frame(window) else { continue }
+                var point = CGPoint(x:max(area.minX,min(frame.minX,area.maxX-frame.width)),
+                                    y:max(area.minY,min(frame.minY,area.maxY-frame.height)))
+                _ = AXUIElementSetAttributeValue(window,kAXPositionAttribute as CFString,AXValueCreate(.cgPoint,&point)!)
+            }
         }
     }
 
@@ -523,9 +654,19 @@ private final class AppWindows: @unchecked Sendable {
         guard !hidden, try value(application, kAXHiddenAttribute) as? Bool != true,
               try value(window, kAXMinimizedAttribute) as? Bool != true,
               try value(window, "AXFullScreen") as? Bool != true else { return false }
-        // Selecting another native tab moves the group's bar to that window.
-        // Raising the former front would select it again over the user's choice.
-        for bar in facts.first(where: { $0.id == id })?.nativeTabGroups ?? [] {
+        return isNativeFront(window, id: id)
+    }
+
+    /// Selecting another native tab moves the group's bar to that window.
+    /// Raising or making the former front main would select it again over the
+    /// user's choice. Focus writes repeat this check: each can take long enough
+    /// on a busy system for the user to select another tab in between.
+    /// Windows without a native tab bar need no AX read.
+    private func isNativeFront(_ window: AXUIElement, id: UInt32) -> Bool {
+        let groups = facts.first(where: { $0.id == id })?.nativeTabGroups ?? []
+        // Its bar can leave the former root before the successor is published.
+        // The retained group still identifies the real selected native window.
+        for bar in groups.isEmpty ? (nativeBars[id] ?? []) : groups {
             AXUIElementSetMessagingTimeout(bar, 0.05)
             if let front = try? value(bar, kAXWindowAttribute), CFGetTypeID(front) == AXUIElementGetTypeID(),
                !CFEqual(front, window) { return false }

@@ -39,7 +39,7 @@ parked in a strip. TileMyMac uses Paneru's engine and exposes numbered rows.
 | Feature | AeroSpace | TrellisWM | TileMyMac / Paneru | Omarchy (Hyprland) | On macOS | tessel |
 |---|---|---|---|---|---|---|
 | Tiling model | Manual i3-style tree | Docking by dragging | Scrolling strip | Dwindle: automatic spiral splits | Accessibility API | #3 |
-| Scrolling columns layout (niri-style) | — | — | Yes, one strip per display | Per workspace | Feasible | #7 |
+| Scrolling columns layout (niri-style) | — | — | Yes, one strip per display | Per workspace | Feasible | Rails experiment (#17) |
 | Floating workspace | — | "Float all" | — | Per workspace | Feasible | Idea |
 | Accordion or tabs | Accordion | Tab groups across apps | Stack windows in a column | Groups with a tab bar | Tab bar needs its own overlay | #5 |
 | Nested groups, step in and out | Nesting by hand | Nested spaces with a camera | Stacked rows (experimental, Paneru) | — | Feasible | #5 |
@@ -68,7 +68,7 @@ parked in a strip. TileMyMac uses Paneru's engine and exposes numbered rows.
 | Modifier plus drag to move or resize | — | Plain dragging | Swipe to slide the strip | Yes | Event tap | No: keyboard only |
 | Binding modes | Yes | — | — | — | Feasible | Idea |
 | CLI, socket, events | Yes | URL commands | — | hyprctl | Feasible | CLI (#1); events: Idea |
-| Layout chosen per workspace | — | — | — | Yes | Feasible | #3, #7 |
+| Layout chosen per workspace | — | — | — | Yes | Feasible | #3, #17 |
 | Center a window | — | — | Yes | — | Feasible | Idea |
 | Copy a rule for the focused window | — | — | Yes (Paneru) | — | Feasible | Idea |
 | Native macOS tabs as one window | — | — | Yes (Paneru) | — | Feasible | #2 |

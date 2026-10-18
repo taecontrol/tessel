@@ -18,7 +18,7 @@ final class DevelopmentCapture: NSObject, NSMenuDelegate {
         guard status.enabled else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) { [weak self, weak button] in
             guard let self, let button, self.generation == token else { return }
-            self.export(button, name: "E37-workspace-\(status.active)")
+            self.export(button, name: status.layout == "rails" ? "E26-workspace-\(status.active)-rail-\(status.rail ?? 0)" : "E37-workspace-\(status.active)")
         }
     }
 

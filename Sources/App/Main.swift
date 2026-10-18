@@ -101,11 +101,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let workspace = workspaces?.status ?? WorkspaceStatus()
         if workspace.enabled {
             statusItem?.button?.title = String(workspace.active)
+            if workspace.layout == "rails" {
+                let count = max(1,workspace.railCount)
+                let glyph = NSImage(size:NSSize(width:18,height:18),flipped:false) { rect in
+                    let step = min(5,18/Double(count)), bar = min(3,step*0.6)
+                    for index in 0..<count {
+                        NSColor.labelColor.withAlphaComponent(index+1 == workspace.rail ? 1 : 0.35).setFill()
+                        NSBezierPath(roundedRect:NSRect(x:0,y:rect.midY+Double(count)*step/2-Double(index+1)*step,
+                                                     width:18,height:bar),xRadius:1,yRadius:1).fill()
+                    }
+                    return true
+                }
+                glyph.isTemplate = false
+                statusItem?.button?.image = glyph
+                statusItem?.button?.imagePosition = .imageRight
+            } else { statusItem?.button?.image = nil }
             menu.addItem(withTitle: "Workspace \(workspace.active)", action: nil, keyEquivalent: "")
         } else {
             // Reuse the number's text renderer. Images and fallback symbol fonts
             // keep extra graphics/font caches resident while workspaces are enabled.
             statusItem?.button?.title = "t"
+            statusItem?.button?.image = nil
             menu.addItem(withTitle: "Workspaces disabled: \(workspace.reason)", action: nil, keyEquivalent: "")
         }
         let permission = trusted ? "Accessibility permission granted" : "Accessibility permission needed"
@@ -125,7 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Quit tessel", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         statusItem?.menu = menu
         let label = config.status.error.map { "Configuration error (line \($0.line))" }
-            ?? (workspace.enabled ? "Workspace \(workspace.active)" : "Workspaces disabled: \(workspace.reason)")
+            ?? (workspace.enabled ? "Workspace \(workspace.active)" + (workspace.layout == "rails" ? ", rail \(workspace.rail ?? 0) of \(workspace.railCount)" : "") : "Workspaces disabled: \(workspace.reason)")
         statusItem?.button?.setAccessibilityLabel("tessel: " + label)
         statusItem?.button?.toolTip = label
         #if TESSEL_DEVELOPMENT

@@ -7,9 +7,14 @@ Apple silicon. It is driven entirely from the keyboard. When a window is moved
 with the mouse, tessel adapts to it, but it offers no mouse or trackpad
 interaction of its own.
 
-Existing window managers are references, not limits. Before adopting how
-another tool solves a problem, list other ways, including ones no tool uses
-yet, test the promising ones on the real system, and choose by evidence.
+Existing window managers are references, not limits, and matching them is
+not a goal. tessel should be the window manager its owner loves to use, so
+question what other tools take for granted, including ideas in this
+repository's roadmap that only repeat them. When a new idea would serve the
+work better than the familiar one, propose it, even if no tool does it yet.
+Before adopting how another tool solves a problem, list other ways, including
+ones no tool uses yet, test the promising ones on the real system, and choose
+by evidence.
 
 The `tessel` CLI is mainly for agents: it lets them observe and test tessel,
 and later operate it on the user's behalf.

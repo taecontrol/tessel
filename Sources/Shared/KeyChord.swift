@@ -1,13 +1,20 @@
 import Foundation
 
 enum WorkspaceCommand: Sendable {
-    case workspace(Int), send(Int), next, previous
+    case workspace(Int), send(Int), next, previous, focus(Direction), move(Direction)
+
+    enum Direction: String, Sendable { case left, right, up, down }
 
     init?(_ text: String) {
         switch text {
         case "focus next": self = .next
         case "focus previous": self = .previous
         default:
+            let words = text.split(separator: " ", omittingEmptySubsequences: false)
+            if words.count == 2, let direction = Direction(rawValue: String(words[1])) {
+                if words[0] == "focus" { self = .focus(direction); return }
+                if words[0] == "move" { self = .move(direction); return }
+            }
             let parts = text.split(separator: " ", omittingEmptySubsequences: false)
             guard parts.count == 2, let number = Int(parts[1]), (1...10).contains(number), String(number) == parts[1] else { return nil }
             switch parts[0] {
@@ -40,6 +47,15 @@ struct KeyChord: Sendable {
         self.code = code
         self.modifiers = modifiers
         name = (Self.modifierOrder.filter { modifiers.contains($0) } + [key]).joined(separator: "-")
+    }
+
+    static var railDefaults: [String:String] {
+        var keys = defaults
+        for (key,direction) in [("h","left"),("j","down"),("k","up"),("l","right")] {
+            keys["alt-"+key] = "focus "+direction
+            keys["alt-shift-"+key] = "move "+direction
+        }
+        return keys
     }
 
     static let defaults: [String: String] = {

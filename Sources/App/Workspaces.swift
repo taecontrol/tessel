@@ -15,6 +15,16 @@ final class Workspaces {
     private var configuration = Configuration()
     private var entries: [UInt32: Entry] = [:]
     private var arrival: [Int: [UInt32]] = [:]
+    private var rails = Rails()
+    private var railSizing = Set<UInt32>()
+    private struct RailPresentation {
+        var workspace: Int
+        var rail: UUID?
+        var frames: [UInt32: CGRect]
+        var pending: Set<UInt32>
+    }
+    private var railPresentation: RailPresentation?
+    private var railEnabled: Bool { configuration.experiments["rails"] == true }
     private var focused: UInt32?
     private var clock: UInt64 = 0
     private var closet: WindowCloset?
@@ -27,6 +37,7 @@ final class Workspaces {
     private var knownApplications = Set<pid_t>()
     private var appFocus: [pid_t: UInt32] = [:]
     private var enablingFront: pid_t?
+    private var initialApplications = Set<pid_t>()
     private var publishedStatus: WorkspaceStatus?
     private(set) var status = WorkspaceStatus()
     weak var catalog: WindowCatalog?
@@ -48,9 +59,29 @@ final class Workspaces {
         configuration = next
         status.gaps = next.gaps
         status.keys = next.keys
-        guard next.experiments["workspaces"] == true else { disable(reason: "experiment off"); return }
+        guard next.experiments["workspaces"] == true || railEnabled else { disable(reason: "experiment off"); return }
         guard trusted else { disable(reason: "Accessibility permission needed"); return }
         guard let closet, unavailable == nil else { disable(reason: unavailable ?? "SkyLight window hiding is unavailable"); return }
+        rails.width = area.width
+        rails.gap = next.gaps.outer
+        status.layout = railEnabled ? "rails" : "stack"
+        let layoutChanged = old.experiments["rails"] != next.experiments["rails"]
+        if status.enabled && layoutChanged {
+            if !railEnabled { catalog?.returnInside(ids: Set(entries.keys.filter { entries[$0]?.workspace != nil && entries[$0]?.observation.record.state != .fullscreen }), area: area) }
+            rails = Rails(width: area.width, gap: next.gaps.outer)
+            railSizing.removeAll()
+            railPresentation = nil
+            if railEnabled {
+                for workspace in arrival.keys.sorted() {
+                    for id in arrival[workspace] ?? [] where railTile(id) { addRailTile(id, initial: true) }
+                }
+                if let focused { rails.select(focused) }
+            }
+            installKeys()
+            // A layout change retains the native selection. Its notification
+            // can still be queued behind an app's current AX read.
+            render(focusing: focused, relayout: true, takeFocus: false)
+        }
         if !status.enabled {
             do { try closet.start() }
             catch let error as WindowCloset.Unavailable { disable(reason: error.reason); return }
@@ -59,15 +90,30 @@ final class Workspaces {
             status.reason = "experiment on"
             status.active = 1
             enablingFront = NSWorkspace.shared.frontmostApplication?.processIdentifier
-            for id in entries.keys.sorted() { assign(id, to: 1) }
+            initialApplications = Set(NSWorkspace.shared.runningApplications.map(\.processIdentifier))
+            for id in entries.keys.sorted() { assign(id, to: 1); if railEnabled && railTile(id) { addRailTile(id, initial: true) } }
+            // The front app already shows its focused window. Its last read
+            // can predate a newer native selection; raising it would take
+            // focus back, so render without a focus request. A fresh report
+            // then selects whichever window really has focus.
+            var nativeFocus: UInt32?
             if let front = enablingFront, let current = appFocus[front], available(current) {
                 rememberInitialFocus(current)
+                nativeFocus = current
             }
             installKeys()
-            if !entries.isEmpty { render(focusing: focused ?? preferred(in: 1), relayout: true) }
+            if !entries.isEmpty { render(focusing: focused ?? preferred(in: 1), relayout: true, takeFocus: nativeFocus == nil) }
         } else {
             if old.keys != next.keys { installKeys() }
-            if old.gaps != next.gaps { render(focusing: focused, relayout: true) }
+            if old.gaps != next.gaps {
+                if railEnabled {
+                    for id in entries.keys where rails.location(id) != nil {
+                        if var size = rails.size(id) { size.width = min(size.width,area.width); size.height = area.height; rails.setSize(id,size) }
+                        railSizing.insert(id)
+                    }
+                }
+                render(focusing: focused, relayout: true, takeFocus: false)
+            }
         }
         publish()
     }
@@ -75,7 +121,11 @@ final class Workspaces {
     private func installKeys() {
         hotkeys?.stop()
         hotkeys = nil
-        do { hotkeys = try Hotkeys(keys: configuration.keys) { [weak self] in self?.perform($0) } }
+        let keys = configuration.keys.filter { binding in
+            guard !railEnabled, let command = WorkspaceCommand(binding.value) else { return true }
+            switch command { case .focus, .move: return false; default: return true }
+        }
+        do { hotkeys = try Hotkeys(keys: keys) { [weak self] in self?.perform($0) } }
         catch { disable(reason: "Could not register workspace hotkeys") }
     }
 
@@ -86,6 +136,12 @@ final class Workspaces {
         hotkeys?.stop()
         hotkeys = nil
         // Return only our managed windows. Fullscreen windows are never touched.
+        if railEnabled || !rails.workspaces.isEmpty { catalog?.returnInside(ids: Set(entries.keys.filter { entries[$0]?.workspace != nil && entries[$0]?.observation.record.state != .fullscreen }), area: area) }
+        rails = Rails()
+        railSizing.removeAll()
+        railPresentation = nil
+        status.rail = nil
+        status.railCount = 0
         closet?.stop(returning: entries.filter { $0.value.workspace != nil && $0.value.observation.record.state != .fullscreen }.map(\.key))
         closeted.removeAll()
         arrival.removeAll()
@@ -123,8 +179,10 @@ final class Workspaces {
         let previousFocus = focused
         let lostCurrent = previousFocus.map { previous[$0] != nil && !incoming.contains($0) } ?? false
         var needsRender = false
+        var closeSelection: UInt32?
         for id in previous.keys where !incoming.contains(id) {
             if previous[id]?.workspace == status.active && !closeted.contains(id) { needsRender = true }
+            if id == previousFocus { closeSelection = rails.remove(id) }
             forget(id)
         }
         if observations.isEmpty { store.update(pid: pid, windows: []) }
@@ -142,6 +200,7 @@ final class Workspaces {
         var changedTiling = false
         var newlyTiled = Set<UInt32>()
         var enteredFullscreen = false
+        var resizedRail = false
         for observation in observations.sorted(by: { $0.record.id < $1.record.id }) {
             let id = observation.record.id
             let old = entries[id]
@@ -161,6 +220,17 @@ final class Workspaces {
                 newWindows.append(id)
                 needsRender = true
             }
+            if railEnabled {
+                if railTile(id) {
+                    if rails.location(id) == nil { addRailTile(id, initial: firstSnapshot && initialApplications.contains(pid) && old == nil, restoring: old != nil); needsRender = true }
+                    else if let old, !railSizing.contains(id), abs(old.observation.frame.width-observation.frame.width) > 1,
+                            var size = rails.size(id), abs(size.width-observation.frame.width) > 1 {
+                        size.width = min(area.width,observation.frame.width)
+                        rails.setSize(id,size)
+                        resizedRail = true
+                    }
+                } else { rails.remove(id, suspending: true) }
+            }
             if let old, [.minimized, .hidden, .fullscreen].contains(old.observation.record.state), available(id) {
                 restored.append(id)
                 needsRender = true
@@ -175,7 +245,11 @@ final class Workspaces {
         if lostCurrent || previousFocus.map({ !available($0) }) == true {
             focusDecision?.cancel()
             expectedFocus = nil
-            focused = preferred(in: status.active)
+            // A coalesced destruction snapshot can also remove the neighbor
+            // captured while the focused window was detached.
+            focused = closeSelection.flatMap { available($0) ? $0 : nil }
+                ?? (lostCurrent && railEnabled ? rails.remembered(status.active) : nil)
+                ?? mostRecent(in: status.active)
             needsRender = true
         }
         // Entering a native fullscreen Space is the user's operation. Keep the
@@ -200,20 +274,25 @@ final class Workspaces {
         } else if let newest = newWindows.last(where: { available($0) && entries[$0]?.observation.parent == nil }) {
             // Initial enumeration preserves the app's actual focused window. Later
             // creations join the end of arrival order and become visible immediately.
-            let selection = firstSnapshot && frontmost ? reportedFocus.flatMap { available($0) ? $0 : nil } ?? newest : newest
-            if firstSnapshot && !frontmost && pid != enablingFront, let current = focused, available(current) {
+            let initialEnumeration = firstSnapshot && (!railEnabled || initialApplications.contains(pid))
+            let selection = initialEnumeration && frontmost ? reportedFocus.flatMap { available($0) ? $0 : nil } ?? newest : newest
+            if initialEnumeration && !frontmost && pid != enablingFront, let current = focused, available(current) {
                 render(focusing: current, relayout: false, layoutWindows: Set(newWindows))
-            } else if firstSnapshot && !frontmost && pid != enablingFront && focused == nil {
+            } else if initialEnumeration && !frontmost && pid != enablingFront && focused == nil {
                 render(focusing: nil, relayout: false, activateDesktop: false, layoutWindows: Set(newWindows))
             } else {
-                if firstSnapshot && frontmost { rememberInitialFocus(selection) }
+                if initialEnumeration && frontmost { rememberInitialFocus(selection) }
                 else { remember(selection) }
                 render(focusing: selection, relayout: false, layoutWindows: Set(newWindows))
             }
-        } else if needsRender {
+        } else if needsRender || resizedRail {
             render(focusing: focused ?? preferred(in: status.active), relayout: false, layoutWindows: hiddenReplacements)
         } else if !replacements.isEmpty {
-            if frontmost, front == pid, let reportedFocus, replacements.contains(reportedFocus), available(reportedFocus) {
+            if let focused, replacements.contains(focused), railPresentation?.pending.contains(focused) == true {
+                // The old native root rejected this current presentation. Its
+                // successor owns the unfinished position and focus intent.
+                render(focusing: focused, relayout: false)
+            } else if frontmost, front == pid, let reportedFocus, replacements.contains(reportedFocus), available(reportedFocus) {
                 followExternalFocus(reportedFocus, layoutWindows: hiddenReplacements)
             } else if !hiddenReplacements.isEmpty {
                 render(focusing: focused, relayout: false, takeFocus: false)
@@ -257,11 +336,17 @@ final class Workspaces {
     func remove(pid: pid_t) {
         let removed = entries.filter { $0.value.pid == pid }
         let affectsVisible = removed.contains { $0.value.workspace == status.active && !closeted.contains($0.key) }
+        let lostRailFocus = railEnabled && focused.map { removed[$0] != nil && rails.location($0) != nil } == true
         for id in removed.keys { forget(id) }
         knownApplications.remove(pid)
         appFocus.removeValue(forKey: pid)
         store.update(pid: pid, windows: nil)
-        if status.enabled && affectsVisible { render(focusing: preferred(in: status.active), relayout: false) }
+        if status.enabled && affectsVisible {
+            // App termination closes its tiles just like a destruction snapshot;
+            // a floating MRU must not override the surviving rail's selection.
+            let selection = lostRailFocus ? rails.remembered(status.active) ?? mostRecent(in: status.active) : preferred(in: status.active)
+            render(focusing: selection, relayout: false)
+        }
         publish()
     }
 
@@ -278,16 +363,42 @@ final class Workspaces {
                   let actual = appFocus[front], let focused, let entry = entries[focused], entry.pid == front,
                   (entries[actual]?.observation.parent ?? actual) == focused, available(focused),
                   let workspace = entry.workspace, workspace != number else { return }
+            rails.remove(focused)
             detach(focused)
             assign(focused, to: number)
             for id in entries.keys where entries[id]?.observation.parent == focused {
                 detach(id)
                 assign(id, to: number)
             }
+            if railEnabled && railTile(focused) { addRailTile(focused) }
             status.active = number
             remember(focused)
             render(focusing: focused, relayout: false, layoutWindows: [focused])
+        case .focus(let direction):
+            guard railEnabled else { return }
+            if entries[focused ?? 0]?.observation.record.state == .floats && rails.location(focused ?? 0) == nil {
+                perform(direction == .left || direction == .up ? .previous : .next); return
+            }
+            let next = direction == .left || direction == .right
+                ? rails.focusX(status.active,direction:direction == .left ? -1 : 1)
+                : rails.focusY(status.active,direction:direction == .up ? -1 : 1)
+            guard let next else { return }
+            remember(next); render(focusing:next,relayout:false)
+        case .move(let direction):
+            guard railEnabled, let focused, rails.location(focused) != nil else { return }
+            let moved = direction == .left || direction == .right
+                ? rails.moveX(focused,direction:direction == .left ? -1 : 1)
+                : rails.moveY(focused,direction:direction == .up ? -1 : 1)
+            guard moved else { return }
+            // A successful reorder is a redraw even if a short ring returns
+            // every tile to the same target frame after anchoring and reveal.
+            railPresentation = nil
+            render(focusing:focused,relayout:false)
         case .next, .previous:
+            if railEnabled, let focused, rails.location(focused) != nil {
+                guard let next = rails.focusX(status.active,direction: { if case .next = command { return 1 }; return -1 }()) else { return }
+                remember(next); render(focusing:next,relayout:false); publish(); return
+            }
             let order = (arrival[status.active] ?? []).filter { available($0) && entries[$0]?.observation.parent == nil }
             guard !order.isEmpty else { return }
             let index = focused.flatMap { order.firstIndex(of: $0) } ?? 0
@@ -304,20 +415,27 @@ final class Workspaces {
         // macOS can re-activate the already selected app when another process
         // exits. Its visible window has not been shown again or switched.
         guard id != focused || workspace != status.active || closeted.contains(id) || !layoutWindows.isEmpty else { return }
+        // macOS promotes another app before delivering process termination.
+        // Preserve the dead rail owner so removal selects its adjacent rail.
+        if railEnabled, let focused, let owner = entries[focused]?.pid,
+           owner != entries[id]?.pid, kill(owner,0) == -1 && errno == ESRCH { return }
         status.active = workspace
         remember(id)
-        render(focusing: id, relayout: false, layoutWindows: layoutWindows)
+        // The native operation already selected this window. A queued raise
+        // can otherwise interrupt a minimize that begins after this snapshot.
+        render(focusing: id, relayout: false, takeFocus: false, layoutWindows: layoutWindows)
         publish()
     }
 
     private func render(focusing selection: UInt32?, relayout: Bool, activateDesktop: Bool = true, takeFocus: Bool = true,
                         layoutWindows: Set<UInt32> = []) {
         guard status.enabled, let closet else { return }
+        if railEnabled { renderRails(focusing: selection, activateDesktop: activateDesktop, takeFocus: takeFocus); return }
         focusDecision?.cancel()
         transition += 1
         let token = transition
         expectedFocus = nil
-        catalog?.cancelPresentations()
+        catalog?.cancelPresentations(invalidatingFocus: takeFocus)
         if let selection, available(selection) { remember(selection) } else { focused = nil }
         let workspace = status.active
         let eligible = entries.keys.filter { entries[$0]?.workspace == workspace && available($0) }
@@ -349,7 +467,7 @@ final class Workspaces {
                     self.publish()
                 }
             }
-        } else if activateDesktop {
+        } else if activateDesktop && takeFocus {
             // A plain activation focuses the desktop; reopening Finder can focus
             // a closeted window. Never use openApplication or activateAllWindows.
             activateFinderDesktop()
@@ -415,6 +533,10 @@ final class Workspaces {
         if let workspace = entry.workspace, let index = arrival[workspace]?.firstIndex(of: previous) {
             arrival[workspace]?[index] = id
         }
+        rails.replace(previous,with:id)
+        if let frame = railPresentation?.frames.removeValue(forKey: previous) { railPresentation?.frames[id] = frame }
+        if railPresentation?.pending.remove(previous) != nil { railPresentation?.pending.insert(id) }
+        if railSizing.remove(previous) != nil { railSizing.insert(id) }
         if focused == previous { focused = id }
         if expectedFocus == previous { expectedFocus = id }
         // Hide intent follows membership and focus history. A new CG window
@@ -429,11 +551,14 @@ final class Workspaces {
     }
 
     private func detach(_ id: UInt32) {
+        rails.remove(id)
+        railSizing.remove(id)
         if let workspace = entries[id]?.workspace { arrival[workspace]?.removeAll { $0 == id } }
         entries[id]?.workspace = nil
     }
 
     private func forget(_ id: UInt32) {
+        rails.forget(id)
         detach(id)
         entries.removeValue(forKey: id)
         closeted.remove(id)
@@ -456,9 +581,21 @@ final class Workspaces {
         clock += 1
         entries[id]?.recent = clock
         focused = id
+        if railEnabled { rails.select(id) }
     }
 
     private func preferred(in workspace: Int) -> UInt32? {
+        let recent = mostRecent(in: workspace)
+        if railEnabled {
+            // Floating dialogs retain the workspace's focus history; tiles
+            // return to the current rail's remembered selection.
+            if let recent, rails.location(recent) == nil { return recent }
+            if let id = rails.remembered(workspace), available(id) { return id }
+        }
+        return recent
+    }
+
+    private func mostRecent(in workspace: Int) -> UInt32? {
         entries.keys.filter { entries[$0]?.workspace == workspace && entries[$0]?.observation.parent == nil && available($0) }
             .max { ((entries[$0]?.recent ?? 0), $0) < ((entries[$1]?.recent ?? 0), $1) }
     }
@@ -467,6 +604,7 @@ final class Workspaces {
     private func available(_ id: UInt32) -> Bool { entries[id].map { availableState($0.observation.record.state) } ?? false }
 
     private func primary(_ observation: WindowObservation) -> Bool {
+        if railEnabled && (rails.location(observation.record.id) != nil || entries[observation.record.id]?.workspace != nil) { return true }
         guard let screen = NSScreen.screens.first else { return false }
         return CGRect(x: screen.frame.minX, y: 0, width: screen.frame.width, height: screen.frame.height)
             .contains(CGPoint(x: observation.frame.midX, y: observation.frame.midY))
@@ -493,18 +631,114 @@ final class Workspaces {
     }
 
     private func publish() {
+        if railEnabled && status.enabled {
+            let ws = rails.workspaces[status.active]
+            status.railCount = ws?.rails.count ?? 0
+            status.rail = status.railCount > 0 ? (ws?.current ?? 0)+1 : nil
+        }
         let visible = Self.onScreen()
         var rows: [pid_t: [WindowRecord]] = [:]
         for (id, entry) in entries {
             var row = entry.observation.record
             row.workspace = status.enabled ? entry.workspace : nil
             row.visible = visible.contains(id)
+            if railEnabled && status.enabled, let p = rails.location(id) {
+                row.rail = p.rail+1; row.slot = p.slot+1
+                row.state = .tiled
+                if let size = rails.size(id), size.height < area.height-2 { row.reason = "maximum height; aligned to top" }
+                else if row.reason == "cannot fill the screen" { row.reason = "standard window" }
+            }
             rows[entry.pid, default: []].append(row)
         }
         for (pid, windows) in rows { store.update(pid: pid, windows: windows) }
         if status != publishedStatus {
             publishedStatus = status
             onChange?()
+        }
+    }
+
+    private func railTile(_ id: UInt32) -> Bool {
+        guard let e = entries[id], e.workspace != nil, e.observation.parent == nil, available(id) else { return false }
+        return e.observation.record.state == .tiled || e.observation.record.reason == "cannot fill the screen"
+    }
+
+    private func addRailTile(_ id: UInt32, initial: Bool = false, restoring: Bool = false) {
+        guard let entry = entries[id], let workspace = entry.workspace else { return }
+        let tile = Rails.Tile(id:id,size:CGSize(width:min(area.width,entry.observation.frame.width),height:area.height))
+        if initial { rails.appendInitial(tile,workspace:workspace) }
+        else { rails.insert(tile,workspace:workspace,restoring:restoring) }
+        railSizing.insert(id)
+    }
+
+    private func renderRails(focusing selection: UInt32?, activateDesktop: Bool, takeFocus: Bool) {
+        guard status.enabled, let closet else { return }
+        focusDecision?.cancel()
+        transition += 1
+        let token = transition
+        expectedFocus = nil
+        catalog?.cancelPresentations(invalidatingFocus: takeFocus)
+        if let selection, available(selection) { remember(selection) } else { focused = nil }
+        let frames = rails.frames(status.active,area:area)
+        let screen = NSScreen.screens.first!
+        let bounds = CGRect(x:screen.frame.minX,y:0,width:screen.frame.width,height:screen.frame.height)
+        var show = Set(frames.filter { $0.value.intersects(bounds) }.keys)
+        show.formUnion(entries.keys.filter {
+            entries[$0]?.workspace == status.active && available($0) && entries[$0]?.observation.parent == nil && rails.location($0) == nil
+        })
+        for id in entries.keys {
+            if let parent = entries[id]?.observation.parent, show.contains(parent), available(id) { show.insert(id) }
+        }
+        let managed = Set(entries.keys.filter { entries[$0]?.workspace != nil && available($0) })
+        let hide = managed.subtracting(show)
+        let newlyShown = show.intersection(closeted).union(show.subtracting(Self.onScreen()))
+        closet.hide(hide.subtracting(closeted).filter { entries[$0]?.observation.parent == nil })
+        closet.show(newlyShown.filter { entries[$0]?.observation.parent == nil })
+        closeted.formUnion(hide); closeted.subtract(show)
+        let rail = rails.current(status.active)?.identity
+        let redraw = railPresentation?.workspace != status.active || railPresentation?.rail != rail || railPresentation?.frames != frames
+        var positions = redraw ? Set(frames.keys).intersection(show) : (railPresentation?.pending.intersection(show) ?? [])
+        positions.formUnion(newlyShown.intersection(frames.keys))
+        railPresentation = RailPresentation(workspace: status.active, rail: rail, frames: frames, pending: positions)
+        if let focused, takeFocus { expectedFocus = focused }
+        // Focus first, then neighbors in spatial order; each app keeps its own
+        // queue and timeout. Scrolls write only positions, never AXSize.
+        let ordered = show.union(railSizing).sorted {
+            if $0 == focused { return true }; if $1 == focused { return false }
+            return (frames[$0]?.minX ?? 0,$0) < (frames[$1]?.minX ?? 0,$1)
+        }
+        for id in ordered where entries[id]?.observation.parent == nil {
+            guard let candidate = entries[id] else { continue }
+            let visible = show.contains(id)
+            let resize = railSizing.contains(id)
+            let position = positions.contains(id) || visible && resize
+            let target = position || resize ? (visible ? frames[id] : rails.size(id).map { CGRect(origin:area.origin,size:$0) }) : nil
+            guard target != nil || takeFocus && id == focused else { continue }
+            catalog?.presentRail(pid:candidate.pid,id:id,frame:target,position:position,resize:resize,focus:takeFocus && id == focused) { [weak self] accepted in
+                guard let self, self.status.enabled, self.railEnabled, self.transition == token else { return }
+                if accepted != nil { self.railPresentation?.pending.remove(id) }
+                if resize, let accepted {
+                    self.railSizing.remove(id)
+                    let previous = self.rails.size(id)
+                    self.rails.setSize(id,accepted.size)
+                    // The accepted size completes this same layout. Retain its
+                    // logical origin so a later focus-only render sees no move.
+                    if var frame = self.railPresentation?.frames[id] {
+                        frame.size = accepted.size
+                        self.railPresentation?.frames[id] = frame
+                    }
+                    if let previous, abs(previous.width-accepted.width)>1 {
+                        self.render(focusing:self.focused,relayout:false,takeFocus:false)
+                    }
+                }
+                if self.transition == token && id == focused { self.expectedFocus = nil }
+                self.publish()
+            }
+        }
+        if focused == nil && activateDesktop && takeFocus { activateFinderDesktop() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) { [weak self] in
+            guard let self, self.transition == token, self.status.enabled else { return }
+            if !hide.intersection(Self.onScreen()).isEmpty { self.disable(reason:"SkyLight could not hide a window") }
+            else { self.publish() }
         }
     }
 

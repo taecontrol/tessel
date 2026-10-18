@@ -34,9 +34,11 @@ extension Acceptance {
                          "the accepted workspaces configuration must enable the experiment")
         }
 
-        func observe(_ sessions: [FixtureSession]? = nil, finder: Bool = false, focusedOnly: Bool = false) throws -> Observation {
-            try #require(try harness.observer.command("observe", ["pids": (sessions ?? [fixture] + harness.otherFixtures).map(\.pid),
-                "finder": finder, "focusedOnly": focusedOnly]).observation)
+        func observe(_ sessions: [FixtureSession]? = nil, finder: Bool = false, focusedOnly: Bool = false, expectedPID: pid_t? = nil) throws -> Observation {
+            var arguments: [String:Any] = ["pids": (sessions ?? [fixture] + harness.otherFixtures).map(\.pid),
+                "finder": finder, "focusedOnly": focusedOnly]
+            if let expectedPID { arguments["expectedPID"] = expectedPID }
+            return try #require(try harness.observer.command("observe", arguments).observation)
         }
 
         func window(_ id: UInt32) throws -> Observation.Window? { try observe().windows.first { $0.id == id } }
@@ -107,7 +109,7 @@ extension Acceptance {
             let observation = try observe()
             let front = observation.activeFixturePID != 0 ? observation.activeFixturePID : observation.frontmostFixturePID
             if front != session.pid, let source = ([fixture] + harness.otherFixtures).first(where: { $0.pid == front }) {
-                try source.command("yieldActivation")
+                try source.command("yieldActivation",["pid":session.pid])
             }
         }
 
@@ -740,6 +742,7 @@ extension Acceptance {
             let d = try fixture.open(kind: "dialog", key: "dialog")
             try expectShown(d, floating: true)
             let frame = try #require(try window(d)).frame
+            try #require(try eventually { try harness.row(d) != nil }, "native dialog focus can precede its catalog arrival")
             #expect(try harness.row(d)?.workspace == 2)
             try key(1)
             try #require(try eventually(within: budget) { try !visible(d) })
@@ -1153,7 +1156,7 @@ extension Acceptance {
             for index in 0..<20 {
                 let start = try key(index.isMultiple(of: 2) ? 2 : 1)
                 try expectShown(index.isMultiple(of: 2) ? b : a, since: start)
-                nanoseconds.append(UInt64((monotonicSeconds() - start) * 1e9))
+                nanoseconds.append(UInt64((SampleClock.lastJudged - start) * 1e9))
             }
             let maximum = nanoseconds.max()!
             #expect(maximum <= 200_000_000)

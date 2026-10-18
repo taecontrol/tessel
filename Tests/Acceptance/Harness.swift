@@ -12,6 +12,8 @@ struct Row: Decodable, Equatable, Hashable {
     let tabs: Int
     let workspace: Int?
     let visible: Bool?
+    let rail: Int?
+    let slot: Int?
 }
 
 struct Status: Decodable {
@@ -27,6 +29,7 @@ struct Status: Decodable {
     }
     struct ConfigError: Decodable {
         let line: Int
+        let message: String
     }
     let permission: String
     let config: Config
@@ -37,6 +40,8 @@ struct Status: Decodable {
         let enabled: Bool
         let reason: String
         let active: Int
+        let layout: String?
+        let rail: Int?
         let gaps: Gaps
         let keys: [String: String]
         struct Gaps: Decodable { let outer: Double }
@@ -75,6 +80,8 @@ struct Observation: Decodable {
     let frontmostFixturePID: Int32
     let activeFixturePID: Int32
     let finderDesktop: Bool
+    /// The observer's monotonic time when it finished taking this observation.
+    let sampledAt: Double?
     let finderHasNoOrdinaryWindows: Bool?
     let area: [Double]
 }
@@ -166,6 +173,7 @@ final class FixtureSession {
             throw HarnessError(error)
         }
         let decoded = try JSONDecoder().decode(FixtureReply.self, from: reply)
+        SampleClock.record(decoded.observation?.sampledAt ?? monotonicSeconds())
         windowIDs = Set(decoded.windows.values)
         return decoded
     }
@@ -289,7 +297,12 @@ final class Harness {
     }
 
     func invoke(_ arguments: [String]) throws -> ProcessResult {
-        try run([cli.path] + arguments, environment: environment, timeout: 1.2)
+        let result = try run([cli.path] + arguments, environment: environment, timeout: 1.2, recordsReceipt: false)
+        // Judge a JSON answer by when tessel produced it; anything else by receipt.
+        let json = try? JSONSerialization.jsonObject(with: result.outputData)
+        let answer = (json as? [String: Any]) ?? (json as? [[String: Any]])?.first
+        SampleClock.record((answer?["answeredAt"] as? NSNumber)?.doubleValue ?? monotonicSeconds())
+        return result
     }
 
     /// The app's only Unix socket: the CLI endpoint.

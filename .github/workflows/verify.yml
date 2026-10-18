@@ -11,7 +11,7 @@ jobs:
   acceptance:
     name: Acceptance
     runs-on: xcode-27
-    timeout-minutes: 8
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Configure ephemeral certificate signing
@@ -20,6 +20,14 @@ jobs:
       - name: Build signed bundles
         id: build
         run: scripts/build
+      # The visible frame's bottom edge, where the Dock sits, moved by up to
+      # two points mid-test on the 1024-point display; each fixture process
+      # adds a Dock icon. Tests compare window frames with that edge.
+      - name: Hide the Dock so fixture apps cannot move the visible frame
+        run: |
+          defaults write com.apple.dock autohide -bool true
+          killall Dock
+          sleep 3
       - name: Verify permission denial and automatic restart
         run: scripts/verify --permission
       - name: Functional acceptance suite
@@ -36,11 +44,16 @@ jobs:
             echo "Resources suite exceeded the 90 second limit" >&2
             exit 1
           fi
+      - name: Capture rails status item for review
+        run: TESSEL_CAPTURE_WORKSPACES=1 scripts/verify captureRailsStatusItem
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: switch-calibration
-          path: .work/switch-calibration.json
+          path: |
+            .work/switch-calibration.json
+            .work/rails-calibration.json
+            .work/captures/E26-*.png
           if-no-files-found: ignore
       - name: Remove ephemeral keychain
         if: always()

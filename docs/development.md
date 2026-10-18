@@ -29,6 +29,10 @@ The read-only CLI accepts `windows [--json]` and `status [--json]`.
 You can symlink this bundled CLI into a directory on your `PATH`.
 With a custom `XDG_CONFIG_HOME`, pass the same value to `open --env` and the CLI.
 The bundle ID and config path select the instance the CLI observes.
+Every JSON answer carries `answeredAt`: raw monotonic seconds
+(`CLOCK_MONOTONIC_RAW`, the clock `clock_gettime_nsec_np` reads) when tessel
+read the state it reports. `status --json` has it at the top level, and each
+`windows --json` record repeats it. Text output is unchanged.
 
 Development uses `com.taecontrol.tessel.dev`; `scripts/build --variant daily`
 uses `com.taecontrol.tessel`. Keep the signing identity stable across rebuilds.
@@ -109,8 +113,30 @@ window: it suspends the process and changes its counters.
 
 CI runs permission, functional, and resource verification sequentially in one
 acceptance job. The resource command has a 90-second budget, and the whole job
-has an eight-minute (480-second) timeout. The workspace switch timing artifact
-is still uploaded.
+has a fifteen-minute (900-second) timeout. With the rails suite, the functional
+command takes about 245 seconds locally; `xcode-27` runners have taken 1.2 to
+1.8 times as long, so the whole job needs about 500 to 710 seconds. The
+workspace switch timing artifact is still uploaded.
+
+A full observation, used by setup and one-shot reads, gives each AX read
+100 ms. A timed-out read means the app did not answer, so it must not count as
+an absent or unfocused window. The system-wide focused-application read is
+answered by the frontmost app, and a 20 ms limit missed busy fixtures even on
+an idle Mac. Focused-only observations, which timed checks poll, keep 20 ms so
+a busy app is asked again rather than consuming the deadline.
+
+Timed checks are judged by when their inputs were produced, not by when this
+test process received them (issue #21). Each observation carries the raw
+monotonic time at which the observer finished it, and a JSON CLI answer counts
+at its `answeredAt`. A fixture reply, an answer without that field, an empty
+window list, or another subprocess counts at its receipt. An evaluation counts at its latest
+input, and one without recorded inputs counts when it returns. On xcode-27 the
+test process alone was descheduled for up to 709 ms. In run 39090280471, a
+switch the observer saw complete in about 14 ms was received 242 ms late.
+Deadlines and budgets are unchanged: an observation taken after its deadline
+still fails, and a stall that prevents any sample before the deadline still
+fails. Switch and rail calibrations measure from the key post to the sample
+time that met the check.
 
 For minimize and restore, the 500 ms observation deadline begins at AppKit's
 completion notification, after the Dock animation. macOS sends the AX event
@@ -143,9 +169,9 @@ root afterwards. An unfocused root without a bar keeps the bar identity it last
 showed, so the successor retires it and it stays retired while another listed
 window holds that bar. A focused window without a bar, such as a tab dragged
 out of its group, is an ordinary window. A queued presentation never writes to
-a tab that is no longer its group's front, and a classification change
-reasserts focus only when the app reports another window, so a raise cannot
-select the former tab again over the user's choice.
+a tab that is no longer its group's front, rechecked before each focus write,
+and a classification change reasserts focus only when the app reports another
+window, so a raise cannot select the former tab again over the user's choice.
 Minimized tab entries continue to follow AppKit's published list.
 The catalog carries a native front's replacement relationship into Workspaces,
 which preserves membership, arrival position, and focus history. Its next render
@@ -155,7 +181,12 @@ that result without resizing the group merely because another tab was selected.
 The close fixture can retain a closed NSWindow object to verify that revalidation
 still retires its AX window.
 
-CI runs the same commands on `xcode-27` (macOS 27). Its short-lived certificate
+CI runs the same commands on `xcode-27` (macOS 27). It first hides the
+runner's Dock. On the runner's 1024×768 display the visible frame's bottom
+edge, where the Dock sits, moved by up to two points during a test, so a window
+tessel had just filled no longer matched the frame the observer read. Each
+fixture process adds a Dock icon; a local desktop with a hidden Dock kept the
+same visible frame while 28 fixture apps launched and quit. Its short-lived certificate
 is created in a temporary keychain; no signing material is stored in GitHub.
 Only the disposable runner provisions its Accessibility database, for the
 denial and restart checks in `scripts/verify --permission`; elsewhere that
@@ -209,7 +240,8 @@ workspace membership is persisted. See [ADR 0002](adr/0002-hide-inactive-windows
 for the private system dependency and its tradeoffs.
 
 Window records contain an ID, app name, bundle ID, state, reason, native tab
-count, `workspace` (1…10 or null), and `visible` (CG on-screen membership).
+count, `workspace` (1…10 or null), `visible` (CG on-screen membership), and
+`answeredAt`.
 `state` includes `fullscreen`. Titles are never queried. `status --json` adds
 `workspaces.enabled`, `reason`, `active`, `gaps`, and the effective `keys`.
 With the experiment disabled, tessel observes without managing ordinary windows.
@@ -229,6 +261,9 @@ supplies fixture visibility independently, including the empty-workspace check.
 The focused window's frame and main state are read together in one AX request;
 ordinary focused-only observations omit unrelated child controls. Sheet and full
 observations retain their parent and child relationships.
+When the destination app is known, `expectedPID` restricts focused-only AX reads
+to that app while retaining CG visibility for every fixture. An early foreground
+sample can otherwise send a timed check into a source app that has since been hidden.
 Cached LaunchServices activation metadata is read only by setup observations;
 timed checks retain the live system-wide AX focus check.
 The active number is observed through the signed app's status-item AX label
@@ -256,7 +291,7 @@ Run this capture only when owner review requires new evidence; it is separate
 from the automated gates. The issue #2 delivery's E37 capture is already accepted.
 
 Switch completion means visible, filled, and focused, measured from posting the
-event. The functional suite records 20 switches in `.work/switch-calibration.json`.
+event to the observer sample that showed it. The functional suite records 20 switches in `.work/switch-calibration.json`.
 `Tests/Acceptance/switch-budget.json` enforces three times the maximum of the
 delivery's 20 CI measurements, capped at 200 ms. Recalibrate on `xcode-27`, retain
 its run ID and measurements in that file, and rerun against the resulting budget.
@@ -267,3 +302,93 @@ Workspace E36 enforces the same idle wakeup, CPU, and footprint limits as E22.
 Before the first public release (#6), revisit the bundle IDs, config schema,
 and read-only CLI contract. A command that changes state or exposes titles needs
 an architecture decision before implementation.
+
+## Rails experiment (#17)
+
+`[experiments] rails = true` enables workspaces in rail layout, independently
+of the `workspaces` flag. Without it, the workspace experiment keeps its
+one-window layout and shortcuts. With both flags absent, tessel only observes.
+Reloading into rails forms one row per existing workspace in arrival order.
+The active workspace and focused window remain selected. Enabling either
+layout never raises the front app's last-read focus: that read can predate a
+newer native selection, so the first render only lays windows out and the
+next focus report selects the window that really has focus. Membership and rail
+positions are session state, with no persistence across restarts.
+
+A rail is a horizontal row of windows with individual widths, separated by the
+outer gap. Windows keep their current width, capped at the rail area's width,
+and take the area's height. Height-constrained windows remain tiled, aligned
+to the top; their CLI reason explains the constraint. A row that fits starts
+at the area's left edge. A longer row forms a ring: the last window's next
+neighbor is the first. Focus moves without scrolling when the destination is
+fully visible. Otherwise the row scrolls to reveal it with a 56-point peek;
+wide windows are centered. The 56-point peek is the scroll target. Each window
+then uses the single ring placement exposing the most of it. In a short ring,
+that can put the next neighbor on the opposite edge, for any window count.
+Completely off-screen windows go into the closet.
+Focus, scrolling and elevator travel never resize windows.
+A rail write that times out against a busy or briefly hung app is retried
+after 100, 200, 400 and 800 ms, like a failed read, unless a newer render
+replaces it. An app that stays hung longer keeps its stale frame until the next
+render.
+
+Option+H/L (`focus left|right`) wraps within the current rail. Option+K/J
+(`focus up|down`) visits adjacent rails, stopping at either end. Each rail
+remembers its focused window and scroll position. Option+Shift+H/L
+(`move left|right`) swaps neighbors, including across the ring's end.
+Option+Shift+K/J (`move up|down`) inserts the window after the destination
+rail's remembered window and follows it. Moving beyond an end creates a rail,
+except when already alone at that end. Empty rails disappear.
+
+New windows enter to the right of the current window. Closing selects the
+left neighbor and closes the gap. Sending still follows the window to the
+selected workspace, inserting after its current rail's remembered window.
+When a rail empties on close, move or send, its current position selects the
+rail below, or the one above if it was last. Minimize/hide instead selects the
+most recently focused available window anywhere in the workspace, even when
+that empties a rail. This preserves the workspace experiment's focus policy.
+Minimized or hidden windows leave their rail temporarily; restoring inserts
+after their former left neighbor when that rail survives, or after the current
+window otherwise. External activation selects the window's workspace and rail
+and reveals it. Dialogs float as before, sheets follow their parents, and
+native fullscreen windows have no rail or workspace.
+
+A manually moved window stays where released until the next rail render.
+Successful window moves redraw the rail even when a ring's final target frames
+coincide. A manual resize updates that window's width and repositions its right
+neighbors.
+Disabling rails or quitting returns all managed windows fully inside the
+visible desktop. After a crash, closet recovery still works with the flag off,
+but a partially visible window stays where it was: no persisted membership
+identifies it as a former rail window.
+
+Numeric workspace/send shortcuts keep their meanings. `focus next|previous`
+remain bindable aliases for rail traversal, with no default binding in rails.
+`[keys]` overrides merge with the layout's defaults. Directional rail commands
+are validated with the flag off, but their shortcuts are registered only while
+rails is enabled. `windows --json` adds
+nullable one-based `rail` and `slot` fields, and `status --json` reports
+`workspaces.layout`, the nullable current `rail`, and `railCount`. The status
+item shows the workspace number and one bar per rail, highlighting the current
+one; its AX label includes the current rail and total. The map overlay belongs
+to #18, and the floating layer to #19.
+
+`Tests/Acceptance/Rails.swift` and `RailsReload.swift` exercise #17 at the same
+signed CLI and independent AX/CG boundary as #2. The fixture accepts width fractions of the
+usable area, keeping fitting and overflowing scenarios independent of screen
+size. Rail setups allow 2 s for every opened fixture window to be listed. This is a
+setup precondition, not an example deadline: six- and twenty-window setups
+missed 0.5 s on xcode-27 (issues #21, #22). Run `scripts/verify FunctionalRails`; resource E29 is included in
+`scripts/verify --resources` with the unchanged ADR 0003 limits. Rails E28
+records 20 completed scrolls and elevator trips in `.work/rails-calibration.json`;
+`Tests/Acceptance/rails-budget.json` retains the authorized xcode-27 run and
+uses three times its maximum, capped at 200 ms. The delivery calibration
+recorded a 99.779542 ms maximum in run 39084887323, giving the 200 ms cap. Timing starts at the real key
+post and ends at the observer sample whose AX position, size, focus and CG
+visibility met every check. Capture the app's own status button, without desktop content, with:
+
+```sh
+TESSEL_CAPTURE_WORKSPACES=1 scripts/verify captureRailsStatusItem
+```
+
+The PNGs are written to `.work/captures/E26-workspace-1-rail-{1,2}.png`.
