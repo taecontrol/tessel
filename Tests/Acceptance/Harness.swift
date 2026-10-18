@@ -129,6 +129,11 @@ final class FixtureSession {
     private let clientPath: String
     private let socket: Int32
 
+    private struct Unreachable: Error, CustomStringConvertible {
+        let code: Int32
+        var description: String { "cannot reach the fixture: errno \(code)" }
+    }
+
     init(directory: URL, number: Int, swiftUI: Bool = false, prohibited: Bool = false) throws {
         path = directory.appending(path: "f\(number).sock").path
         clientPath = directory.appending(path: "c\(number).sock").path
@@ -148,11 +153,18 @@ final class FixtureSession {
         setTimeout(socket, seconds: margin)
         try run(["open", "-n"] + (swiftUI ? [] : ["-g"]) + ["--stdout", "/dev/null", "--stderr", "/dev/null", fixtureBundle.path, "--args", "--socket", path]
                 + (swiftUI ? ["--swiftui"] : []) + (prohibited ? ["--prohibited"] : []), timeout: margin, check: true)
-        let path = path
-        guard finalState({ FileManager.default.fileExists(atPath: path) }) else {
-            throw HarnessError("fixture did not launch")
-        }
-        pid = try command("ping").pid
+        // The path can appear before bind attaches its socket. Keep one ping
+        // in flight so a late startup reply cannot answer a later command.
+        var sent = false
+        guard let reply = try finalValue({ () throws -> FixtureReply? in
+            if !sent {
+                do { try send("ping", [:], flags: MSG_DONTWAIT) }
+                catch let error as Unreachable where error.code == ENOENT || error.code == ECONNREFUSED { return nil }
+                sent = true
+            }
+            return try receive("ping", flags: MSG_DONTWAIT)
+        }) else { throw HarnessError("fixture did not launch and answer ping within the final-state margin") }
+        pid = reply.pid
     }
 
     @discardableResult
@@ -171,6 +183,12 @@ final class FixtureSession {
     }
 
     private func request(_ action: String, _ arguments: [String: Any]) throws -> FixtureReply {
+        try send(action, arguments)
+        guard let reply = try receive(action) else { throw HarnessError("fixture did not answer \(action)") }
+        return reply
+    }
+
+    private func send(_ action: String, _ arguments: [String: Any], flags: Int32 = 0) throws {
         var request = arguments
         request["action"] = action
         request["transitionMargin"] = margin
@@ -179,13 +197,17 @@ final class FixtureSession {
         let sent = data.withUnsafeBytes { bytes in
             withUnsafePointer(to: &address) {
                 $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    sendto(socket, bytes.baseAddress, data.count, 0, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+                    sendto(socket, bytes.baseAddress, data.count, flags, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
                 }
             }
         }
-        guard sent == data.count else { throw HarnessError("cannot reach the fixture: errno \(errno)") }
+        guard sent == data.count else { throw Unreachable(code: errno) }
+    }
+
+    private func receive(_ action: String, flags: Int32 = 0) throws -> FixtureReply? {
         var buffer = [UInt8](repeating: 0, count: 65_536)
-        let received = recv(socket, &buffer, buffer.count, 0)
+        let received = recv(socket, &buffer, buffer.count, flags)
+        if received < 0, flags & MSG_DONTWAIT != 0, errno == EWOULDBLOCK { return nil }
         guard received > 0 else {
             throw HarnessError("fixture did not answer \(action)")
         }
