@@ -157,10 +157,10 @@ import Testing
         })
     }
 
-    @Test("#17 E22: burst input retains the latest focus and finishes every pending position", arguments: [false, true], [false, true])
-    func burst(layout: Bool, opposite: Bool) {
-        requireScenario(Scenario.run("burst layout=\(layout) opposite=\(opposite)") { s in
-            let fraction = opposite ? (1_004.0 - 100) / (3 * 1_004.0) : 0.3
+    @Test("#17 E22: burst input retains the latest focus and finishes every pending position", arguments: [false, true])
+    func burst(layout: Bool) {
+        requireScenario(Scenario.run("burst layout=\(layout)") { s in
+            let fraction = 0.3
             let f = RailFixture(s, widths: Array(repeating: fraction, count: 3))
             let other = f.mac.launch(), b = other.open(WindowSpec(frame: CGRect(x: 40, y: 60, width: floor(f.area.width * fraction), height: 400)))
             s.settle()

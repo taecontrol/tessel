@@ -168,7 +168,9 @@ struct ScenarioResult {
         let scenario = Scenario(name, writes: writes)
         defer { scenario.mac.shutdown() }
         body(scenario)
-        return scenario.result()
+        let result = scenario.result()
+        ScenarioDigests.shared.record(result)
+        return result
     }
 }
 

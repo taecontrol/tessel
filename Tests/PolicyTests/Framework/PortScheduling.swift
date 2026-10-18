@@ -25,6 +25,76 @@ private final class BatonValues: @unchecked Sendable {
         #expect(values.events == ["worker", "main continued"])
     }
 
+    @Test("a main port call returns after one worker yield even when that worker stays ready")
+    func singleMainStep() {
+        let scheduler = BatonScheduler()
+        defer { scheduler.shutdown() }
+        let values = BatonValues()
+        scheduler.writeOrder = .readsFirst
+        scheduler.serialLane(label: "test.single-step").async {
+            values.events.append("worker began")
+            scheduler.call("first worker port")
+            values.events.append("first port returned")
+            scheduler.call("second worker port")
+            values.events.append("second port returned")
+        }
+        scheduler.writeOrder = .writesFirst
+        scheduler.call("main port")
+        values.events.append("main continued")
+        #expect(scheduler.run() == .settled)
+        #expect(values.events == ["worker began", "main continued", "first port returned", "second port returned"])
+    }
+
+    @Test("a main AX wait resumes at its own virtual deadline before the worker's reply")
+    func mainReplyDeadline() {
+        let scheduler = BatonScheduler()
+        defer { scheduler.shutdown() }
+        let values = BatonValues()
+        scheduler.writeOrder = .readsFirst
+        scheduler.serialLane(label: "test.main-reply").async {
+            scheduler.reply("worker reply", cost: 100)
+            values.events.append("worker returned at \(scheduler.now)")
+        }
+        scheduler.main.async {
+            scheduler.reply("main reply", cost: 10)
+            values.events.append("main returned at \(scheduler.now)")
+        }
+        #expect(scheduler.run() == .settled)
+        #expect(values.events == ["main returned at 10", "worker returned at 100"])
+    }
+
+    @Test("a worker drain observes its transition bound and unwinds on shutdown")
+    func workerTransitionBound() {
+        let scheduler = BatonScheduler()
+        defer { scheduler.shutdown() }
+        let values = BatonValues()
+        scheduler.writeOrder = .readsFirst
+        scheduler.serialLane(label: "test.worker-bound").async {
+            for _ in 0..<10 { scheduler.call("worker port") }
+            values.events.append(Thread.isMainThread ? "main" : "worker unwound")
+        }
+        scheduler.maxTransitions = 4
+        guard case .transitionBound(let pending) = scheduler.run() else { Issue.record("Expected worker transition bound"); return }
+        #expect(scheduler.transitions == 4)
+        #expect(pending.contains("test.worker-bound"))
+        #expect(scheduler.trace.last?.hasPrefix("[0ms] main STOP transition bound") == true)
+        scheduler.shutdown()
+        #expect(values.events == ["worker unwound"])
+    }
+
+    @Test("a worker reply cannot advance past the virtual-time bound")
+    func workerVirtualTimeBound() {
+        let scheduler = BatonScheduler()
+        defer { scheduler.shutdown() }
+        scheduler.writeOrder = .readsFirst
+        scheduler.serialLane(label: "test.worker-time-bound").async { scheduler.reply("worker reply", cost: 10) }
+        scheduler.maxMilliseconds = 5
+        guard case .virtualTimeBound(let pending) = scheduler.run() else { Issue.record("Expected worker virtual-time bound"); return }
+        #expect(scheduler.now == 0)
+        #expect(pending.contains("test.worker-time-bound"))
+        #expect(scheduler.trace.last?.hasPrefix("[0ms] main STOP virtual-time bound") == true)
+    }
+
     @Test("a native event cannot masquerade as captured read delivery")
     func capturedDelivery() {
         let scheduler = BatonScheduler()

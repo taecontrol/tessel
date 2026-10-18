@@ -83,11 +83,4 @@ import Testing
         #expect(schedules.count == 12)
         for schedule in schedules { requireScenario(EnablingScenarios.run(schedule, layout: layout)) }
     }
-
-    @Test("#17 E2; #2 E2: enabling immediately before selection keeps the unread selection", arguments: [Layout.rails, .stack])
-    func enableBeforeSelect(layout: Layout) {
-        // This order was absent from the CI failures that exposed 6b80843.
-        let schedule = EnablingScenarios.schedules.first { $0.steps == [.enable, .select, .read, .deliver] && $0.writes == .writesFirst }!
-        requireScenario(EnablingScenarios.run(schedule, layout: layout))
-    }
 }

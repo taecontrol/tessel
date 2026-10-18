@@ -10,9 +10,10 @@ extension SimulatedMac {
     final class Handle: AXElementIdentity, @unchecked Sendable {
         unowned let mac: SimulatedMac
         let node: Node
+        let name: String
         var timeout: Float = 0.05
         var focusedReadJob: Int?
-        init(_ mac: SimulatedMac, _ node: Node) { self.mac = mac; self.node = node }
+        init(_ mac: SimulatedMac, _ node: Node) { self.mac = mac; self.node = node; name = mac.name(node) }
         func isEqual(to other: any AXElementIdentity) -> Bool {
             guard let other = other as? Handle else { return false }
             return mac === other.mac && node == other.node
@@ -57,7 +58,7 @@ extension SimulatedMac {
             guard let handle = element.identity as? Handle, handle.mac === mac else {
                 mac.scheduler.failUnmodeled("AccessibilityPort.\(operation) foreign element"); return nil
             }
-            mac.scheduler.call("AccessibilityPort.\(operation) \(mac.name(handle.node))")
+            mac.scheduler.call("AccessibilityPort.\(operation) \(handle.name)")
             return handle
         }
         private func unavailable(_ handle: Handle) -> AXStatus? {
@@ -70,7 +71,7 @@ extension SimulatedMac {
         private func finish(_ handle: Handle, operation: String, status: AXStatus, value: String = "", point: PausePoint? = nil) {
             mac.assume(.axReadDelivery)
             let cost = status == .cannotComplete ? max(1, Int((handle.timeout * 1_000).rounded())) : 1
-            mac.scheduler.reply("AccessibilityPort.\(operation) reply \(mac.name(handle.node)) \(status)\(value.isEmpty ? "" : " " + value)",
+            mac.scheduler.reply("AccessibilityPort.\(operation) reply \(handle.name) \(status.traceName)\(value.isEmpty ? "" : " " + value)",
                                 cost: cost, point: point)
         }
         @discardableResult func setMessagingTimeout(_ element: AXElement, seconds: Float) -> AXStatus {
@@ -157,7 +158,7 @@ extension SimulatedMac {
         switch value {
         case .bool(let value): String(value)
         case .string(let value): value
-        case .element(let element): (element.identity as? Handle).map { name($0.node) } ?? "foreign"
+        case .element(let element): (element.identity as? Handle)?.name ?? "foreign"
         case .elements(let elements): "[" + elements.map { describe(.element($0)) }.joined(separator: ",") + "]"
         case .point(let point): "\(point.x),\(point.y)"
         case .size(let size): "\(size.width)x\(size.height)"
@@ -298,21 +299,21 @@ extension SimulatedMac {
         func add(_ notification: AXNotification, to element: AXElement) -> AXStatus {
             mac.assume(.axSubscriptions)
             guard let handle = element.identity as? Handle else { mac.scheduler.failUnmodeled("AXObservation.add foreign element"); return .cannotComplete }
-            mac.scheduler.call("AXObservation.add \(notification.rawValue) \(mac.name(handle.node))")
+            mac.scheduler.call("AXObservation.add \(notification.rawValue) \(handle.name)")
             guard mac.scheduler.isActive else { return .cannotComplete }
             let status: AXStatus
             if mac.apps[pid]?.hung == true || (mac.apps[pid]?.busyUntil ?? 0) > mac.scheduler.now { status = .cannotComplete }
             else { status = registrations[handle.node, default: []].insert(notification).inserted ? .success : .notificationAlreadyRegistered }
-            mac.scheduler.reply("AXObservation.add reply \(notification.rawValue) \(mac.name(handle.node)) \(status)",
+            mac.scheduler.reply("AXObservation.add reply \(notification.rawValue) \(handle.name) \(status.traceName)",
                                 cost: status == .cannotComplete ? max(1, Int((handle.timeout * 1_000).rounded())) : 1)
             return status
         }
         func remove(_ notification: AXNotification, from element: AXElement) {
             mac.assume(.axSubscriptions)
             guard let handle = element.identity as? Handle else { mac.scheduler.failUnmodeled("AXObservation.remove foreign element"); return }
-            mac.scheduler.call("AXObservation.remove \(notification.rawValue) \(mac.name(handle.node))")
+            mac.scheduler.call("AXObservation.remove \(notification.rawValue) \(handle.name)")
             registrations[handle.node]?.remove(notification)
-            mac.scheduler.reply("AXObservation.remove reply \(notification.rawValue) \(mac.name(handle.node))", cost: 1)
+            mac.scheduler.reply("AXObservation.remove reply \(notification.rawValue) \(handle.name)", cost: 1)
         }
     }
     func notify(_ notification: AXNotification, node: Node) {
@@ -325,6 +326,23 @@ extension SimulatedMac {
                 self.scheduler.note("AX notification \(notification.rawValue) \(self.name(node))")
                 observer.callback(notification, handle)
             }
+        }
+    }
+}
+
+private extension AXStatus {
+    // Avoid reflecting an enum for every AX reply; retain the trace spelling.
+    var traceName: String {
+        switch self {
+        case .success: "success"
+        case .cannotComplete: "cannotComplete"
+        case .apiDisabled: "apiDisabled"
+        case .invalidUIElement: "invalidUIElement"
+        case .noValue: "noValue"
+        case .attributeUnsupported: "attributeUnsupported"
+        case .notificationAlreadyRegistered: "notificationAlreadyRegistered"
+        case .notificationUnsupported: "notificationUnsupported"
+        case .other(let value): "other(\(value))"
         }
     }
 }

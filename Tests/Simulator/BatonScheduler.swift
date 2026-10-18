@@ -89,11 +89,12 @@ package final class BatonScheduler: SchedulingPort, @unchecked Sendable {
     private var pauseTarget: PausePoint?
     private var pauseHit: String?
     private var stopped = false
+    private var workerDrain: (allowMain: Bool, allowTimers: Bool)?
     private let returned = DispatchSemaphore(value: 0)
 
     package init() {}
 
-    private var context: Context { Thread.isMainThread ? .main : .lane(running!) }
+    private var context: Context { if let running { .lane(running) } else { .main } }
     private var contextName: String {
         switch context { case .main: "main"; case .lane(let id): lanes[id].label }
     }
@@ -142,7 +143,7 @@ package final class BatonScheduler: SchedulingPort, @unchecked Sendable {
         note(label)
         checkpoint(.call(label), label: label)
         if context == .main, writeOrder != .readsFirst, failure == nil,
-           case .lane = choices(allowMain: false, allowTimers: false).first {
+           case .lane = choice(allowMain: false, allowTimers: false) {
             _ = step(allowMain: false, allowTimers: false)
         }
     }
@@ -175,6 +176,23 @@ package final class BatonScheduler: SchedulingPort, @unchecked Sendable {
             if case .lane(let id) = context { lanes[id].held = true }
         }
         guard case .lane(let id) = context else { return }
+        // A drain would hand the baton straight back to this lane. Keep its
+        // stack running, but still make every choice and count every step.
+        // Single-step main calls and waits must return to their caller first.
+        if let drain = workerDrain {
+            draining: while failure == nil, pauseHit == nil, transitions < maxTransitions,
+                            let next = choice(allowMain: drain.allowMain, allowTimers: drain.allowTimers) {
+                switch next {
+                case .lane(let nextID) where nextID == id:
+                    transitions += 1
+                    return
+                case .advance(let time) where time <= maxMilliseconds:
+                    transitions += 1
+                    advance(to: time, allowTimers: drain.allowTimers)
+                default: break draining
+                }
+            }
+        }
         returned.signal()
         lanes[id].wake.wait()
     }
@@ -203,44 +221,50 @@ package final class BatonScheduler: SchedulingPort, @unchecked Sendable {
         return parts.isEmpty ? "nothing" : parts.joined(separator: "; ")
     }
 
-    private func choices(allowMain: Bool, allowTimers: Bool) -> [Choice] {
-        var ready = lanes.filter {
-            !$0.held && ($0.current != nil || !$0.queue.isEmpty) && $0.readyAt <= now && ($0.waiting?() ?? true)
-        }.map(\.id)
-        if let lastLane, let index = ready.firstIndex(of: lastLane) {
-            ready.remove(at: index); ready.insert(lastLane, at: 0)
-        }
-        var result = ready.map { Choice.lane($0) }
-        if allowMain && mainDepth == 0 && mainBlocked == 0 && !mainQueue.isEmpty {
-            if writeOrder == .readsFirst { result.insert(.main, at: 0) }
-            else { result.append(.main) }
-        }
+    private func choice(allowMain: Bool, allowTimers: Bool) -> Choice? {
         // Expired timers enqueue now, even with runnable work. Equal deadlines
         // use submission order; scenarios must never use that as an oracle.
-        if allowTimers, let timer = timers.first, timer.due <= now { result.insert(.advance(now), at: 0) }
-        if result.isEmpty {
-            let wake = lanes.filter { !$0.held && ($0.current != nil || !$0.queue.isEmpty) && $0.readyAt > now }.map(\.readyAt).min()
-            if let next = [wake, allowTimers ? timers.first?.due : nil, mainWake].compactMap({ $0 }).min() { result.append(.advance(next)) }
+        if allowTimers, let timer = timers.first, timer.due <= now { return .advance(now) }
+        let mainReady = allowMain && mainDepth == 0 && mainBlocked == 0 && !mainQueue.isEmpty
+        if mainReady && writeOrder == .readsFirst { return .main }
+        if let lastLane, ready(lanes[lastLane]) { return .lane(lastLane) }
+        for lane in lanes where ready(lane) { return .lane(lane.id) }
+        if mainReady { return .main }
+        var wake = mainWake
+        if allowTimers, let due = timers.first?.due { wake = min(wake ?? due, due) }
+        for lane in lanes where !lane.held && (lane.current != nil || !lane.queue.isEmpty) && lane.readyAt > now {
+            wake = min(wake ?? lane.readyAt, lane.readyAt)
         }
-        return result
+        if let wake { return .advance(wake) }
+        return nil
     }
 
-    private func step(allowMain: Bool = true, allowTimers: Bool = true) -> Bool {
-        guard failure == nil, pauseHit == nil, let choice = choices(allowMain: allowMain, allowTimers: allowTimers).first else { return false }
+    private func ready(_ lane: Lane) -> Bool {
+        !lane.held && (lane.current != nil || !lane.queue.isEmpty) && lane.readyAt <= now && (lane.waiting?() ?? true)
+    }
+
+    private func advance(to time: Int, allowTimers: Bool) {
+        now = max(now, time)
+        while allowTimers, let timer = timers.first, timer.due <= now {
+            timers.removeFirst()
+            switch timer.target {
+            case .lane(let id, let job): lanes[id].queue.append(job)
+            case .main(let job): mainQueue.append(job)
+            }
+            // Advancing is a main scheduler step, even when a worker retains
+            // the baton through it. Keep the trace independent of handoffs.
+            trace.append("[\(now)ms] main timer #\(timer.id) ready")
+        }
+    }
+
+    private func step(allowMain: Bool = true, allowTimers: Bool = true, draining: Bool = false) -> Bool {
+        guard failure == nil, pauseHit == nil, let choice = choice(allowMain: allowMain, allowTimers: allowTimers) else { return false }
         if transitions >= maxTransitions { stop(with: .transitionBound("t=\(now)ms; \(pending())")); return false }
         transitions += 1
         switch choice {
         case .advance(let time):
             if time > maxMilliseconds { stop(with: .virtualTimeBound("t=\(now)ms; \(pending())")); return false }
-            now = max(now, time)
-            while allowTimers, let timer = timers.first, timer.due <= now {
-                timers.removeFirst()
-                switch timer.target {
-                case .lane(let id, let job): lanes[id].queue.append(job)
-                case .main(let job): mainQueue.append(job)
-                }
-                note("timer #\(timer.id) ready")
-            }
+            advance(to: time, allowTimers: allowTimers)
         case .main:
             let job = mainQueue.removeFirst()
             note("main begin #\(job.id)")
@@ -260,8 +284,10 @@ package final class BatonScheduler: SchedulingPort, @unchecked Sendable {
             }
             running = id
             lastLane = id
+            workerDrain = draining ? (allowMain, allowTimers) : nil
             lane.wake.signal()
             returned.wait()
+            workerDrain = nil
             running = nil
         }
         return true
@@ -272,7 +298,7 @@ package final class BatonScheduler: SchedulingPort, @unchecked Sendable {
         precondition(Thread.isMainThread)
         pauseTarget = point
         pauseHit = nil
-        while step() {}
+        while step(draining: true) {}
         if let failure { return failure }
         if let pauseHit { return .paused(pauseHit) }
         if lanes.contains(where: \.held) { return .paused(pending()) }
@@ -287,7 +313,7 @@ package final class BatonScheduler: SchedulingPort, @unchecked Sendable {
     /// Main notifications and future timers remain queued for explicit reads.
     package func runReadyWorkers() {
         pauseHit = nil
-        while step(allowMain: false, allowTimers: false) {}
+        while step(allowMain: false, allowTimers: false, draining: true) {}
     }
 
     private func waitOnMain(_ name: String, until done: () -> Bool) {
