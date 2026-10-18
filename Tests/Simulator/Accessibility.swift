@@ -5,6 +5,7 @@ import Ports
 extension SimulatedMac {
     enum Node: Hashable, Sendable {
         case application(Int32), window(UInt32), bar(Int), tab(Int, Int), desktop
+        case foundation(UInt32, FoundationNode)
     }
     final class Handle: AXElementIdentity, @unchecked Sendable {
         unowned let mac: SimulatedMac
@@ -23,6 +24,7 @@ extension SimulatedMac {
         switch node {
         case .application(let pid): pid
         case .window(let id): windows[id]?.pid
+        case .foundation(let id, _): windows[id]?.pid
         case .bar(let group), .tab(let group, _): groups[group].flatMap { windows[$0.selected]?.pid }
         case .desktop: 10
         }
@@ -32,6 +34,7 @@ extension SimulatedMac {
         switch node {
         case .application(let pid): return "\(alias) pid=\(pid)"
         case .window(let id): return "window \(id) \(alias)"
+        case .foundation(let id, let node): return "\(node) window \(id) \(alias)"
         case .bar(let group): return "native-bar \(group) \(alias)"
         case .tab(let group, let index): return "tab \(group).\(index) \(alias)"
         case .desktop: return "desktop app-desktop"
@@ -171,6 +174,7 @@ extension SimulatedMac {
                 return AXResult(.success, .bool(apps[pid]!.hidden))
             case .focusedWindow:
                 assume(.axFocus)
+                if withholdsFocus(pid) { return AXResult(.noValue) }
                 return apps[pid]?.key.map { AXResult(.success, .element(element(.window($0)))) } ?? AXResult(.noValue)
             case .frontmost:
                 assume(.applicationActivation)
@@ -191,6 +195,7 @@ extension SimulatedMac {
             case .children:
                 var children = windows.values.filter { !$0.closed && $0.spec.parent == id }.map(\.id).sorted().map { element(.window($0)) }
                 if let group = window.group, let bar = groups[group], bar.selected == id, bar.windows.count > 1 { children.append(element(.bar(group))) }
+                children.append(contentsOf: foundationChildren(id))
                 return AXResult(.success, .elements(children))
             default: break
             }
@@ -199,12 +204,19 @@ extension SimulatedMac {
             guard let group = groups[id] else { return AXResult(.invalidUIElement) }
             switch attribute {
             case .role: return AXResult(.success, .string("AXTabGroup"))
-            case .tabs, .contents: return AXResult(.success, .elements(group.windows.indices.map { element(.tab(id, $0)) }))
+            case .tabs: return AXResult(.success, .elements(group.windows.indices.map { element(.tab(id, $0)) }))
+            case .contents:
+                return AXResult(.success, .elements(group.windows.indices.map { element(.tab(id, $0)) } + extraNativeControls(id)))
             case .window: return AXResult(.success, .element(element(.window(group.selected))))
             default: break
             }
         case .tab:
             if attribute == .role { return AXResult(.success, .string("AXRadioButton")) }
+            if attribute == .children {
+                assume(.nativeTabExtraControls)
+                return AXResult(.success, .elements([]))
+            }
+        case .foundation(let id, let node): return readFoundation(attribute, window: id, node: node)
         case .desktop:
             assume(.finderDesktop)
             switch attribute {
@@ -224,6 +236,7 @@ extension SimulatedMac {
             return window.group.flatMap { groups[$0]?.selected == window.id || window.minimized } ?? true
         }.map(\.id).sorted()
         if apps[pid]?.hidden == true && apps[pid]?.omitHiddenWindows == true { ids = [] }
+        if let published = publishedWindowList(pid) { ids = published }
         apps[pid]?.zeroIDs.removeAll()
         if let reply = apps[pid]?.windowLists.first {
             apps[pid]?.windowLists.removeFirst()
