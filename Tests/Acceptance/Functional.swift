@@ -2,11 +2,6 @@ import Darwin
 import Foundation
 import Testing
 
-/// The accepted #1 examples, exercised at the shipped CLI boundary.
-/// Suites run one at a time: they share one desktop, app instance, and fixture.
-@Suite(.serialized)
-enum Acceptance {}
-
 /// Helpers shared by suites that run inside an `AppSession`.
 /// Keep raw CLI output out of `#expect`: a failure prints every captured value.
 @MainActor

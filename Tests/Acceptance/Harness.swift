@@ -2,6 +2,10 @@ import Darwin
 import Foundation
 import Testing
 
+/// Real-system suites share one desktop and run serially.
+@Suite(.serialized)
+enum Acceptance {}
+
 /// One window record from `tessel windows --json`.
 struct Row: Decodable, Equatable, Hashable {
     let id: UInt32
@@ -125,11 +129,11 @@ final class FixtureSession {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(socket, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }
         guard bound == 0 else { throw HarnessError("cannot bind the fixture client socket: errno \(errno)") }
-        setTimeout(socket, seconds: 3)
+        setTimeout(socket, seconds: margin)
         try run(["open", "-n"] + (swiftUI ? [] : ["-g"]) + ["--stdout", "/dev/null", "--stderr", "/dev/null", fixtureBundle.path, "--args", "--socket", path]
                 + (swiftUI ? ["--swiftui"] : []), check: true)
         let path = path
-        guard eventually(within: 5, { FileManager.default.fileExists(atPath: path) }) else {
+        guard finalState({ FileManager.default.fileExists(atPath: path) }) else {
             throw HarnessError("fixture did not launch")
         }
         pid = try command("ping").pid
@@ -137,7 +141,7 @@ final class FixtureSession {
 
     @discardableResult
     func command(_ action: String, _ arguments: [String: Any] = [:]) throws -> FixtureReply {
-        let deadline = monotonicSeconds() + 1
+        let deadline = monotonicSeconds() + margin
         while true {
             do {
                 return try request(action, arguments)
@@ -186,7 +190,7 @@ final class FixtureSession {
 
     func stop() {
         kill(pid, SIGKILL)
-        _ = eventually(within: 1) { kill(pid, 0) != 0 }
+        _ = finalState { kill(pid, 0) != 0 }
         disconnect()
     }
 
@@ -221,7 +225,7 @@ final class Harness {
         guard processIDs(appExecutable).isEmpty else {
             throw HarnessError("This worktree's development app is already running; stop it before verification")
         }
-        guard try run([fixtureExecutable.path, "--check-session"], timeout: 2).status == 0 else {
+        guard try run([fixtureExecutable.path, "--check-session"], timeout: margin).status == 0 else {
             throw HarnessError("Wake and unlock the Mac before running GUI verification")
         }
         let power = Process()
@@ -258,17 +262,16 @@ final class Harness {
         try run(["open", "-n", "-g", "--stdout", "/dev/null", "--stderr", "/dev/null",
                  "--env", "XDG_CONFIG_HOME=" + environment["XDG_CONFIG_HOME"]!, app.path,
                  "--args", "--test-fixture-only"] + capture + arguments, check: true)
-        guard let pid = eventualValue(within: 5, { processIDs(appExecutable).first }) else {
+        guard let pid = finalValue({ processIDs(appExecutable).first }) else {
             throw HarnessError("signed development app did not launch")
         }
         appPID = pid
-        // Launch readiness is separate from the 500 ms event deadlines.
-        guard try eventually(within: 5, { try invoke("status", "--json").status == 0 }) else {
+        guard try finalState({ try invoke("status", "--json").status == 0 }) else {
             throw HarnessError("signed development app did not expose its status endpoint")
         }
         guard fixtureReady else { return }
         // Socket readiness does not prove that startup AX subscriptions exist.
-        // Exercise one generic window before starting event-specific deadlines.
+        // Exercise one generic window before driving the app.
         let health = try fixture.open(key: "startupHealth")
         func listed() throws -> Bool? {
             let result = try invoke("windows", "--json")
@@ -276,18 +279,18 @@ final class Harness {
             return try JSONDecoder().decode([Row].self, from: result.outputData)
                 .contains { $0.bundleId == fixtureID && $0.id == health }
         }
-        guard try eventually(within: 5, { try listed() == true }) else {
+        guard try finalState({ try listed() == true }) else {
             throw HarnessError("signed development app did not observe the fixture startup window")
         }
         try fixture.command("close", ["key": "startupHealth"])
-        guard try eventually(within: 1, { try listed() == false }) else {
+        guard try finalState({ try listed() == false }) else {
             throw HarnessError("signed development app did not retire the fixture startup window")
         }
     }
 
     func stopApp() {
         for pid in processIDs(appExecutable) { kill(pid, SIGTERM) }
-        _ = eventually(within: 3) { processIDs(appExecutable).isEmpty }
+        _ = finalState { processIDs(appExecutable).isEmpty }
     }
 
     var appIsRunning: Bool { !processIDs(appExecutable).isEmpty }
@@ -297,7 +300,7 @@ final class Harness {
     }
 
     func invoke(_ arguments: [String]) throws -> ProcessResult {
-        let result = try run([cli.path] + arguments, environment: environment, timeout: 1.2, recordsReceipt: false)
+        let result = try run([cli.path] + arguments, environment: environment, timeout: margin, recordsReceipt: false)
         // Judge a JSON answer by when tessel produced it; anything else by receipt.
         let json = try? JSONSerialization.jsonObject(with: result.outputData)
         let answer = (json as? [String: Any]) ?? (json as? [[String: Any]])?.first
@@ -343,9 +346,9 @@ final class Harness {
         var command = ["open", "-n", "-g", "--stdout", output.path, "--stderr", "/dev/null", fixtureBundle.path,
                        "--args", "--probe", String((session ?? fixture).pid)]
         if let resizeID { command.append(String(resizeID)) }
-        try run(command, timeout: 3, check: true)
+        try run(command, timeout: margin, check: true)
         struct Reply: Decodable { let windows: [ProbeWindow]? }
-        let reply = try eventualValue(within: 2) { () throws -> Reply? in
+        let reply = try finalValue { () throws -> Reply? in
             guard let data = FileManager.default.contents(atPath: output.path), !data.isEmpty else { return nil }
             return try? JSONDecoder().decode(Reply.self, from: data)
         }
@@ -372,7 +375,7 @@ final class Harness {
     func reset() throws {
         if !appIsRunning { try startApp(fixtureReady: false) }
         try? FileManager.default.removeItem(at: configFile)
-        guard try eventually(within: 1, { try status().config.state == "defaults" }) else {
+        guard try finalState({ try status().config.state == "defaults" }) else {
             throw HarnessError("tessel did not return to the default configuration")
         }
         for other in otherFixtures { other.stop() }

@@ -32,6 +32,18 @@ jobs:
         run: scripts/verify --permission
       - name: Functional acceptance suite
         run: scripts/verify --functional
+      - name: End-to-end journeys
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: scripts/verify --journeys
+      - name: Workspace and rail latency
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: scripts/verify --latency
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: latency
+          path: .work/latency.json
+          if-no-files-found: ignore
       # Run even when the functional suite fails, so each run reports both.
       - name: Resource acceptance suite (90 second budget)
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
