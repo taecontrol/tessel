@@ -3,6 +3,30 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct RailOrderingRegressions {
+    @Test("#2 E25; #17 E17: a queued raise never restores a window minimized while AXMain returns", arguments: [Layout.stack, .rails], MinimizedRaiseReply.allCases)
+    func minimizeBetweenFocusWrites(_ layout: Layout, _ reply: MinimizedRaiseReply) {
+        for writes in WriteOrder.allCases {
+            requireScenario(Scenario.run("minimize between focus writes in \(layout), reply=\(reply)", writes: writes) { s in
+                let mac = s.mac, app = mac.launch(windows: 1)
+                let id = app.open(WindowSpec(minimizedRaiseReply: reply))
+                app.select(1)
+                let tessel = s.startTessel(layout)
+                s.settle()
+                tessel.press(layout == .rails ? "focus right" : "focus next")
+                let held = mac.pause(after: .call("AccessibilityPort.set AXMain=true window \(id) \(app.alias)"))
+                if case .paused = held {} else { s.expect("the main write is outstanding: \(held)", false) }
+                mac.scheduler.main.after(milliseconds: 1) {
+                    s.expect("the main write selected the window before minimization", mac.focusedWindow == id)
+                    app.minimize(id, selecting: 1)
+                }
+                s.settle()
+                s.expect("native minimize remains in force", tessel.windows.first { $0.id == id }?.state == .minimized && !mac.isVisible(id))
+                s.expect("the minimized window keeps its workspace", tessel.windows.first { $0.id == id }?.workspace == 1)
+                s.expect("the available successor is selected and visible", mac.focusedWindow == 1 && mac.isFullyOnScreen(1))
+            })
+        }
+    }
+
     @Test("#17 E16: a gap redraw cannot discard a pending cross-app native selection")
     func ownerReadSurvivesGapReload() {
         requireScenario(Scenario.run("owner revalidation across gap redraw", writes: .readsFirst) { s in

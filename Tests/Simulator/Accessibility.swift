@@ -127,7 +127,7 @@ extension SimulatedMac {
             guard let handle = handle(element, operation: "perform \(action.rawValue)") else { return .cannotComplete }
             var status = unavailable(handle) ?? .success
             if status == .success {
-                if case .window(let id) = handle.node { mac.selectFromAX(id) }
+                if case .window(let id) = handle.node { status = mac.selectFromAX(id, raising: true) }
                 else { mac.scheduler.failUnmodeled("AccessibilityPort.perform \(action.rawValue) \(mac.name(handle.node))"); status = .cannotComplete }
             }
             finish(handle, operation: "perform \(action.rawValue)", status: status)
@@ -282,7 +282,7 @@ extension SimulatedMac {
             activateFromAX(pid)
         case (.window(let id), .main, .bool(true)):
             assume(.axFocus)
-            selectFromAX(id)
+            return selectFromAX(id)
         case (.window(let id), .position, .point(let point)):
             assume(.windowGeometryWrites)
             var accepted = point

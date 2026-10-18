@@ -9,6 +9,35 @@ private final class NativeRootEvents: @unchecked Sendable {
 }
 
 @Suite @MainActor struct MacOSChoices {
+    @Test("minimize completion separates a harmless main write from a restoring raise, even with a timed-out reply", arguments: MinimizedRaiseReply.allCases, [false, true])
+    func minimizeFocus(_ reply: MinimizedRaiseReply, _ raising: Bool) throws {
+        for completed in [false, true] {
+            let mac = SimulatedMac()
+            defer { mac.shutdown() }
+            let app = mac.launch(windows: 1)
+            let id = app.open(WindowSpec(minimizedRaiseReply: reply))
+            let ax = mac.ax, application = ax.application(app.pid)
+            let window = try #require(ax.copy(.windows, of: application).value?.elements?.first { ax.windowID($0).value == id })
+            let events = NativeRootEvents()
+            let observer = try #require(ax.observer(app.pid) { notification, _ in events.names.append(notification) }.value)
+            observer.start()
+            #expect(observer.add(.minimized, to: window) == .success)
+            #expect(observer.add(.restored, to: window) == .success)
+            app.beginMinimize(id)
+            if completed { app.finishMinimize(id, selecting: 1) }
+            let result = raising ? ax.perform(.raise, on: window) : ax.set(.main, of: window, to: .bool(true))
+            #expect(result == (completed && raising && reply == .cannotComplete ? .cannotComplete : .success))
+            app.finishMinimize(id, selecting: 1)
+            #expect(mac.settle() == .settled)
+            let staysMinimized = completed && !raising
+            #expect(ax.copy(.minimized, of: window).value?.bool == staysMinimized)
+            #expect(mac.isVisible(id) == !staysMinimized)
+            #expect(mac.focusedWindow == (staysMinimized ? 1 : id))
+            #expect(mac.isMain(id) == !staysMinimized)
+            #expect(events.names == (completed ? (raising ? [.minimized, .restored] : [.minimized]) : []))
+        }
+    }
+
     @Test("survivor activation can precede process exit while the dying app's windows are gone", arguments: TerminationExitOrder.allCases, [false, true])
     func termination(_ exitOrder: TerminationExitOrder, _ automaticNotice: Bool) throws {
         let mac = SimulatedMac()

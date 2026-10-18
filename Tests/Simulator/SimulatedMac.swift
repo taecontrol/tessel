@@ -5,6 +5,7 @@ import Assumptions
 
 package enum PositionAcceptance: String, CaseIterable, Sendable { case requested, rightEdgeStrip }
 package enum OffDisplayMembership: String, CaseIterable, Sendable { case included, omitted }
+package enum MinimizedRaiseReply: String, CaseIterable, Sendable { case success, cannotComplete }
 
 package struct WindowSpec: Sendable {
     package var frame: CGRect
@@ -15,14 +16,17 @@ package struct WindowSpec: Sendable {
     package var parent: UInt32?
     package var positionAcceptance: PositionAcceptance
     package var offDisplayMembership: OffDisplayMembership
+    package var minimizedRaiseReply: MinimizedRaiseReply
     package init(frame: CGRect = CGRect(x: 40, y: 60, width: 451, height: 400), subrole: String = "AXStandardWindow",
                  resizable: Bool = true, minimumSize: CGSize = CGSize(width: 1, height: 1),
                  maximumSize: CGSize = CGSize(width: 100_000, height: 100_000), parent: UInt32? = nil,
-                 positionAcceptance: PositionAcceptance = .rightEdgeStrip, offDisplayMembership: OffDisplayMembership = .included) {
+                 positionAcceptance: PositionAcceptance = .rightEdgeStrip, offDisplayMembership: OffDisplayMembership = .included,
+                 minimizedRaiseReply: MinimizedRaiseReply = .success) {
         self.frame = frame; self.subrole = subrole; self.resizable = resizable
         self.minimumSize = minimumSize; self.maximumSize = maximumSize; self.parent = parent
         self.positionAcceptance = positionAcceptance
         self.offDisplayMembership = offDisplayMembership
+        self.minimizedRaiseReply = minimizedRaiseReply
     }
 }
 
@@ -236,10 +240,13 @@ package final class SimulatedMac: @unchecked Sendable {
         notify(.minimized, node: .window(id))
     }
     @MainActor func restore(_ id: UInt32) {
-        assume(.minimizeRestore)
         action("restore window \(id)")
+        restoreWindow(id)
+    }
+    func restoreWindow(_ id: UInt32, activating: Bool = true) {
+        assume(.minimizeRestore)
         for member in groupMembers(id) { windows[member]?.minimized = false }
-        focus(id)
+        focus(id, activating: activating)
         notify(.restored, node: .window(id))
     }
     @MainActor func visibility(_ pid: Int32, hidden: Bool, omitWindows: Bool) {

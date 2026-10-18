@@ -310,7 +310,7 @@ extension Acceptance.Contracts {
         try expectFocus(id)
     }
 
-    @Test("minimize-focus-interruption: a main or raise request can cancel the unfinished Dock operation", contract(.minimizeFocusInterruption), arguments: ["AXMain", "AXRaise"])
+    @Test("minimize-focus-interruption: focus writes cancel pending minimize; only raise restores a completed minimize", contract(.minimizeFocusInterruption), arguments: ["AXMain", "AXRaise"])
     func minimizeFocusInterruption(_ attribute: String) throws {
         _ = try fixture.open(key: "sibling")
         let id = try fixture.open(kind: "minimize")
@@ -322,28 +322,48 @@ extension Acceptance.Contracts {
         let baseline = try #require(try fixture.command("ping").minimizeEvents?["window"])
         try #require(baseline.contains { $0.name == "NSWindowDidMiniaturizeNotification" && $0.minimized }
             && baseline.contains { $0.name == "NSWindowDidDeminiaturizeNotification" && !$0.minimized }, "the native notification recorder must witness the control operation")
-        let offset = baseline.count
-        let began = try fixture.command("minimize", ["waitForTransition": false])
-        let alreadyMinimized = try #require(began.miniaturized?["window"])
-        let write = try native("write", ["id": id, "attribute": attribute])
-        try #require(write.result == 0 || write.result == -25204, "a Dock transition must return a modeled AX write outcome")
-        let returnedAt = try #require(write.writeReturnedAt)
-        // A cancelled request need not notify completion. Let the Dock finish
-        // another real request before checking the interrupted window.
-        try fixture.command("minimize", ["key": "sibling"])
-        let events = Array((try #require(try fixture.command("ping").minimizeEvents?["window"])).dropFirst(offset))
-        print("Minimize \(attribute): " + events.map { "\($0.name)(minimized=\($0.minimized))" }.joined(separator: " -> "))
-        let state = try native()
-        // These stamps establish cross-process order, never a latency budget.
-        let completed = events.filter { $0.name == "NSWindowDidMiniaturizeNotification" && $0.minimized }
-        let finishedBeforeReply = completed.contains { $0.sampledAt <= returnedAt }
-        if write.result == 0 && !alreadyMinimized && !finishedBeforeReply {
-            try #require(completed.isEmpty, "the accepted AX request returned before native minimization completed instead of cancelling it")
-            try #require(state.focused?.id == id && state.visible.contains(id) && state.roots.first { $0.id == id }?.minimized == false)
-            print("Minimize \(attribute): accepted pending request cancelled native minimization")
-        } else {
-            try #require(state.roots.first { $0.id == id }?.minimized == true && !state.visible.contains(id), "an unanswered AX request or earlier completion must leave native minimization intact")
-            print("Minimize \(attribute): completion won or AX returned cannotComplete; cancellation path not observed")
+        for completedFirst in [false, true] {
+            try fixture.command("restore")
+            try fixture.command("restore", ["key": "sibling"])
+            try desktop.activate()
+            let offset = try #require(try fixture.command("ping").minimizeEvents?["window"]).count
+            let began = try fixture.command("minimize", ["waitForTransition": completedFirst])
+            let alreadyMinimized = try #require(began.miniaturized?["window"] as Bool?)
+            let write = try native("write", ["id": id, "attribute": attribute])
+            try #require(write.result == 0 || write.result == -25204, "a Dock transition must return a modeled AX write outcome")
+            let returnedAt = try #require(write.writeReturnedAt)
+            // A cancellation need not notify. Drain another real Dock request,
+            // then wait for any restore notification as well as AX/CG state.
+            try fixture.command("minimize", ["key": "sibling"])
+            var evidence = ""
+            defer { print("Minimize \(attribute): completedFirst=\(completedFirst), result=\(write.result!), returnedAt=\(returnedAt); \(evidence)") }
+            try requireFinalState("the focus write has exactly a modeled minimize outcome") {
+                let state = try native(), local = try fixture.command("ping")
+                let events = Array((local.minimizeEvents?["window"] ?? []).dropFirst(offset))
+                evidence = events.map { "\($0.name)(minimized=\($0.minimized),at=\($0.sampledAt))" }.joined(separator: " -> ")
+                    + "; AXMinimized=\(String(describing: state.roots.first { $0.id == id }?.minimized)), visible=\(state.visible.contains(id)), nativeMinimized=\(String(describing: local.miniaturized?["window"]))"
+                guard let root = state.roots.first(where: { $0.id == id }),
+                      root.minimizedError == 0 && root.mainError == 0,
+                      zip(events, events.dropFirst()).allSatisfy({ $0.sampledAt <= $1.sampledAt }) else { return false }
+                let names = events.map(\.name), flags = events.map(\.minimized)
+                let will = "NSWindowWillMiniaturizeNotification", did = "NSWindowDidMiniaturizeNotification", restored = "NSWindowDidDeminiaturizeNotification"
+                let selected = root.minimized == false && local.miniaturized?["window"] == false
+                    && state.visible.contains(id) && state.focused?.id == id && root.main == true
+                let minimized = root.minimized == true && local.miniaturized?["window"] == true
+                    && !state.visible.contains(id) && state.focused?.id != id && root.main == false
+                if names.isEmpty || names == [will] && flags == [false] {
+                    return !completedFirst && !alreadyMinimized && write.result == 0 && selected
+                }
+                if names == [will, did] && flags == [false, true] {
+                    return minimized && (attribute == "AXMain" && (write.result == -25204 || events[1].sampledAt <= returnedAt)
+                        || attribute == "AXRaise" && !completedFirst && write.result == -25204)
+                }
+                if names == [will, did, restored] && flags == [false, true, false] {
+                    // A timed-out raise may already have started the restore.
+                    return attribute == "AXRaise" && events[1].sampledAt <= returnedAt && selected
+                }
+                return false
+            }
         }
     }
 
