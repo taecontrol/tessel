@@ -20,6 +20,14 @@ jobs:
       - name: Build signed bundles
         id: build
         run: scripts/build
+      # The visible frame's bottom edge, where the Dock sits, moved by up to
+      # two points mid-test on the 1024-point display; each fixture process
+      # adds a Dock icon. Tests compare window frames with that edge.
+      - name: Hide the Dock so fixture apps cannot move the visible frame
+        run: |
+          defaults write com.apple.dock autohide -bool true
+          killall Dock
+          sleep 3
       - name: Verify permission denial and automatic restart
         run: scripts/verify --permission
       - name: Functional acceptance suite

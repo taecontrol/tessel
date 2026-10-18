@@ -165,7 +165,12 @@ that result without resizing the group merely because another tab was selected.
 The close fixture can retain a closed NSWindow object to verify that revalidation
 still retires its AX window.
 
-CI runs the same commands on `xcode-27` (macOS 27). Its short-lived certificate
+CI runs the same commands on `xcode-27` (macOS 27). It first hides the
+runner's Dock. On the runner's 1024×768 display the visible frame's bottom
+edge, where the Dock sits, moved by up to two points during a test, so a window
+tessel had just filled no longer matched the frame the observer read. Each
+fixture process adds a Dock icon; a local desktop with a hidden Dock kept the
+same visible frame while 28 fixture apps launched and quit. Its short-lived certificate
 is created in a temporary keychain; no signing material is stored in GitHub.
 Only the disposable runner provisions its Accessibility database, for the
 denial and restart checks in `scripts/verify --permission`; elsewhere that
