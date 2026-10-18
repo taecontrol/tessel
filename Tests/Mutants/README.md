@@ -28,6 +28,7 @@ on the development machine (2026-10-18).
 | [retired-native-tab-root.patch](retired-native-tab-root.patch) | 97f790d | #1 E5: `FoundationNativeTabs.laggingRoot` keeps the former root retired on later reads | 39.193 |
 | [unpublished-rail-successor.patch](unpublished-rail-successor.patch) | 28093c6 | #17 E19: `RailNativeWindows.unpublishedSuccessor` completes the still-current successor focus | 41.918 |
 | [dying-rail-owner.patch](dying-rail-owner.patch) | d31cefa | #17 E11: `RailNativeWindows.termination` retains the adjacent-rail landing when native promotion precedes process exit and termination delivery | 21.004 |
+| [minimize-between-focus-writes.patch](minimize-between-focus-writes.patch) | 5fe9b3d | #2 E25 / #17 E17: `RailOrderingRegressions.minimizeBetweenFocusWrites` preserves minimization and successor focus across an outstanding AXMain reply | 20.978 |
 
 The two 647500d paths are separate mutants so one cannot mask missing coverage
 of the other. The zero-ID mutant also removes the subsequent closed-handle
@@ -44,6 +45,13 @@ The d31cefa revert removes owner-handle revalidation before cross-app focus.
 Its focused run reproduces all six original failures: quit and crash under
 three write orders select window 1 instead of the adjacent rail's window 2
 when termination arrives late and the dying PID still exists at promotion.
+
+The 5fe9b3d revert restores the native-tab-only checks between focus writes,
+including the deferred rail activation retry. Signed macOS 27.0.1 probes
+witnessed AXRaise restoring a completed minimize even with a cannotComplete
+reply. Before the fix, the regression failed in both layouts under readsFirst
+with either raise reply: the minimized window was restored and took focus
+from its available successor. Existing accepted assertions remain unchanged.
 
 Fresh review found two further ordering regressions, fixed in 790be60:
 
@@ -141,3 +149,7 @@ S12 killed all eleven patches (nine known bugs and two architecture guards),
 with 227.013 s summed across per-mutant timings. The new dying-owner mutant
 took 21.004 s. Its focused failure was inspected separately; compilation and
 missing revalidation checkpoints were not counted as evidence of that bug.
+
+S15 killed all fourteen patches, including the new minimize-between-focus-writes
+mutant in 20.978 s. The sum was 867.501 s, including a 601.789 s outlier for
+zero-window-id; the other thirteen totaled 265.712 s. No runner budget changed.
