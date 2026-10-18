@@ -28,6 +28,23 @@ func monotonicSeconds() -> Double {
     Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1e9
 }
 
+// The generous final-state margin for real-system journeys and contracts.
+let margin = 5.0
+
+func finalValue<T>(_ predicate: () throws -> T?) rethrows -> T? {
+    try eventualValue(within: margin, predicate)
+}
+
+func finalState(_ predicate: () throws -> Bool) rethrows -> Bool {
+    try finalValue { try predicate() ? true : nil } != nil
+}
+
+func requireFinalState(_ expectation: String, _ predicate: () throws -> Bool) throws {
+    guard try finalState(predicate) else {
+        throw HarnessError("\(expectation) did not arrive within the final-state margin")
+    }
+}
+
 /// When the inputs of one predicate evaluation were produced (issue #21).
 /// An observation counts at the time the independent observer finished taking
 /// it, and a CLI answer at its `answeredAt`, when tessel produced it. A fixture

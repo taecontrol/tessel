@@ -407,3 +407,46 @@ TESSEL_CAPTURE_WORKSPACES=1 scripts/verify captureRailsStatusItem
 ```
 
 The PNGs are written to `.work/captures/E26-workspace-1-rail-{1,2}.png`.
+
+## Journeys and latency (#24)
+
+Run `scripts/verify --journeys` for the eight end-to-end journeys and
+`scripts/verify --latency` for latency. Both use the signed development bundle,
+isolated fixtures and independent observer described above. The selectors also
+accept test-name fragments (`scripts/verify Journeys` or `scripts/verify Latency`).
+`scripts/verify` sets `TESSEL_ACCEPTANCE=1` for the real-system targets.
+The existing functional, resource and permission selectors remain available
+during the migration.
+
+Journeys and contracts wait only for a final state, using the generous 5 s
+`margin` declared once in `Tests/Acceptance/Support.swift`. Their wait API has
+no per-call deadline or timeout. Harness lifecycle and CLI transport operations
+use that same margin. Compilation and runner permission provisioning retain
+separate process limits. Foundation E11 and E14 print elapsed times without a
+shorter assertion while the owner's #24 timing question remains open; permission
+denial and restart still run only on the disposable CI runner.
+
+The journey steps carry these example IDs; decision examples belong to the
+deterministic policy layer and are not tagged in these files:
+
+| Journey | Journey example IDs |
+| --- | --- |
+| Enable | #1 E9; #2 E1; #17 E1 |
+| Switch | #2 E31, E32 |
+| Send | #2 E35 |
+| Rail scroll and elevator | #17 E24, E25 |
+| Reload | File watcher wiring for save, atomic replace, chmod and delete |
+| Crash, quit and disable | #2 E28, E29, E34; #17 E3 |
+| CLI and config files | #1 E10, E11, E12; #1 U-cli-args, U-private-transport, U-read-only-transport, U-stalled-clients, U-observer-identity, U-cpu-oracle, U-notification-retries |
+| Signing and permission | #1 E13, E14, E15, E16 |
+
+Latency owns #2 U-switch-budget and #17 E28 in `Tests/Acceptance/Latency.swift`.
+It records 100 workspace switches and 100 rail moves (50 scrolls and 50 elevator
+trips). Each sample starts at the trusted fixture's real key `postedAt` and ends
+at the independent observer's `sampledAt` when destination frames, focus and CG
+visibility all match. Samples must finish within the final-state margin.
+Only this suite judges elapsed time: each kind's nearest-rank p95 must be at
+most 200 ms. It prints p50, p95 and maximum, and writes `.work/latency.json` with
+the samples, counts, percentiles and nonpersonal run metadata. CI uploads that
+artifact even on failure; incomplete runs retain their partial counts and the
+failed sample index. No window listings or titles reach the artifact.

@@ -1,14 +1,16 @@
 #!/bin/bash
 # Drive the signed app through its CLI and isolated AppKit fixtures.
-# With no suite or test name, runs the functional and resource suites.
+# With no suite or test name, runs all suites except disposable-runner permission checks.
 set -euo pipefail
 export TESSEL_ACCEPTANCE=1
 root=$(cd "$(dirname "$0")/.." && pwd)
-usage='Usage: scripts/verify [--functional] [--resources] [--permission] [TEST...]'
+usage='Usage: scripts/verify [--functional] [--journeys] [--latency] [--resources] [--permission] [TEST...]'
 filters=()
 for argument in "$@"; do
     case $argument in
         --functional) filters+=(--filter /Functional/ --filter /FunctionalWorkspaces/ --filter /FunctionalRails/) ;;
+        --journeys) filters+=(--filter /Journeys/) ;;
+        --latency) filters+=(--filter /Latency/) ;;
         --resources) filters+=(--filter /Resources/ --filter /Verification/) ;;
         --permission) filters+=(--filter /Permission/) ;;
         -h | --help) echo "$usage"; exit 0 ;;
@@ -88,4 +90,5 @@ EOF
         sleep 0.5
     done
 fi
+export TESSEL_ACCEPTANCE=1
 exec swift test --package-path "$root" --no-parallel "${filters[@]}"
