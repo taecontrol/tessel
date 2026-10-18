@@ -9,6 +9,110 @@ private final class NativeRootEvents: @unchecked Sendable {
 }
 
 @Suite @MainActor struct MacOSChoices {
+    @Test("survivor activation can precede process exit while the dying app's windows are gone", arguments: TerminationExitOrder.allCases, [false, true])
+    func termination(_ exitOrder: TerminationExitOrder, _ automaticNotice: Bool) throws {
+        let mac = SimulatedMac()
+        defer { mac.shutdown() }
+        let survivor = mac.launch(windows: 1), dying = mac.launch(windows: 1)
+        let ax = mac.ax, application = ax.application(dying.pid)
+        let window = try #require(ax.copy(.windows, of: application).value?.elements?.first)
+        #expect(mac.settle() == .settled)
+        var promotions: [Bool] = [], terminations: [Bool] = []
+        let observation = mac.applications.observe { event, app in
+            if event == .activated && app.pid == survivor.pid { promotions.append(mac.applications.isAlive(dying.pid)) }
+            if event == .terminated && app.pid == dying.pid { terminations.append(mac.applications.isAlive(dying.pid)) }
+        }
+        dying.terminate(activating: 1, crash: true, publishesNotification: automaticNotice, exitOrder: exitOrder)
+        #expect(mac.applications.isAlive(dying.pid) == (exitOrder == .afterPromotion))
+        #expect(ax.copy(.role, of: window).status == .invalidUIElement)
+        #expect(mac.windowOrder.onScreenOrder() == [1])
+        #expect(mac.settle() == .settled)
+        #expect(promotions == [exitOrder == .afterPromotion])
+        if !automaticNotice {
+            #expect(terminations.isEmpty && mac.applications.isAlive(dying.pid) == (exitOrder == .afterPromotion))
+            dying.publishTermination()
+            #expect(mac.settle() == .settled)
+        }
+        #expect(terminations == [false] && !mac.applications.isAlive(dying.pid))
+        withExtendedLifetime(observation) {}
+    }
+
+    @Test("native tab insertion publishes the new root on the active desktop even from a closeted reference", arguments: [false, true])
+    func nativeTabInsertion(_ closeted: Bool) throws {
+        let mac = SimulatedMac()
+        defer { mac.shutdown() }
+        let app = mac.launch(windows: 2)
+        app.groupTabs([1, 2], selected: 1)
+        let ax = mac.ax, application = ax.application(app.pid)
+        let reference = try #require(ax.copy(.windows, of: application).value?.elements?.first)
+        let bar = try #require(ax.copy(.children, of: reference).value?.elements?.first)
+        let frame = mac.frame(1)
+        let closet = mac.closetPort
+        try closet.start()
+        if closeted { closet.hide([1]) }
+        let cover = mac.launch(windows: 1)
+        let added = app.addTab(to: 1, activating: false)
+        let root = try #require(ax.copy(.windows, of: application).value?.elements?.first)
+        #expect(ax.windowID(root).value == added)
+        #expect(ax.copy(.children, of: root).value?.elements == [bar])
+        #expect(ax.copy(.tabs, of: bar).value?.elements?.count == 3)
+        #expect(mac.frame(added) == frame && app.focusedWindow == added)
+        #expect(mac.frontmostApp == cover.pid && mac.isVisible(added))
+        for scope in [SpaceScope.ordinary, .all] { #expect(closet.memberships(added, scope: scope) == [closet.activeSpace()]) }
+        if closeted { #expect(closet.memberships(1, scope: .all) == [closet.closetSpace]) }
+        #expect(mac.settle() == .settled)
+    }
+
+    @Test("pending AX activation may complete on a focus write, a native event, or the next request", arguments: DeferredActivationCompletion.allCases)
+    func deferredActivation(_ completion: DeferredActivationCompletion) throws {
+        let mac = SimulatedMac()
+        defer { mac.shutdown() }
+        let app = mac.launch(windows: 1)
+        _ = mac.launch(windows: 1)
+        let ax = mac.ax, application = ax.application(app.pid)
+        let window = try #require(ax.copy(.windows, of: application).value?.elements?.first)
+        app.deferNextActivation(completion: completion)
+        #expect(ax.set(.frontmost, of: application, to: .bool(true)) == .success)
+        #expect(ax.copy(.frontmost, of: application).value?.bool == false)
+        #expect(ax.set(.main, of: window, to: .bool(true)) == .success)
+        #expect(ax.perform(.raise, on: window) == .success)
+        #expect(ax.copy(.frontmost, of: application).value?.bool == (completion == .focusWrite))
+        #expect(mac.isMain(1) && app.focusedWindow == 1)
+        #expect(mac.settle() == .settled)
+        #expect((mac.frontmostApp == app.pid) == (completion != .nextRequest))
+        if completion == .nextRequest { #expect(ax.set(.frontmost, of: application, to: .bool(true)) == .success) }
+        #expect(mac.settle() == .settled)
+        #expect(mac.focusedWindow == 1 && mac.frontmostApp == app.pid)
+    }
+
+    @Test("content tab contents flatten selected pages and segmented controls expose only radio children", arguments: [ContentTabStyle.empty, .populated, .segmentedRadioGroup])
+    func contentTabs(_ style: ContentTabStyle) throws {
+        let mac = SimulatedMac()
+        defer { mac.shutdown() }
+        let app = mac.launch(windows: 1)
+        app.showContentTabs(in: 1, style: style)
+        let ax = mac.ax, application = ax.application(app.pid)
+        let window = try #require(ax.copy(.windows, of: application).value?.elements?.first)
+        let group = try #require(ax.copy(.children, of: window).value?.elements?.first)
+        let tabReply = ax.copy(.tabs, of: group), contentReply = ax.copy(.contents, of: group)
+        let children = try #require(ax.copy(.children, of: group).value?.elements)
+        if style == .segmentedRadioGroup {
+            #expect(ax.copy(.role, of: group).value?.string == "AXRadioGroup")
+            #expect(tabReply.status == .attributeUnsupported && tabReply.value == nil)
+            #expect(contentReply.status == .attributeUnsupported && contentReply.value == nil)
+            #expect(children.map { ax.copy(.role, of: $0).value?.string } == Array(repeating: "AXRadioButton", count: 3))
+            for button in children { #expect(ax.copy(.children, of: button).status == .noValue) }
+        } else {
+            let tabs = try #require(tabReply.value?.elements), contents = try #require(contentReply.value?.elements)
+            #expect(contents.count == (style == .empty ? 0 : 1))
+            #expect(children == tabs + contents)
+            #expect(tabs.allSatisfy { !contents.contains($0) })
+            for tab in tabs { #expect(ax.copy(.children, of: tab).status == .noValue) }
+            for content in contents { #expect(ax.copy(.role, of: content).value?.string == "AXStaticText") }
+        }
+        #expect(mac.settle() == .settled)
+    }
+
     @Test("prohibited lifecycle notifications may be delivered or omitted independently", arguments: ProhibitedNotifications.allCases)
     func prohibitedLifecycle(_ notifications: ProhibitedNotifications) {
         let mac = SimulatedMac()

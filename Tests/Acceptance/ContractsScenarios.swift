@@ -28,13 +28,27 @@ extension Acceptance.Contracts {
             try #require(["AXTabGroup", "AXGroup", "AXRadioGroup"].contains(group.role ?? ""))
             try #require(group.childrenError == 0 && group.childrenIsArray)
             if kind == "segmentedTabs" {
-                try #require(group.children.filter { $0 == "AXRadioButton" }.count == 3)
+                if group.role == "AXRadioGroup" {
+                    try #require(group.children == Array(repeating: "AXRadioButton", count: 3))
+                    try #require(group.tabsError == -25205 && !group.tabsIsArray && group.tabs.isEmpty)
+                    try #require(group.contentsError == -25205 && !group.contentsIsArray && group.contents.isEmpty)
+                } else {
+                    try #require(group.tabsError == 0 && group.tabsIsArray && group.tabs == Array(repeating: "AXRadioButton", count: 3))
+                    try #require(group.contentsError == 0 && group.contentsIsArray && group.contents == ["AXGroup"])
+                    try #require(group.contentsInChildren && group.children == group.tabs + group.contents && !group.tabsInContents)
+                }
             } else {
+                try #require(group.role == "AXTabGroup")
                 try #require(group.tabsError == 0 && group.tabsIsArray && group.contentsError == 0 && group.contentsIsArray)
                 try #require(group.tabs == Array(repeating: "AXRadioButton", count: 3))
                 try #require(!group.tabsInContents, "content tab buttons must not acquire native-bar identity")
-                try #require(kind == "emptyContentTabs" ? group.contents.isEmpty : group.contents == ["AXGroup"], "\(kind) publishes AXContents roles \(group.contents)")
+                try #require(kind == "emptyContentTabs" ? group.contents.isEmpty : group.contents == ["AXStaticText"], "\(kind) publishes AXContents roles \(group.contents)")
+                try #require(group.contentsInChildren && group.children == group.tabs + group.contents)
             }
+            let buttonCount = group.role == "AXRadioGroup" ? 3 : group.tabs.count
+            try #require(group.tabChildrenErrors == Array(repeating: -25212, count: buttonCount)
+                && group.tabChildrenAreArrays == Array(repeating: false, count: buttonCount)
+                && group.tabChildren.count == buttonCount && group.tabChildren.allSatisfy(\.isEmpty))
         }
     }
 
@@ -140,7 +154,7 @@ extension Acceptance.Contracts {
         }
     }
 
-    @Test("native-tab-insertion: insertion preserves bar identity, frame and Space", contract(.nativeTabInsertion))
+    @Test("native-tab-insertion: insertion preserves bar and frame while publishing a new active-desktop root", contract(.nativeTabInsertion))
     func nativeTabInsertion() throws {
         let ids = try nativeTabs()
         let first = try window(ids[0]), bar = try #require(first.bar)
@@ -148,7 +162,8 @@ extension Acceptance.Contracts {
         try #require(try write(ids[0], "AXPosition", Array(frame.prefix(2))) == 0)
         try #require(try write(ids[0], "AXSize", Array(frame.suffix(2))) == 0)
         try requireFinalState("the existing tab group has distinct geometry before insertion") { try desktop.near(window(ids[0]).frame, frame) }
-        let space = try #require(try native("spaces", ["ids": [ids[0]]]).memberships?.first?.ordinary)
+        let initial = try native("spaces", ["ids": [ids[0]]])
+        let space = try #require(initial.memberships?.first?.ordinary), active = try #require(initial.activeSpace)
         let reply = try fixture.command("addTab", ["key": "inserted", "reference": "tabs0"])
         let inserted = try #require(reply.windows["inserted"])
         try requireFinalState("the inserted tab becomes the selected native root") {
@@ -177,13 +192,13 @@ extension Acceptance.Contracts {
                 && memberships.allSatisfy { $0.ordinary.isEmpty && $0.all.contains(closet) }
         }
         let added = try #require(try fixture.command("addTab", ["key": "backgroundInserted", "reference": "inserted", "activating": false]).windows["backgroundInserted"])
-        try requireFinalState("background insertion keeps the group frame and invisible Space") {
+        try requireFinalState("background insertion keeps the group frame and publishes the new root on the active desktop") {
             let state = try native()
             guard state.focused?.id == added || state.roots.contains(where: { $0.id == added }) else { return false }
             let membership = try native("spaces", ["ids": [added]])
             return state.focused?.id == added && state.frontmost == false && state.roots.first?.bar == bar && state.roots.first?.tabs == 5
-                && state.roots.first.map { desktop.near($0.frame, frame) } == true && !state.visible.contains(added)
-                && membership.memberships?.first?.ordinary.isEmpty == true && membership.memberships?.first?.all.contains(closet) == true
+                && state.roots.first.map { desktop.near($0.frame, frame) } == true && state.visible.contains(added)
+                && membership.activeSpace == active && membership.memberships?.first?.ordinary == [active] && membership.memberships?.first?.all == [active]
         }
     }
 
@@ -207,7 +222,7 @@ extension Acceptance.Contracts {
         }
     }
 
-    @Test("termination-activation-order: promotion before termination delivery sees a dead process", contract(.terminationActivationOrder))
+    @Test("termination-activation-order: survivor activation may precede process reaping", contract(.terminationActivationOrder))
     func terminationActivationOrder() throws {
         _ = try fixture.open()
         try desktop.activate()
@@ -233,11 +248,14 @@ extension Acceptance.Contracts {
             }
             let events = Array((try native("lifecycle").lifecycle ?? []).dropFirst(offset))
             let terminated = try #require(events.firstIndex { $0.knownPID == pid && $0.name == "NSWorkspaceDidTerminateApplicationNotification" })
+            let exited = try #require(events[terminated].alivePIDs)
+            try #require(events[terminated].mainThread && !exited.contains(pid), "termination delivery must observe process exit")
             let promotions = events.prefix(terminated).filter { $0.knownPID == fixture.pid && $0.name == "NSWorkspaceDidActivateApplicationNotification" }
             print("Termination activation: crash=\(crash), promotions before termination delivery=\(promotions.count)")
             for event in promotions {
                 let alive = try #require(event.alivePIDs)
-                try #require(!alive.contains(pid) && alive.contains(fixture.pid), "promotion before lifecycle delivery must not precede process exit (crash=\(crash))")
+                try #require(event.mainThread && alive.contains(fixture.pid), "native promotion must name a surviving fixture")
+                print("Termination activation: crash=\(crash), dying process still exists at promotion=\(alive.contains(pid))")
             }
         }
     }
@@ -265,7 +283,7 @@ extension Acceptance.Contracts {
         print("Native tab publication: retained-bar successors with delayed list and focus=\(delayedSuccessors)")
     }
 
-    @Test("deferred-ax-activation: accepted main and raise requests allow an unconfirmed activation", contract(.deferredAXActivation))
+    @Test("deferred-ax-activation: accepted activation may complete before another activation request", contract(.deferredAXActivation))
     func deferredAXActivation() throws {
         let id = try fixture.open()
         try desktop.activate()
@@ -276,13 +294,17 @@ extension Acceptance.Contracts {
         let activation = try native("activateAX")
         try #require(activation.result == 0 && activation.readError == 0 && activation.frontmost != nil)
         let pending = activation.frontmost == false
+        var confirmed = !pending
         print("Deferred activation: first accepted request pending=\(pending)")
         for attribute in ["AXMain", "AXRaise"] {
             try #require(try write(id, attribute) == 0)
             let state = try native()
             try #require(state.focused?.id == id && state.roots.first?.main == true)
-            if pending { try #require(state.frontmost == false, "main and raise must not complete the modeled pending activation") }
+            let frontmost = try #require(state.frontmost)
+            if confirmed { try #require(frontmost, "a completed activation must remain active without an intervening selection") }
+            confirmed = frontmost
         }
+        print("Deferred activation: completed before another activation request=\(confirmed)")
         try cover.command("yieldActivation", ["pid": fixture.pid])
         try #require(try native("activateAX").result == 0)
         try expectFocus(id)

@@ -1,6 +1,11 @@
 import Foundation
 import CoreGraphics
 
+package enum DeferredActivationCompletion: String, CaseIterable, Sendable {
+    case focusWrite, nativeEvent, nextRequest
+}
+package enum TerminationExitOrder: String, CaseIterable, Sendable { case beforePromotion, afterPromotion }
+
 extension SimulatedApp {
     @MainActor package func beginMinimize(_ window: UInt32) {
         mac.assume(.minimizeFocusInterruption)
@@ -14,27 +19,34 @@ extension SimulatedApp {
         mac.windows[window]?.minimizing = false
         mac.minimize(window, successor: successor)
     }
-    @MainActor package func deferNextActivation() {
+    @MainActor package func deferNextActivation(completion: DeferredActivationCompletion = .focusWrite) {
         mac.assume(.deferredAXActivation)
-        mac.action("\(alias) defer its next AX activation")
+        mac.action("\(alias) defer its next AX activation until \(completion.rawValue)")
         mac.apps[pid]?.deferredActivations += 1
+        mac.apps[pid]?.activationCompletion = completion
     }
     @MainActor package func limitSize(_ window: UInt32, maximum: CGSize) {
         mac.assume(.sizeLimitChanges)
         mac.action("\(alias) limit window \(window) to \(maximum.width)x\(maximum.height)")
         mac.windows[window]?.spec.maximumSize = maximum
     }
-    @MainActor package func terminate(activating successor: UInt32, crash: Bool, publishesNotification: Bool = true) {
+    @MainActor package func terminate(activating successor: UInt32, crash: Bool, publishesNotification: Bool = true,
+                                     exitOrder: TerminationExitOrder = .afterPromotion) {
         mac.assume(.terminationActivationOrder)
-        mac.action("\(crash ? "crash" : "quit") \(alias), promoting window \(successor) before notification")
+        mac.action("\(crash ? "crash" : "quit") \(alias), promoting window \(successor) before notification, exit=\(exitOrder.rawValue)")
         mac.apps[pid]?.terminated = true
+        mac.apps[pid]?.processExists = exitOrder == .afterPromotion
         for id in mac.windows.keys.sorted() where mac.windows[id]?.pid == pid { mac.windows[id]?.closed = true }
         mac.focus(successor)
-        if publishesNotification { mac.post(.terminated, pid: pid) }
+        if publishesNotification {
+            if exitOrder == .afterPromotion { mac.scheduler.nativeEvent { self.publishTermination() } }
+            else { mac.post(.terminated, pid: pid) }
+        }
     }
     @MainActor package func publishTermination() {
         mac.assume(.terminationActivationOrder)
         mac.action("publish termination of \(alias)")
+        mac.apps[pid]?.processExists = false
         mac.post(.terminated, pid: pid)
     }
     @MainActor package func publishWindows(_ windows: [UInt32]?) {
@@ -59,20 +71,32 @@ extension SimulatedMac {
             assume(.deferredAXActivation)
             apps[pid]?.deferredActivations -= 1
             apps[pid]?.activationPending = true
+            if apps[pid]?.activationCompletion == .nativeEvent {
+                scheduler.nativeEvent {
+                    if self.apps[pid]?.activationPending == true { self.completeAXActivation(pid) }
+                }
+            }
         } else {
-            apps[pid]?.activationPending = false
-            front = pid
-            post(.activated, pid: pid)
+            completeAXActivation(pid)
         }
+    }
+    func completeAXActivation(_ pid: Int32) {
+        guard apps[pid]?.terminated == false else { return }
+        apps[pid]?.activationPending = false
+        front = pid
+        post(.activated, pid: pid)
     }
     func selectFromAX(_ id: UInt32) {
         if windows[id]?.minimizing == true {
             assume(.minimizeFocusInterruption)
             windows[id]?.minimizing = false
         }
-        let pending = apps[windows[id]!.pid]?.activationPending == true
-        if pending { assume(.deferredAXActivation) }
-        focus(id, activating: !pending)
+        let pid = windows[id]!.pid
+        if apps[pid]?.activationPending == true {
+            assume(.deferredAXActivation)
+            if apps[pid]?.activationCompletion == .focusWrite { completeAXActivation(pid) }
+        }
+        focus(id, activating: apps[pid]?.activationPending != true)
     }
 
     @MainActor package func isInCloset(_ id: UInt32) -> Bool {

@@ -2,7 +2,6 @@ import Foundation
 import Ports
 
 package enum ContentTabStyle: String, CaseIterable, Sendable {
-    // Keep segmented chrome as choices until the real contract pins its shape.
     case empty, populated, segmentedGroup, segmentedRadioGroup, segmentedTabs
 }
 
@@ -98,6 +97,7 @@ extension SimulatedMac {
             }
         } else if let content = foundation.content[window] {
             assume(.contentTabChrome)
+            let contents = [.empty, .segmentedRadioGroup].contains(content.style) ? [] : [element(.foundation(window, .page))]
             switch (node, attribute) {
             case (.contentGroup, .role):
                 let role: String = switch content.style {
@@ -107,15 +107,18 @@ extension SimulatedMac {
                 }
                 return AXResult(.success, .string(role))
             case (.contentGroup, .tabs):
+                if content.style == .segmentedRadioGroup { return AXResult(.attributeUnsupported) }
                 return AXResult(.success, .elements((0..<content.count).map { element(.foundation(window, .contentTab($0))) }))
             case (.contentGroup, .contents):
-                return AXResult(.success, .elements(content.style == .empty ? [] : [element(.foundation(window, .page))]))
+                if content.style == .segmentedRadioGroup { return AXResult(.attributeUnsupported) }
+                return AXResult(.success, .elements(contents))
             case (.contentGroup, .children):
                 return AXResult(.success, .elements((0..<content.count).map { element(.foundation(window, .contentTab($0))) }
-                    + [element(.foundation(window, .page))]))
+                    + contents))
             case (.contentTab, .role): return AXResult(.success, .string("AXRadioButton"))
-            case (.page, .role): return AXResult(.success, .string("AXGroup"))
-            case (.contentTab, .children), (.page, .children): return AXResult(.success, .elements([]))
+            case (.page, .role): return AXResult(.success, .string(content.style == .populated ? "AXStaticText" : "AXGroup"))
+            case (.contentTab, .children): return AXResult(.noValue)
+            case (.page, .children): return AXResult(.success, .elements([]))
             default: break
             }
         }

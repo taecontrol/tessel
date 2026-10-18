@@ -96,6 +96,7 @@ package final class SimulatedMac: @unchecked Sendable {
     struct AppState {
         let pid: Int32, alias: String, bundleID: String
         var hidden = false, terminated = false, prohibited = false, hung = false
+        var processExists = true
         var prohibitedNotifications = ProhibitedNotifications.omitted
         var busyUntil = 0
         var omitHiddenWindows = false
@@ -106,6 +107,7 @@ package final class SimulatedMac: @unchecked Sendable {
         var publishesFocus = true
         var deferredActivations = 0
         var activationPending = false
+        var activationCompletion = DeferredActivationCompletion.focusWrite
     }
     struct Window {
         let id: UInt32, pid: Int32
@@ -261,6 +263,7 @@ package final class SimulatedMac: @unchecked Sendable {
         assume(.applicationLifecycle)
         action("\(crash ? "crash" : "quit") \(apps[pid]!.alias)")
         apps[pid]?.terminated = true
+        apps[pid]?.processExists = false
         for id in windows.keys.sorted() where windows[id]?.pid == pid { windows[id]?.closed = true }
         if front == pid { front = nil }
         if apps[pid]?.prohibited == false || [.delivered, .terminationOnly].contains(apps[pid]!.prohibitedNotifications) {

@@ -88,6 +88,18 @@ IDs, failed/non-array reads and retained closed handles. They do not publish
 catalog rows or decide workspace membership. The production catalog must
 interpret the resulting port calls.
 
+Content tabs flatten their selected page: an empty page contributes no contents
+or child, while a populated page exposes its static-text leaf in both AXContents
+and AXChildren. The content handles remain distinct from the tab buttons.
+Content tab buttons have no AXChildren value. Segmented radio groups expose
+only those buttons as children and report unsupported AXTabs/AXContents;
+the other segmented roles retain conservative alternative shapes.
+
+`addTab(to:activating:)` creates a new native root on the active desktop, retaining
+the group's bar and frame. A background insertion can therefore be CG-visible
+before policy reconciles a closeted group's hidden intent; it does not inherit
+the reference root's completed Space move or activate the app.
+
 `beginFullscreenTransition(_:publishingRoot:)` chooses whether AppKit exposes
 an auxiliary display-sized `AXUnknown` root. It stays live across reads until
 `finishFullscreenTransition` removes it; `enterFullscreen` and `leaveFullscreen`
@@ -105,6 +117,18 @@ Space membership is a set: showing a window restores ordinary active membership
 and, by default, retains its invisible closet membership until destruction.
 `closetPort(retainingShownMembership:)` also models immediate removal. A shown
 window with both memberships is visible and is no longer in the closet.
+
+`deferNextActivation(completion:)` accepts the AX request before activation is
+confirmed. Completion can follow a main/raise write (the default), arrive as a
+native event, or wait for another activation request. Retry scenarios select
+the last choice explicitly; native completion does not require that retry.
+
+`terminate(activating:crash:publishesNotification:exitOrder:)` separates a dying
+app's destroyed windows from the process-existence probe. The process can exit
+before promotion or remain unreaped through survivor activation (the default).
+Publishing termination completes process exit before lifecycle delivery.
+The rail termination example enumerates both exit orders without changing its
+adjacent-rail landing assertion.
 
 A new OS behavior gets a stable kebab-case ID and a one-sentence statement in
 `Assumption`, and an `assume(.caseName)` call at its simulator definition.

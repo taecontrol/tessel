@@ -64,19 +64,19 @@ package enum Assumption: String, CaseIterable, Sendable {
         case .finderDesktop: "Finder exposes its desktop as an AXScrollArea without a window ID or subrole and can activate it without reopening windows."
         // #1 scenarios
         case .backgroundWindowCreation: "Opening a window in the background posts a creation notification without changing app focus or main window."
-        case .contentTabChrome: "Content tabs expose tab buttons separately from their selected-page contents, including empty contents, and segmented controls expose ordinary child controls."
+        case .contentTabChrome: "Content tabs expose childless buttons separately from flattened selected-page contents: empty pages publish no content, populated pages publish AXStaticText in AXContents and AXChildren, and segmented radio groups expose only child buttons with unsupported tabs/contents attributes."
         case .nativeTabExtraControls: "A native tab bar's AXContents may include a New Tab button beyond AXTabs, and native tabs need not have close buttons."
         case .delayedNativeTabFocus: "AXWindows may retain the former native-tab root after its bar moves while AXFocusedWindow is unavailable until the selected root is published."
         // #2 scenarios
         case .activationHiddenFocus: "Plain activation can leave an app's focused window in the closet, with AX focus still readable, and unhides a hidden app."
         case .closeFocusPromotion: "Closing a key window can promote a closeted sibling before the destruction notification is delivered."
         case .sheetFocusOwnership: "An attached sheet keeps key focus when its parent is raised or made main, while the parent owns AXMain."
-        case .nativeTabInsertion: "Adding a native tab preserves the group's bar identity, shared frame and Space while selecting the new front."
+        case .nativeTabInsertion: "Adding a native tab preserves bar identity and shared frame while selecting the new front; its new root belongs to the active desktop and may become CG-visible even when inserted into a closeted background group."
         // #17 scenarios
         case .sizeLimitChanges: "Changing an AppKit window's maximum size leaves its current frame intact and clamps the next size write."
-        case .terminationActivationOrder: "A process is no longer alive when macOS promotes a surviving app before delivering the terminated process's lifecycle notification."
+        case .terminationActivationOrder: "A dying process may still satisfy a liveness probe when macOS activates a survivor before termination notification delivery; window destruction, process exit and lifecycle delivery are separate."
         case .nativeTabPublication: "A native tab's bar can identify its successor while AXWindows still lists the former root and AXFocusedWindow is temporarily unpublished."
-        case .deferredAXActivation: "AX can accept activation, main and raise requests while the app remains inactive until another activation request completes it."
+        case .deferredAXActivation: "AX can accept activation before the app becomes active; pending activation may complete asynchronously, on a main or raise write, or on another activation request."
         case .minimizeFocusInterruption: "An AX main or raise request during the Dock transition can cancel minimization before AXMinimized becomes true."
         }
     }
