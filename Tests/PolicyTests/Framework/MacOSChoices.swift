@@ -9,6 +9,28 @@ private final class NativeRootEvents: @unchecked Sendable {
 }
 
 @Suite @MainActor struct MacOSChoices {
+    @Test("pending AX activation may complete on a focus write, a native event, or the next request", arguments: DeferredActivationCompletion.allCases)
+    func deferredActivation(_ completion: DeferredActivationCompletion) throws {
+        let mac = SimulatedMac()
+        defer { mac.shutdown() }
+        let app = mac.launch(windows: 1)
+        _ = mac.launch(windows: 1)
+        let ax = mac.ax, application = ax.application(app.pid)
+        let window = try #require(ax.copy(.windows, of: application).value?.elements?.first)
+        app.deferNextActivation(completion: completion)
+        #expect(ax.set(.frontmost, of: application, to: .bool(true)) == .success)
+        #expect(ax.copy(.frontmost, of: application).value?.bool == false)
+        #expect(ax.set(.main, of: window, to: .bool(true)) == .success)
+        #expect(ax.perform(.raise, on: window) == .success)
+        #expect(ax.copy(.frontmost, of: application).value?.bool == (completion == .focusWrite))
+        #expect(mac.isMain(1) && app.focusedWindow == 1)
+        #expect(mac.settle() == .settled)
+        #expect((mac.frontmostApp == app.pid) == (completion != .nextRequest))
+        if completion == .nextRequest { #expect(ax.set(.frontmost, of: application, to: .bool(true)) == .success) }
+        #expect(mac.settle() == .settled)
+        #expect(mac.focusedWindow == 1 && mac.frontmostApp == app.pid)
+    }
+
     @Test("content tab contents flatten the selected page and share their children handles", arguments: [ContentTabStyle.empty, .populated])
     func contentTabs(_ style: ContentTabStyle) throws {
         let mac = SimulatedMac()

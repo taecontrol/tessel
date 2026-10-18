@@ -106,6 +106,7 @@ package final class SimulatedMac: @unchecked Sendable {
         var publishesFocus = true
         var deferredActivations = 0
         var activationPending = false
+        var activationCompletion = DeferredActivationCompletion.focusWrite
     }
     struct Window {
         let id: UInt32, pid: Int32

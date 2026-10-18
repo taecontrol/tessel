@@ -110,6 +110,11 @@ and, by default, retains its invisible closet membership until destruction.
 `closetPort(retainingShownMembership:)` also models immediate removal. A shown
 window with both memberships is visible and is no longer in the closet.
 
+`deferNextActivation(completion:)` accepts the AX request before activation is
+confirmed. Completion can follow a main/raise write (the default), arrive as a
+native event, or wait for another activation request. Retry scenarios select
+the last choice explicitly; native completion does not require that retry.
+
 A new OS behavior gets a stable kebab-case ID and a one-sentence statement in
 `Assumption`, and an `assume(.caseName)` call at its simulator definition.
 Real contracts in `Tests/Acceptance/Contracts*.swift` declare

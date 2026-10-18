@@ -32,7 +32,7 @@ import Testing
             let f = RailFixture(s, widths: [0.25]), a = f.ids[0]
             let other = f.mac.launch(), b = other.open(WindowSpec())
             s.settle(); f.press("move down", focus: b); f.press("focus up", focus: a)
-            other.deferNextActivation()
+            other.deferNextActivation(completion: .nextRequest)
             let start = f.mac.scheduler.trace.count
             f.tessel.press("focus down"); s.settle(); f.focus(b)
             let trace = Array(f.mac.scheduler.trace.dropFirst(start)), lane = "tessel.ax.\(other.pid)"

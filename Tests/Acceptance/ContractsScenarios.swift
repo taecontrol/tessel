@@ -267,7 +267,7 @@ extension Acceptance.Contracts {
         print("Native tab publication: retained-bar successors with delayed list and focus=\(delayedSuccessors)")
     }
 
-    @Test("deferred-ax-activation: accepted main and raise requests allow an unconfirmed activation", contract(.deferredAXActivation))
+    @Test("deferred-ax-activation: accepted activation may complete before another activation request", contract(.deferredAXActivation))
     func deferredAXActivation() throws {
         let id = try fixture.open()
         try desktop.activate()
@@ -278,13 +278,17 @@ extension Acceptance.Contracts {
         let activation = try native("activateAX")
         try #require(activation.result == 0 && activation.readError == 0 && activation.frontmost != nil)
         let pending = activation.frontmost == false
+        var confirmed = !pending
         print("Deferred activation: first accepted request pending=\(pending)")
         for attribute in ["AXMain", "AXRaise"] {
             try #require(try write(id, attribute) == 0)
             let state = try native()
             try #require(state.focused?.id == id && state.roots.first?.main == true)
-            if pending { try #require(state.frontmost == false, "main and raise must not complete the modeled pending activation") }
+            let frontmost = try #require(state.frontmost)
+            if confirmed { try #require(frontmost, "a completed activation must remain active without an intervening selection") }
+            confirmed = frontmost
         }
+        print("Deferred activation: completed before another activation request=\(confirmed)")
         try cover.command("yieldActivation", ["pid": fixture.pid])
         try #require(try native("activateAX").result == 0)
         try expectFocus(id)
