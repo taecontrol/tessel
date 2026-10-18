@@ -28,7 +28,15 @@ extension Acceptance.Contracts {
             try #require(["AXTabGroup", "AXGroup", "AXRadioGroup"].contains(group.role ?? ""))
             try #require(group.childrenError == 0 && group.childrenIsArray)
             if kind == "segmentedTabs" {
-                try #require(group.children.filter { $0 == "AXRadioButton" }.count == 3)
+                if group.role == "AXRadioGroup" {
+                    try #require(group.children == Array(repeating: "AXRadioButton", count: 3))
+                    try #require(group.tabsError == -25205 && !group.tabsIsArray && group.tabs.isEmpty)
+                    try #require(group.contentsError == -25205 && !group.contentsIsArray && group.contents.isEmpty)
+                } else {
+                    try #require(group.tabsError == 0 && group.tabsIsArray && group.tabs == Array(repeating: "AXRadioButton", count: 3))
+                    try #require(group.contentsError == 0 && group.contentsIsArray && group.contents == ["AXGroup"])
+                    try #require(group.contentsInChildren && group.children == group.tabs + group.contents && !group.tabsInContents)
+                }
             } else {
                 try #require(group.role == "AXTabGroup")
                 try #require(group.tabsError == 0 && group.tabsIsArray && group.contentsError == 0 && group.contentsIsArray)
@@ -37,6 +45,10 @@ extension Acceptance.Contracts {
                 try #require(kind == "emptyContentTabs" ? group.contents.isEmpty : group.contents == ["AXStaticText"], "\(kind) publishes AXContents roles \(group.contents)")
                 try #require(group.contentsInChildren && group.children == group.tabs + group.contents)
             }
+            let buttonCount = group.role == "AXRadioGroup" ? 3 : group.tabs.count
+            try #require(group.tabChildrenErrors == Array(repeating: -25212, count: buttonCount)
+                && group.tabChildrenAreArrays == Array(repeating: false, count: buttonCount)
+                && group.tabChildren.count == buttonCount && group.tabChildren.allSatisfy(\.isEmpty))
         }
     }
 

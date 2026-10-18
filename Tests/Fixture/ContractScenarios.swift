@@ -50,7 +50,8 @@ extension FixtureContracts {
                 }
                 var result: [[String: Any]] = []
                 if !tabs.isEmpty || roles(children).contains(kAXRadioButtonRole) {
-                    let tabChildren = tabs.map { read($0, kAXChildrenAttribute) }
+                    let buttons = tabs.isEmpty ? children.filter { read($0, kAXRoleAttribute).value as? String == kAXRadioButtonRole } : tabs
+                    let tabChildren = buttons.map { read($0, kAXChildrenAttribute) }
                     result.append(["role": read(node, kAXRoleAttribute).value as? String as Any? ?? NSNull(),
                                    "tabs": roles(tabs), "contents": roles(contents), "children": roles(children),
                                    "tabsError": tabReply.error.rawValue, "tabsIsArray": tabReply.value is [AXUIElement],

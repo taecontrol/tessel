@@ -91,6 +91,9 @@ interpret the resulting port calls.
 Content tabs flatten their selected page: an empty page contributes no contents
 or child, while a populated page exposes its static-text leaf in both AXContents
 and AXChildren. The content handles remain distinct from the tab buttons.
+Content tab buttons have no AXChildren value. Segmented radio groups expose
+only those buttons as children and report unsupported AXTabs/AXContents;
+the other segmented roles retain conservative alternative shapes.
 
 `addTab(to:activating:)` creates a new native root on the active desktop, retaining
 the group's bar and frame. A background insertion can therefore be CG-visible

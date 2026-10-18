@@ -85,7 +85,7 @@ private final class NativeRootEvents: @unchecked Sendable {
         #expect(mac.focusedWindow == 1 && mac.frontmostApp == app.pid)
     }
 
-    @Test("content tab contents flatten the selected page and share their children handles", arguments: [ContentTabStyle.empty, .populated])
+    @Test("content tab contents flatten selected pages and segmented controls expose only radio children", arguments: [ContentTabStyle.empty, .populated, .segmentedRadioGroup])
     func contentTabs(_ style: ContentTabStyle) throws {
         let mac = SimulatedMac()
         defer { mac.shutdown() }
@@ -94,12 +94,22 @@ private final class NativeRootEvents: @unchecked Sendable {
         let ax = mac.ax, application = ax.application(app.pid)
         let window = try #require(ax.copy(.windows, of: application).value?.elements?.first)
         let group = try #require(ax.copy(.children, of: window).value?.elements?.first)
-        let tabs = try #require(ax.copy(.tabs, of: group).value?.elements)
-        let contents = try #require(ax.copy(.contents, of: group).value?.elements)
-        #expect(contents.count == (style == .empty ? 0 : 1))
-        #expect(ax.copy(.children, of: group).value?.elements == tabs + contents)
-        #expect(tabs.allSatisfy { !contents.contains($0) })
-        for content in contents { #expect(ax.copy(.role, of: content).value?.string == "AXStaticText") }
+        let tabReply = ax.copy(.tabs, of: group), contentReply = ax.copy(.contents, of: group)
+        let children = try #require(ax.copy(.children, of: group).value?.elements)
+        if style == .segmentedRadioGroup {
+            #expect(ax.copy(.role, of: group).value?.string == "AXRadioGroup")
+            #expect(tabReply.status == .attributeUnsupported && tabReply.value == nil)
+            #expect(contentReply.status == .attributeUnsupported && contentReply.value == nil)
+            #expect(children.map { ax.copy(.role, of: $0).value?.string } == Array(repeating: "AXRadioButton", count: 3))
+            for button in children { #expect(ax.copy(.children, of: button).status == .noValue) }
+        } else {
+            let tabs = try #require(tabReply.value?.elements), contents = try #require(contentReply.value?.elements)
+            #expect(contents.count == (style == .empty ? 0 : 1))
+            #expect(children == tabs + contents)
+            #expect(tabs.allSatisfy { !contents.contains($0) })
+            for tab in tabs { #expect(ax.copy(.children, of: tab).status == .noValue) }
+            for content in contents { #expect(ax.copy(.role, of: content).value?.string == "AXStaticText") }
+        }
         #expect(mac.settle() == .settled)
     }
 
