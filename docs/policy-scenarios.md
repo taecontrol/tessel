@@ -87,6 +87,12 @@ IDs, failed/non-array reads and retained closed handles. They do not publish
 catalog rows or decide workspace membership. The production catalog must
 interpret the resulting port calls.
 
+`beginFullscreenTransition(_:publishingRoot:)` chooses whether AppKit exposes
+an auxiliary display-sized `AXUnknown` root. It stays live across reads until
+`finishFullscreenTransition` removes it; `enterFullscreen` and `leaveFullscreen`
+set the ordinary window's final state independently. The workspace fullscreen
+example exercises both choices without changing its assertions.
+
 A new OS behavior gets a stable kebab-case ID and a one-sentence statement in
 `Assumption`, and an `assume(.caseName)` call at its simulator definition.
 Real contracts in `Tests/Acceptance/Contracts*.swift` declare

@@ -51,7 +51,7 @@ package enum Assumption: String, CaseIterable, Sendable {
         case .axSubscriptions: "Observers register per-element notifications, retain equal element identity, and stop delivering after removal."
         case .axMessagingTimeout: "AX calls to a hung app fail with cannotComplete after the handle's messaging timeout."
         case .axReadDelivery: "An AX reply describes state captured by that call, even when delivery happens later."
-        case .transientWindowLists: "AXWindows may omit live handles, expose zero IDs, fail or change between successive reads during native transitions."
+        case .transientWindowLists: "AXWindows may omit handles, expose zero IDs, fail or change during transitions, including a temporary nonresizable display-sized AXUnknown root with AXFullScreen false during native fullscreen."
         case .closedWindowHandles: "A closed window can remain listed, but its retained AX handle becomes invalid."
         case .minimizeRestore: "Minimize and restore change AX and CG state, with notifications after the Dock operation and a selectable successor."
         case .nativeFullscreen: "A native fullscreen window occupies a separate Space and leaves ordinary desktop visibility until exit."

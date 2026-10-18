@@ -69,6 +69,7 @@ package final class SimulatedMac: @unchecked Sendable {
     var apps: [Int32: AppState] = [:]
     var windows: [UInt32: Window] = [:]
     var groups: [Int: TabGroup] = [:]
+    var fullscreenRoots: [UInt32: UInt32] = [:]
     var front: Int32?
     var zOrder: [UInt32] = []
     var active: UInt64 = 1
