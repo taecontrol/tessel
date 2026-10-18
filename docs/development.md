@@ -119,8 +119,19 @@ A full observation, used by setup and one-shot reads, gives each AX read
 an absent or unfocused window. The system-wide focused-application read is
 answered by the frontmost app, and a 20 ms limit missed busy fixtures even on
 an idle Mac. Focused-only observations, which timed checks poll, keep 20 ms so
-a busy app is asked again rather than consuming the deadline. Deadlines are
-unchanged: a reading that arrives after its deadline still fails.
+a busy app is asked again rather than consuming the deadline.
+
+Timed checks are judged by when their inputs were produced, not by when this
+test process received them (issue #21). Each observation carries the raw
+monotonic time at which the observer finished it. A CLI result, fixture reply
+or other subprocess counts at its receipt. An evaluation counts at its latest
+input, and one without recorded inputs counts when it returns. On xcode-27 the
+test process alone was descheduled for up to 709 ms. In run 39090280471, a
+switch the observer saw complete in about 14 ms was received 242 ms late.
+Deadlines and budgets are unchanged: an observation taken after its deadline
+still fails, and a stall that prevents any sample before the deadline still
+fails. Switch and rail calibrations measure from the key post to the sample
+time that met the check.
 
 For minimize and restore, the 500 ms observation deadline begins at AppKit's
 completion notification, after the Dock animation. macOS sends the AX event
@@ -274,7 +285,7 @@ Run this capture only when owner review requires new evidence; it is separate
 from the automated gates. The issue #2 delivery's E37 capture is already accepted.
 
 Switch completion means visible, filled, and focused, measured from posting the
-event. The functional suite records 20 switches in `.work/switch-calibration.json`.
+event to the observer sample that showed it. The functional suite records 20 switches in `.work/switch-calibration.json`.
 `Tests/Acceptance/switch-budget.json` enforces three times the maximum of the
 delivery's 20 CI measurements, capped at 200 ms. Recalibrate on `xcode-27`, retain
 its run ID and measurements in that file, and rerun against the resulting budget.
@@ -362,8 +373,8 @@ records 20 completed scrolls and elevator trips in `.work/rails-calibration.json
 `Tests/Acceptance/rails-budget.json` retains the authorized xcode-27 run and
 uses three times its maximum, capped at 200 ms. The delivery calibration
 recorded a 99.779542 ms maximum in run 39084887323, giving the 200 ms cap. Timing starts at the real key
-post and ends after independent AX position, size, focus and CG visibility
-checks. Capture the app's own status button, without desktop content, with:
+post and ends at the observer sample whose AX position, size, focus and CG
+visibility met every check. Capture the app's own status button, without desktop content, with:
 
 ```sh
 TESSEL_CAPTURE_WORKSPACES=1 scripts/verify captureRailsStatusItem

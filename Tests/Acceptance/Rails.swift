@@ -1044,7 +1044,7 @@ extension Acceptance {
                 }
                 if !complete { print("Latency failure",i,target,slot,try flow.observe(),try harness.status().workspaces as Any) }
                 try #require(complete,"scroll/elevator must finish all destination geometry, visibility and focus within 200 ms")
-                samples.append(UInt64((monotonicSeconds()-start)*1e9))
+                samples.append(UInt64((SampleClock.lastJudged-start)*1e9))
             }
             let maximum = samples.max()!
             let result: [String:Any] = ["measurements":samples,"nanoseconds":min(200_000_000,maximum*3),"sourceRun":ProcessInfo.processInfo.environment["GITHUB_RUN_ID"] ?? "local"]

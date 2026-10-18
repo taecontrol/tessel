@@ -28,12 +28,47 @@ func monotonicSeconds() -> Double {
     Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1e9
 }
 
-/// Polls until the predicate holds. A result that arrives after the deadline is a failure.
+/// When the inputs of one predicate evaluation were produced (issue #21).
+/// An observation counts at the time the independent observer finished taking
+/// it; a CLI result, fixture reply, or other subprocess counts when it was
+/// received. The xcode-27 runner can deschedule this test process for hundreds
+/// of milliseconds after a sample was taken; that delay is not tessel's latency.
+enum SampleClock {
+    nonisolated(unsafe) private static var evaluations: [Double?] = []
+    /// The time the most recent successful wait was judged by.
+    nonisolated(unsafe) private(set) static var lastJudged: Double = 0
+
+    static func record(_ time: Double) {
+        guard let current = evaluations.indices.last else { return }
+        evaluations[current] = max(evaluations[current] ?? time, time)
+    }
+    fileprivate static func begin() { evaluations.append(nil) }
+    /// A nested wait's inputs are also inputs of the evaluation that called it.
+    fileprivate static func end() -> Double? {
+        let time = evaluations.removeLast()
+        if let time { record(time) }
+        return time
+    }
+    fileprivate static func judged(_ time: Double) { lastJudged = time }
+}
+
+/// Polls until the predicate holds. A result counts only if its inputs were
+/// produced by the deadline (see `SampleClock`); a predicate without recorded
+/// inputs is judged when it returns.
 func eventualValue<T>(within timeout: Double = 0.5, _ predicate: () throws -> T?) rethrows -> T? {
     let deadline = monotonicSeconds() + timeout
     while true {
-        if let result = try predicate() {
-            return monotonicSeconds() <= deadline ? result : nil
+        SampleClock.begin()
+        var ended = false
+        defer { if !ended { _ = SampleClock.end() } }
+        let value = try predicate()
+        let sampled = SampleClock.end()
+        ended = true
+        if let result = value {
+            let judged = sampled ?? monotonicSeconds()
+            guard judged <= deadline else { return nil }
+            SampleClock.judged(judged)
+            return result
         }
         if monotonicSeconds() >= deadline { return nil }
         usleep(15_000)
@@ -96,6 +131,7 @@ func run(_ command: [String], environment: [String: String]? = nil, timeout: Dou
         throw ProcessTimeout(description: "\(URL(fileURLWithPath: command[0]).lastPathComponent) timed out after \(timeout) seconds")
     }
     _ = reading.wait(timeout: .now() + 1)
+    SampleClock.record(monotonicSeconds())
     let result = ProcessResult(status: process.terminationStatus, outputData: collected[0], errorData: collected[1])
     if check, result.status != 0 {
         throw HarnessError("\(URL(fileURLWithPath: command[0]).lastPathComponent) exited with status \(result.status)")

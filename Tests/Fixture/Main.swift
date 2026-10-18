@@ -562,7 +562,9 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 "frontmostFixturePID": frontmostFixture ? front! : 0,
                 "activeFixturePID": workspaceFront.flatMap { pids.contains($0) ? $0 : nil } ?? 0,
                 "finderDesktop": desktop, "finderHasNoOrdinaryWindows": finderHasNoOrdinaryWindows.map { $0 as Any } ?? NSNull(),
-                "area": [area.minX, screen.frame.height - area.maxY, area.width, area.height]]
+                "area": [area.minX, screen.frame.height - area.maxY, area.width, area.height],
+                // The same raw monotonic clock as the harness; every read above is complete.
+                "sampledAt": Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1e9]
     }
 }
 

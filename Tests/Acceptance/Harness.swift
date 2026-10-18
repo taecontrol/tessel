@@ -80,6 +80,8 @@ struct Observation: Decodable {
     let frontmostFixturePID: Int32
     let activeFixturePID: Int32
     let finderDesktop: Bool
+    /// The observer's monotonic time when it finished taking this observation.
+    let sampledAt: Double?
     let finderHasNoOrdinaryWindows: Bool?
     let area: [Double]
 }
@@ -171,6 +173,7 @@ final class FixtureSession {
             throw HarnessError(error)
         }
         let decoded = try JSONDecoder().decode(FixtureReply.self, from: reply)
+        SampleClock.record(decoded.observation?.sampledAt ?? monotonicSeconds())
         windowIDs = Set(decoded.windows.values)
         return decoded
     }

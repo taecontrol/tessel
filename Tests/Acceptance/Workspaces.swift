@@ -1156,7 +1156,7 @@ extension Acceptance {
             for index in 0..<20 {
                 let start = try key(index.isMultiple(of: 2) ? 2 : 1)
                 try expectShown(index.isMultiple(of: 2) ? b : a, since: start)
-                nanoseconds.append(UInt64((monotonicSeconds() - start) * 1e9))
+                nanoseconds.append(UInt64((SampleClock.lastJudged - start) * 1e9))
             }
             let maximum = nanoseconds.max()!
             #expect(maximum <= 200_000_000)
