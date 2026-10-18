@@ -8,9 +8,11 @@ let package = Package(
     platforms: [.macOS("27.0")],
     products: [
         .executable(name: "tessel-build", targets: ["Build"]),
+        .executable(name: "tessel-verify-selection", targets: ["VerifySelection"]),
     ],
     targets: [
         .executableTarget(name: "Build", path: "Tools/Build"),
+        .executableTarget(name: "VerifySelection", path: "Tools/Verify"),
         .target(name: "Ports", path: "Sources/Ports", swiftSettings: [.enableUpcomingFeature("MemberImportVisibility")]),
         .target(name: "Policy", dependencies: ["Ports"], path: "Sources", exclude: ["App", "CLI", "Ports", "Shared/IPC.swift"],
                 sources: ["Policy", "Shared/Protocol.swift", "Shared/KeyChord.swift"],

@@ -21,6 +21,9 @@ if [[ ${#filters[@]} -eq 0 ]]; then
 fi
 filters+=(--skip '^PolicyTests[./]')
 
+# SwiftPM succeeds on an empty selection. Reject it before any suite or GUI job
+# starts; the Swift tool lists tests without executing their scopes.
+swift run --package-path "$root" --scratch-path "$root/.build/tools" --quiet tessel-verify-selection "$root" "${filters[@]}"
 
 # Timed checks need this process scheduled like the apps it observes (issue
 # #21). A launchd job without ProcessType Interactive clamps its whole process
