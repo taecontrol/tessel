@@ -54,6 +54,14 @@ struct Status: Decodable {
 
 /// The fixture's own description of its windows, keyed by the test's names.
 struct FixtureReply: Decodable {
+    struct MinimizeEvent: Decodable {
+        let name: String
+        let minimized: Bool
+        let key: Bool
+        let main: Bool
+        let active: Bool
+        let sampledAt: Double
+    }
     let pid: pid_t
     let windows: [String: UInt32]
     let nativeTabs: [String: Int]
@@ -69,6 +77,10 @@ struct FixtureReply: Decodable {
     let frames: [String: [Double]]?
     let axWindowOrder: [UInt32]?
     let transitionCount: Int?
+    let keyWindow: UInt32?
+    let mainWindow: UInt32?
+    let minimizeEvents: [String: [MinimizeEvent]]?
+    let miniaturized: [String: Bool]?
 }
 
 struct Observation: Decodable {
