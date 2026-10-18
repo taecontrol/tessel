@@ -58,6 +58,10 @@ enum Layout: String, CaseIterable, Sendable { case off, stack, rails }
         mac.action("press \(command)")
         keys.press(command)
     }
+    func pressKey(_ chord: String) {
+        mac.action("press key \(chord)")
+        keys.pressKey(chord)
+    }
     var windows: [WindowRecord] { rows.byPID.keys.sorted().flatMap { rows.byPID[$0] ?? [] }.sorted { $0.id < $1.id } }
     var status: WorkspaceStatus { workspaces.status }
     var configuration: ConfigStatus { config.status }
@@ -76,11 +80,13 @@ enum Layout: String, CaseIterable, Sendable { case off, stack, rails }
     private let now: () -> Int
     var byPID: [Int32: [WindowRecord]] = [:]
     private(set) var publications: [Publication] = []
+    var onUpdate: ((Int32, [WindowRecord]?) -> Void)?
     init(now: @escaping () -> Int) { self.now = now }
     func update(pid: Int32, windows: [WindowRecord]?) {
         let windows = windows?.sorted { $0.id < $1.id }
         byPID[pid] = windows
         publications.append(Publication(at: now(), pid: pid, windows: windows))
+        onUpdate?(pid, windows)
     }
 }
 @MainActor final class PressedKeys: HotkeyInstalling {
@@ -93,6 +99,11 @@ enum Layout: String, CaseIterable, Sendable { case off, stack, rails }
     func press(_ command: String) {
         guard let registration, registration.active, registration.keys.values.contains(command),
               let command = WorkspaceCommand(command) else { Issue.record("Command has no registered hotkey"); return }
+        registration.perform(command)
+    }
+    func pressKey(_ chord: String) {
+        guard let registration, registration.active, let value = registration.keys[chord],
+              let command = WorkspaceCommand(value) else { return }
         registration.perform(command)
     }
     private final class Registration: HotkeyRegistration {

@@ -26,6 +26,11 @@ package enum Assumption: String, CaseIterable, Sendable {
     case contentTabChrome = "content-tab-chrome"
     case nativeTabExtraControls = "native-tab-extra-controls"
     case delayedNativeTabFocus = "delayed-native-tab-focus"
+    // #2 scenarios
+    case activationHiddenFocus = "activation-hidden-focus"
+    case closeFocusPromotion = "close-focus-promotion"
+    case sheetFocusOwnership = "sheet-focus-ownership"
+    case nativeTabInsertion = "native-tab-insertion"
 
     package var statement: String {
         switch self {
@@ -56,6 +61,11 @@ package enum Assumption: String, CaseIterable, Sendable {
         case .contentTabChrome: "Content tabs expose tab buttons separately from their selected-page contents, including empty contents, and segmented controls expose ordinary child controls."
         case .nativeTabExtraControls: "A native tab bar's AXContents may include a New Tab button beyond AXTabs, and native tabs need not have close buttons."
         case .delayedNativeTabFocus: "AXWindows may retain the former native-tab root after its bar moves while AXFocusedWindow is unavailable until the selected root is published."
+        // #2 scenarios
+        case .activationHiddenFocus: "Plain activation can leave an app's focused window in the closet, with AX focus still readable, and unhides a hidden app."
+        case .closeFocusPromotion: "Closing a key window can promote a closeted sibling before the destruction notification is delivered."
+        case .sheetFocusOwnership: "An attached sheet keeps key focus when its parent is raised or made main, while the parent owns AXMain."
+        case .nativeTabInsertion: "Adding a native tab preserves the group's bar identity, shared frame and Space while selecting the new front."
         }
     }
 }
