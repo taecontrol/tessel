@@ -545,9 +545,9 @@ private final class AppWindows: @unchecked Sendable {
                 guard presentationLock.withLock({ presentation == token }), try canPresent(window, id: id) else { return }
                 if focus {
                     try check(ax.set(.frontmost, of: application, to: .bool(true)))
-                    guard presentationLock.withLock({ presentation == token }), isNativeFront(window, id: id) else { return }
+                    guard presentationLock.withLock({ presentation == token }), try canPresent(window, id: id) else { return }
                     try check(ax.set(.main, of: window, to: .bool(true)))
-                    guard presentationLock.withLock({ presentation == token }), isNativeFront(window, id: id) else { return }
+                    guard presentationLock.withLock({ presentation == token }), try canPresent(window, id: id) else { return }
                     try check(ax.perform(.raise, on: window))
                 }
                 publishSnapshot()
@@ -595,9 +595,9 @@ private final class AppWindows: @unchecked Sendable {
             guard presentationLock.withLock({ presentation == token }), try canPresent(window,id:id) else { return }
             if focus {
                 try check(ax.set(.frontmost, of: application, to: .bool(true)))
-                guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return }
+                guard presentationLock.withLock({ presentation == token }), try canPresent(window,id:id) else { return }
                 try check(ax.set(.main, of: window, to: .bool(true)))
-                guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return }
+                guard presentationLock.withLock({ presentation == token }), try canPresent(window,id:id) else { return }
                 try check(ax.perform(.raise, on: window))
                 // AX accepts an activation request before it necessarily
                 // becomes active. Retry once only while it is unconfirmed.
@@ -610,9 +610,9 @@ private final class AppWindows: @unchecked Sendable {
                           (try? self.value(self.application,.frontmost)?.bool) != true else { return }
                     do {
                         try self.check(self.ax.set(.frontmost, of: self.application, to: .bool(true)))
-                        guard self.presentationLock.withLock({ self.presentation == token }), self.isNativeFront(window,id:id) else { return }
+                        guard self.presentationLock.withLock({ self.presentation == token }), try self.canPresent(window,id:id) else { return }
                         try self.check(self.ax.set(.main, of: window, to: .bool(true)))
-                        guard self.presentationLock.withLock({ self.presentation == token }), self.isNativeFront(window,id:id) else { return }
+                        guard self.presentationLock.withLock({ self.presentation == token }), try self.canPresent(window,id:id) else { return }
                         try self.check(self.ax.perform(.raise, on: window))
                         self.publishSnapshot()
                     } catch { /* Another app and newer focus intents remain independent. */ }
@@ -670,7 +670,8 @@ private final class AppWindows: @unchecked Sendable {
     }
 
     /// Native hide, minimize, and fullscreen can begin between a snapshot and a
-    /// queued write. Never let an old presentation undo the user's operation.
+    /// queued write, or during a focus reply. AXRaise restores even a completed
+    /// minimize, so each focus write must recheck the native state.
     private func canPresent(_ window: AXElement, id: UInt32) throws -> Bool {
         guard !hidden, try value(application, .hidden)?.bool != true,
               try value(window, .minimized)?.bool != true,

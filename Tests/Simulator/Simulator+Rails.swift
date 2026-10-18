@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import Ports
 
 package enum DeferredActivationCompletion: String, CaseIterable, Sendable {
     case focusWrite, nativeEvent, nextRequest
@@ -86,7 +87,11 @@ extension SimulatedMac {
         front = pid
         post(.activated, pid: pid)
     }
-    func selectFromAX(_ id: UInt32) {
+    func selectFromAX(_ id: UInt32, raising: Bool = false) -> AXStatus {
+        if windows[id]?.minimized == true {
+            assume(.minimizeFocusInterruption)
+            guard raising else { return .success }
+        }
         if windows[id]?.minimizing == true {
             assume(.minimizeFocusInterruption)
             windows[id]?.minimizing = false
@@ -96,7 +101,12 @@ extension SimulatedMac {
             assume(.deferredAXActivation)
             if apps[pid]?.activationCompletion == .focusWrite { completeAXActivation(pid) }
         }
+        if windows[id]?.minimized == true {
+            restoreWindow(id, activating: apps[pid]?.activationPending != true)
+            return windows[id]?.spec.minimizedRaiseReply == .cannotComplete ? .cannotComplete : .success
+        }
         focus(id, activating: apps[pid]?.activationPending != true)
+        return .success
     }
 
     @MainActor package func isInCloset(_ id: UInt32) -> Bool {

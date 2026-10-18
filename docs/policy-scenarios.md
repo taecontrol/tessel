@@ -123,6 +123,13 @@ confirmed. Completion can follow a main/raise write (the default), arrive as a
 native event, or wait for another activation request. Retry scenarios select
 the last choice explicitly; native completion does not require that retry.
 
+`beginMinimize` and `finishMinimize` separate the pending Dock transition from
+its completion. AXMain or AXRaise can cancel the pending operation. After
+completion AXMain leaves the window minimized, while AXRaise restores it.
+`WindowSpec.minimizedRaiseReply` chooses success (the default) or cannotComplete;
+both restore the window and publish its native restore notification. A timeout
+before a hung app processes the request still has no effect.
+
 `terminate(activating:crash:publishesNotification:exitOrder:)` separates a dying
 app's destroyed windows from the process-existence probe. The process can exit
 before promotion or remain unreaped through survivor activation (the default).
