@@ -1,0 +1,8 @@
+# Bug: Simulator can see the policy it is meant to challenge (E10 guard).
+# Fixing commit: 42da2ad61cb02e9fabfa42c701a628f70e1845ef
+diff --git a/Tests/Simulator/ForbiddenPolicyImport.swift b/Tests/Simulator/ForbiddenPolicyImport.swift
+new file mode 100644
+--- /dev/null
++++ b/Tests/Simulator/ForbiddenPolicyImport.swift
+@@ -0,0 +1 @@
++import Policy

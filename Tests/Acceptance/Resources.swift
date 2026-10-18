@@ -35,14 +35,14 @@ extension Acceptance {
             try #require(after.footprintBytes < budget.footprintBytes, "End footprint must be below the footprint limit")
         }
 
-        @Test func e22TwentyIdleWindowsStayWithinWakeupCPUAndFootprintLimits() throws {
+        @Test("#1 E22: idle resource budget") func e22TwentyIdleWindowsStayWithinWakeupCPUAndFootprintLimits() throws {
             for index in 0..<20 { _ = try fixture.open(key: "idle\(index)") }
             try #require(try converges(within: 2) { $0.count == 20 })
             sleep(seconds: 1)  // Let the bounded new-window settling work finish.
             try verifyIdleResources("E22")
         }
 
-        @Test func e36TwentyWindowsAcrossTenWorkspacesKeepTheFoundationBudget() throws {
+        @Test("#2 E36: resources across ten workspaces") func e36TwentyWindowsAcrossTenWorkspacesKeepTheFoundationBudget() throws {
             let flow = try Acceptance.FunctionalWorkspaces()
             try flow.enable()
             for index in 0..<20 {
@@ -61,7 +61,7 @@ extension Acceptance {
             sleep(seconds: 1)
             try verifyIdleResources("E36")
         }
-        @Test func e29RailsAcrossWorkspacesKeepTheIdleResourceBudget() throws {
+        @Test("#17 E29: rails idle resource budget") func e29RailsAcrossWorkspacesKeepTheIdleResourceBudget() throws {
             let flow = try Acceptance.FunctionalRails()
             try flow.enable()
             for index in 0..<20 {
