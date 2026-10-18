@@ -11,6 +11,7 @@ func contract(_ assumption: Assumption) -> MacAssumption { MacAssumption(assumpt
 struct NativeContractReply: Codable {
     struct Window: Codable {
         let id: UInt32
+        let idError: Int32
         let role: String?
         let roleError: Int32
         let subrole: String?

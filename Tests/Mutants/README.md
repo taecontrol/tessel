@@ -117,3 +117,6 @@ CI runs only the retained known bugs and guards.
 S8 reran all ten patches after closed-handle revalidation: all were killed,
 with 298.707 s summed across the per-mutant timings. The updated zero-ID
 mutant took 30.034 s and the omitted-minimized-window mutant took 34.821 s.
+After merging the contracts/timing slices and consolidating the closed-handle
+contract, all ten were killed again (302.513 s summed per-mutant time).
+Zero-ID took 31.043 s and omitted-minimized-window took 32.435 s.

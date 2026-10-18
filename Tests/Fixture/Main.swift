@@ -38,7 +38,6 @@ final class Fixture: NSObject, NSApplicationDelegate {
     static weak var current: Fixture?
     var windows: [String: NSWindow] = [:]
     private var retainedClosedWindows: [NSWindow] = []
-    private let windowHandleProbe = WindowHandleProbe()
     var socketFD: Int32 = -1
     var source: DispatchSourceRead?
     var socketPath = ""
@@ -258,10 +257,6 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 reply["ready"] = FixtureProbe.value(AXUIElementCreateApplication(pid), kAXWindowsAttribute) != nil
             } else { reply["ready"] = false }
             return reply
-        case "retainWindowHandle", "sampleWindowHandle":
-            let result = windowHandleProbe.perform(command)
-            if result["error"] != nil { return result }
-            return snapshot.merging(result) { $1 }
         case "activate":
             if let sourcePID = FixtureProbe.frontmostPID(), FixtureProbe.isFixture(sourcePID),
                let source = NSRunningApplication(processIdentifier:sourcePID) {
