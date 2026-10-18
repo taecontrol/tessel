@@ -98,6 +98,7 @@ extension SimulatedMac {
             }
         } else if let content = foundation.content[window] {
             assume(.contentTabChrome)
+            let contents = content.style == .empty ? [] : [element(.foundation(window, .page))]
             switch (node, attribute) {
             case (.contentGroup, .role):
                 let role: String = switch content.style {
@@ -109,12 +110,12 @@ extension SimulatedMac {
             case (.contentGroup, .tabs):
                 return AXResult(.success, .elements((0..<content.count).map { element(.foundation(window, .contentTab($0))) }))
             case (.contentGroup, .contents):
-                return AXResult(.success, .elements(content.style == .empty ? [] : [element(.foundation(window, .page))]))
+                return AXResult(.success, .elements(contents))
             case (.contentGroup, .children):
                 return AXResult(.success, .elements((0..<content.count).map { element(.foundation(window, .contentTab($0))) }
-                    + [element(.foundation(window, .page))]))
+                    + contents))
             case (.contentTab, .role): return AXResult(.success, .string("AXRadioButton"))
-            case (.page, .role): return AXResult(.success, .string("AXGroup"))
+            case (.page, .role): return AXResult(.success, .string(content.style == .populated ? "AXStaticText" : "AXGroup"))
             case (.contentTab, .children), (.page, .children): return AXResult(.success, .elements([]))
             default: break
             }

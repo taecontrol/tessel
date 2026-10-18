@@ -30,10 +30,12 @@ extension Acceptance.Contracts {
             if kind == "segmentedTabs" {
                 try #require(group.children.filter { $0 == "AXRadioButton" }.count == 3)
             } else {
+                try #require(group.role == "AXTabGroup")
                 try #require(group.tabsError == 0 && group.tabsIsArray && group.contentsError == 0 && group.contentsIsArray)
                 try #require(group.tabs == Array(repeating: "AXRadioButton", count: 3))
                 try #require(!group.tabsInContents, "content tab buttons must not acquire native-bar identity")
-                try #require(kind == "emptyContentTabs" ? group.contents.isEmpty : group.contents == ["AXGroup"], "\(kind) publishes AXContents roles \(group.contents)")
+                try #require(kind == "emptyContentTabs" ? group.contents.isEmpty : group.contents == ["AXStaticText"], "\(kind) publishes AXContents roles \(group.contents)")
+                try #require(group.contentsInChildren && group.children == group.tabs + group.contents)
             }
         }
     }

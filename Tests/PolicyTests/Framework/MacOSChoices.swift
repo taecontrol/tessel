@@ -9,6 +9,24 @@ private final class NativeRootEvents: @unchecked Sendable {
 }
 
 @Suite @MainActor struct MacOSChoices {
+    @Test("content tab contents flatten the selected page and share their children handles", arguments: [ContentTabStyle.empty, .populated])
+    func contentTabs(_ style: ContentTabStyle) throws {
+        let mac = SimulatedMac()
+        defer { mac.shutdown() }
+        let app = mac.launch(windows: 1)
+        app.showContentTabs(in: 1, style: style)
+        let ax = mac.ax, application = ax.application(app.pid)
+        let window = try #require(ax.copy(.windows, of: application).value?.elements?.first)
+        let group = try #require(ax.copy(.children, of: window).value?.elements?.first)
+        let tabs = try #require(ax.copy(.tabs, of: group).value?.elements)
+        let contents = try #require(ax.copy(.contents, of: group).value?.elements)
+        #expect(contents.count == (style == .empty ? 0 : 1))
+        #expect(ax.copy(.children, of: group).value?.elements == tabs + contents)
+        #expect(tabs.allSatisfy { !contents.contains($0) })
+        for content in contents { #expect(ax.copy(.role, of: content).value?.string == "AXStaticText") }
+        #expect(mac.settle() == .settled)
+    }
+
     @Test("prohibited lifecycle notifications may be delivered or omitted independently", arguments: ProhibitedNotifications.allCases)
     func prohibitedLifecycle(_ notifications: ProhibitedNotifications) {
         let mac = SimulatedMac()

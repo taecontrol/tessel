@@ -56,6 +56,7 @@ extension FixtureContracts {
                                    "tabsError": tabReply.error.rawValue, "tabsIsArray": tabReply.value is [AXUIElement],
                                    "contentsError": contentReply.error.rawValue, "contentsIsArray": contentReply.value is [AXUIElement],
                                    "childrenError": childReply.error.rawValue, "childrenIsArray": childReply.value is [AXUIElement],
+                                   "contentsInChildren": contents.allSatisfy { content in children.contains { CFEqual(content, $0) } },
                                    "tabChildren": tabChildren.map { roles($0.value as? [AXUIElement] ?? []) },
                                    "tabChildrenErrors": tabChildren.map { $0.error.rawValue }, "tabChildrenAreArrays": tabChildren.map { $0.value is [AXUIElement] },
                                    "tabsInContents": !tabs.isEmpty && tabs.allSatisfy { tab in contents.contains { CFEqual(tab, $0) } }])

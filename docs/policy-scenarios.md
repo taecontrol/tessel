@@ -88,6 +88,10 @@ IDs, failed/non-array reads and retained closed handles. They do not publish
 catalog rows or decide workspace membership. The production catalog must
 interpret the resulting port calls.
 
+Content tabs flatten their selected page: an empty page contributes no contents
+or child, while a populated page exposes its static-text leaf in both AXContents
+and AXChildren. The content handles remain distinct from the tab buttons.
+
 `beginFullscreenTransition(_:publishingRoot:)` chooses whether AppKit exposes
 an auxiliary display-sized `AXUnknown` root. It stays live across reads until
 `finishFullscreenTransition` removes it; `enterFullscreen` and `leaveFullscreen`

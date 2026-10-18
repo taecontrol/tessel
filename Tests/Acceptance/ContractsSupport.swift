@@ -56,6 +56,7 @@ struct NativeContractReply: Codable {
         let contentsIsArray: Bool
         let childrenError: Int32
         let childrenIsArray: Bool
+        let contentsInChildren: Bool
     }
     struct Membership: Codable {
         let id: UInt32
