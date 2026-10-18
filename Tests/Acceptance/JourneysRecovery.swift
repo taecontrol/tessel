@@ -66,7 +66,7 @@ extension Acceptance.Journeys {
             try desktop.expectInside([a, b])
         }
         try step("#17 E3 rail disable, quit, crash and failed hide return managed windows") {
-            for operation in ["disable", "quit", "crash-off", "crash-on", "failed-hide"] {
+            for operation in ["disable", "quit", "stack-disable", "stack-quit", "crash-off", "crash-on", "failed-hide"] {
                 print("Rail cleanup: \(operation)")
                 try desktop.clear()
                 let ids: [UInt32]
@@ -89,11 +89,12 @@ extension Acceptance.Journeys {
                         let visible = try desktop.observe(focusedOnly: true).visibleIDs
                         return ids.contains { !visible.contains($0) }
                     }
+                    if operation.hasPrefix("stack-") { try desktop.configure(desktop.stack, layout: "stack") }
                     switch operation {
-                    case "disable":
+                    case "disable", "stack-disable":
                         try desktop.writeConfig("")
                         try requireFinalState("rail disablement") { try harness.status().workspaces?.enabled == false }
-                    case "quit": harness.stopApp()
+                    case "quit", "stack-quit": harness.stopApp()
                     default:
                         kill(harness.appPID, SIGKILL)
                         try requireFinalState("the rail app exited after a crash") { !harness.appIsRunning }

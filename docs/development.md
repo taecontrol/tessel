@@ -428,8 +428,8 @@ deterministic policy layer and are not tagged in these files:
 
 Latency owns #2 U-switch-budget and #17 E28 in `Tests/Acceptance/Latency.swift`.
 It records 100 workspace switches and 100 rail moves (50 scrolls and 50 elevator
-trips). Each sample starts at the trusted fixture's real key `postedAt` and ends
-at the independent observer's `sampledAt` when destination frames, focus and CG
+trips between apps). Each sample starts at the trusted fixture's real key
+`postedAt` and ends at the independent observer's `sampledAt` when destination frames, focus and CG
 visibility all match. Samples must finish within the final-state margin.
 Only this suite judges elapsed time: each kind's nearest-rank p95 must be at
 most 200 ms. It prints p50, p95 and maximum, and writes `.work/latency.json` with

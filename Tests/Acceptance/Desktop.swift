@@ -164,9 +164,12 @@ struct Desktop {
         return (a, b)
     }
 
-    func railSetup(_ widths: [Double] = Array(repeating: 0.45, count: 5)) throws -> [UInt32] {
-        let ids = try widths.enumerated().map { try fixture.open(key: "w\($0.offset)", ["widthFraction": $0.element]) }
-        try activate(key: "w0")
+    func railSetup(_ widths: [Double] = Array(repeating: 0.45, count: 5), firstIn firstSession: FixtureSession? = nil) throws -> [UInt32] {
+        let ids = try widths.enumerated().map { index, width in
+            let session = index == 0 ? firstSession ?? fixture : fixture
+            return try session.open(key: "w\(index)", ["widthFraction": width])
+        }
+        try activate(firstSession, key: "w0")
         try requireFinalState("every rail setup window listed") { Set(try harness.rows().map(\.id)) == Set(ids) }
         try configure(rails, layout: "rails")
         try expectFocus(ids[0])

@@ -108,7 +108,9 @@ extension Acceptance {
                 }
                 printSummary("Workspace switches", switches)
                 try desktop.clear()
-                let ids = try desktop.railSetup()
+                let elevatorApp = try FixtureSession(directory: desktop.harness.directory, number: 1)
+                desktop.harness.otherFixtures.append(elevatorApp)
+                let ids = try desktop.railSetup(firstIn: elevatorApp)
                 try desktop.post(kVK_ANSI_J, shift: true)
                 try desktop.expectFocus(ids[0])
                 try requireFinalState("the latency setup's second rail") { try desktop.harness.row(ids[0])?.rail == 2 }
@@ -152,7 +154,7 @@ extension Acceptance {
                     moves.append(sample)
                     if elevator { elevators += 1 } else { scrolls += 1 }
                 }
-                printSummary("Rail moves (50 scrolls, 50 elevator trips)", moves)
+                printSummary("Rail moves (50 scrolls, 50 cross-app elevator trips)", moves)
             } catch {
                 try writeArtifact(failure: String(describing: error))
                 throw error
