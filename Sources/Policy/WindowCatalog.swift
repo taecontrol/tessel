@@ -77,6 +77,11 @@ final class WindowCatalog {
         app.presentRail(id:id,target:frame,position:position,resize:resize,focus:focus,completion:completion)
     }
 
+    func windowIsGone(pid: Int32, id: UInt32, completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+        guard let app = apps[pid] else { completion(false); return }
+        app.windowIsGone(id: id, completion: completion)
+    }
+
     func returnInside(ids: Set<UInt32>, area: CGRect) { apps.keys.sorted().compactMap { apps[$0] }.forEach { $0.returnInside(ids:ids,area:area) } }
 
     func cancelPresentations(invalidatingFocus: Bool = true) {
@@ -500,6 +505,20 @@ private final class AppWindows: @unchecked Sendable {
 
     func ownsFocusIntent(_ token: UUID?) -> Bool {
         presentationLock.withLock { token == focusIntent }
+    }
+
+    func windowIsGone(id: UInt32, completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+        queue.async { [self] in
+            var gone = false
+            if !stopped, let window = elementsByID[id] {
+                ax.setMessagingTimeout(window, seconds: 0.05)
+                // A timeout leaves liveness unanswered; only the closed-handle
+                // error can reject an otherwise healthy external activation.
+                gone = ax.copy(.role, of: window).status == .invalidUIElement
+            }
+            let result = gone
+            scheduler.main.async { completion(result) }
+        }
     }
 
     func present(id: UInt32, area: CGRect?, focus: Bool, completion: @escaping @MainActor @Sendable () -> Void) {

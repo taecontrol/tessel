@@ -27,6 +27,7 @@ on the development machine (2026-10-18).
 | [omitted-minimized-window.patch](omitted-minimized-window.patch) | 647500d | #2 E8: `WorkspaceSend.emptyLists`, `minimizedOmissions`, retains the living minimized row | 31.565 |
 | [retired-native-tab-root.patch](retired-native-tab-root.patch) | 97f790d | #1 E5: `FoundationNativeTabs.laggingRoot` keeps the former root retired on later reads | 39.193 |
 | [unpublished-rail-successor.patch](unpublished-rail-successor.patch) | 28093c6 | #17 E19: `RailNativeWindows.unpublishedSuccessor` completes the still-current successor focus | 41.918 |
+| [dying-rail-owner.patch](dying-rail-owner.patch) | d31cefa | #17 E11: `RailNativeWindows.termination` retains the adjacent-rail landing when native promotion precedes process exit and termination delivery | 21.004 |
 
 The two 647500d paths are separate mutants so one cannot mask missing coverage
 of the other. The zero-ID mutant also removes the subsequent closed-handle
@@ -39,6 +40,10 @@ writes; its semantic revert disables that predicate and restores the redundant
 classification raise.
 The 97f790d revert removes both the retired-root bar retention and the later
 enumeration guard; its failures identify the extra catalog row directly.
+The d31cefa revert removes owner-handle revalidation before cross-app focus.
+Its focused run reproduces all six original failures: quit and crash under
+three write orders select window 1 instead of the adjacent rail's window 2
+when termination arrives late and the dying PID still exists at promotion.
 
 ## Architecture guards
 
@@ -120,3 +125,8 @@ mutant took 30.034 s and the omitted-minimized-window mutant took 34.821 s.
 After merging the contracts/timing slices and consolidating the closed-handle
 contract, all ten were killed again (302.513 s summed per-mutant time).
 Zero-ID took 31.043 s and omitted-minimized-window took 32.435 s.
+
+S12 killed all eleven patches (nine known bugs and two architecture guards),
+with 227.013 s summed across per-mutant timings. The new dying-owner mutant
+took 21.004 s. Its focused failure was inspected separately; compilation and
+missing revalidation checkpoints were not counted as evidence of that bug.
