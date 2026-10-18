@@ -463,3 +463,153 @@ most 200 ms. It prints p50, p95 and maximum, and writes `.work/latency.json` wit
 the samples, counts, percentiles and nonpersonal run metadata. CI uploads that
 artifact even on failure; incomplete runs retain their partial counts and the
 failed sample index. No window listings or titles reach the artifact.
+
+## Acceptance example layers (#24)
+
+This table is the maintained example-to-layer map for issues #1, #2 and #17.
+Its format is exactly `Example | Layer`, one literal ID per row, with no
+description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
+`#1 U-cli-args`. P means deterministic policy, J journey, L latency,
+R the unchanged resource suite, and X an owner-reviewed capture.
+Foundation E13 belongs to J; supplementary visual permission evidence does
+not assign it to a second layer.
+
+An ID appears literally in its `@Test` name or a journey's `step` name.
+P files live in `Tests/PolicyTests/Scenarios/`, J in
+`Tests/Acceptance/Journeys*.swift`, L in `Tests/Acceptance/Latency.swift`,
+and R in `Tests/Acceptance/Resources.swift`. X tests use `capture*` function
+names in Acceptance, or live in `Tests/Acceptance/Captures*.swift`.
+Contracts carry assumption IDs, never example IDs. The E20 integrity check
+rejects missing tags, unmapped tags, duplicate map rows and tags in another
+layer. During migration only the missing P tags are a named known issue.
+
+| Example | Layer |
+| --- | --- |
+| #1 E1 | P |
+| #1 E2 | P |
+| #1 E3 | P |
+| #1 E4 | P |
+| #1 E5 | P |
+| #1 E6 | P |
+| #1 E7 | P |
+| #1 E8 | P |
+| #1 E9 | J |
+| #1 E10 | J |
+| #1 E11 | J |
+| #1 E12 | J |
+| #1 E13 | J |
+| #1 E14 | J |
+| #1 E15 | J |
+| #1 E16 | J |
+| #1 E17 | P |
+| #1 E18 | P |
+| #1 E19 | P |
+| #1 E20 | P |
+| #1 E21 | P |
+| #1 E22 | R |
+| #1 U-cli-args | J |
+| #1 U-private-transport | J |
+| #1 U-read-only-transport | J |
+| #1 U-stalled-clients | J |
+| #1 U-observer-identity | J |
+| #1 U-cpu-oracle | J |
+| #1 U-notification-retries | J |
+| #2 E1 | J |
+| #2 E2 | P |
+| #2 E3 | P |
+| #2 E4 | P |
+| #2 E5 | P |
+| #2 E6 | P |
+| #2 E7 | P |
+| #2 E8 | P |
+| #2 E9 | P |
+| #2 E10 | P |
+| #2 E11 | P |
+| #2 E12 | P |
+| #2 E13 | P |
+| #2 E14 | P |
+| #2 E15 | P |
+| #2 E16 | P |
+| #2 E17 | P |
+| #2 E18 | P |
+| #2 E19 | P |
+| #2 E20 | P |
+| #2 E21 | P |
+| #2 E22 | P |
+| #2 E23 | P |
+| #2 E24 | P |
+| #2 E25 | P |
+| #2 E26 | P |
+| #2 E27 | P |
+| #2 E28 | J |
+| #2 E29 | J |
+| #2 E30 | P |
+| #2 E31 | J |
+| #2 E32 | J |
+| #2 E33 | P |
+| #2 E34 | J |
+| #2 E35 | J |
+| #2 E36 | R |
+| #2 E37 | X |
+| #2 U-switch-budget | L |
+| #17 E1 | J |
+| #17 E2 | P |
+| #17 E3 | J |
+| #17 E4 | P |
+| #17 E5 | P |
+| #17 E6 | P |
+| #17 E7 | P |
+| #17 E8 | P |
+| #17 E9 | P |
+| #17 E10 | P |
+| #17 E11 | P |
+| #17 E12 | P |
+| #17 E13 | P |
+| #17 E14 | P |
+| #17 E15 | P |
+| #17 E16 | P |
+| #17 E17 | P |
+| #17 E18 | P |
+| #17 E19 | P |
+| #17 E20 | P |
+| #17 E21 | P |
+| #17 E22 | P |
+| #17 E23 | P |
+| #17 E24 | J |
+| #17 E25 | J |
+| #17 E26 | X |
+| #17 E27 | P |
+| #17 E28 | L |
+| #17 E29 | R |
+
+## Deterministic checks (#24)
+
+Run these commands from the repository root. They use SwiftPM tooling only;
+they do not launch the app or fixtures. Child test processes remove
+`TESSEL_ACCEPTANCE` and the purity-test override from their environment.
+
+```sh
+swift test
+swift run tessel-check layers
+swift run tessel-check mutants
+swift run tessel-check determinism --runs 100
+swift run tessel-check simulator-evidence --base origin/main --body-file pr-body.txt
+```
+
+`layers` lists tests without entering their execution scopes, and rejects
+Acceptance compilation or discovery. `mutants` copies the tracked tree with
+its current working contents to a fresh temporary directory per patch,
+using APFS clones when available. Stage new source files before running it.
+It applies each patch under `Tests/Mutants/` and requires a failing bare
+`swift test`; known bugs must reach test failures, and guards must fail at
+their intended boundary. An obsolete patch or surviving mutant fails the
+check. It removes its copies and reports every mutant's result and time.
+The patch inventory records fixing commits and rejected candidates.
+
+`determinism` requires successful runs and one identical SHA-256
+`trace digest:` line per run, printing the digest and each run's time.
+`simulator-evidence` checks `<base>...HEAD`: a change under `Tests/Simulator/`
+needs either a changed `Tests/Acceptance/Contracts*.swift` file or a PR-body
+line starting exactly `Simulator-evidence:` with non-empty text after it.
+CI passes the body through an environment variable into a file, then runs
+the guard; it never treats the body as shell source.

@@ -9,6 +9,7 @@ let package = Package(
     products: [
         .executable(name: "tessel-build", targets: ["Build"]),
         .executable(name: "tessel-verify-selection", targets: ["VerifySelection"]),
+        .executable(name: "tessel-check", targets: ["Check"]),
     ],
     targets: [
         .executableTarget(name: "Build", path: "Tools/Build"),
@@ -22,6 +23,8 @@ let package = Package(
         .target(name: "Assumptions", path: "Tests/Assumptions"),
         .target(name: "Simulator", dependencies: ["Ports", "Assumptions"], path: "Tests/Simulator"),
         .testTarget(name: "PolicyTests", dependencies: ["Policy", "Ports", "Simulator", "Assumptions"], path: "Tests/PolicyTests"),
+        .executableTarget(name: "Check", path: "Tools/Check"),
+        .testTarget(name: "CheckTests", dependencies: ["Check"], path: "Tests/CheckTests"),
     ]
     + (Context.environment["TESSEL_ACCEPTANCE"] == "1" ? [
         .testTarget(name: "Acceptance", path: "Tests/Acceptance", exclude: ["resource-budget.json", "switch-budget.json", "rails-budget.json"]),

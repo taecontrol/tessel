@@ -131,7 +131,7 @@ final class FixtureSession {
         guard bound == 0 else { throw HarnessError("cannot bind the fixture client socket: errno \(errno)") }
         setTimeout(socket, seconds: margin)
         try run(["open", "-n"] + (swiftUI ? [] : ["-g"]) + ["--stdout", "/dev/null", "--stderr", "/dev/null", fixtureBundle.path, "--args", "--socket", path]
-                + (swiftUI ? ["--swiftui"] : []), check: true)
+                + (swiftUI ? ["--swiftui"] : []), timeout: margin, check: true)
         let path = path
         guard finalState({ FileManager.default.fileExists(atPath: path) }) else {
             throw HarnessError("fixture did not launch")
@@ -261,7 +261,7 @@ final class Harness {
         let capture = ProcessInfo.processInfo.environment["TESSEL_CAPTURE_WORKSPACES"] == "1" ? ["--test-capture-ui"] : []
         try run(["open", "-n", "-g", "--stdout", "/dev/null", "--stderr", "/dev/null",
                  "--env", "XDG_CONFIG_HOME=" + environment["XDG_CONFIG_HOME"]!, app.path,
-                 "--args", "--test-fixture-only"] + capture + arguments, check: true)
+                 "--args", "--test-fixture-only"] + capture + arguments, timeout: margin, check: true)
         guard let pid = finalValue({ processIDs(appExecutable).first }) else {
             throw HarnessError("signed development app did not launch")
         }
@@ -310,7 +310,7 @@ final class Harness {
 
     /// The app's only Unix socket: the CLI endpoint.
     func endpoint() throws -> String {
-        let result = try run(["/usr/sbin/lsof", "-a", "-p", String(appPID), "-U", "-Fn"], check: true)
+        let result = try run(["/usr/sbin/lsof", "-a", "-p", String(appPID), "-U", "-Fn"], timeout: margin, check: true)
         let paths = result.output.split(separator: "\n").filter { $0.hasPrefix("n/") && $0.hasSuffix(".sock") }
         guard paths.count == 1 else { throw HarnessError("expected one tessel endpoint, found \(paths.count)") }
         return String(paths[0].dropFirst())

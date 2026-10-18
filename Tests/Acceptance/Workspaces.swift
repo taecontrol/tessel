@@ -1168,7 +1168,7 @@ extension Acceptance {
             print("Switch calibration: maximum \(Double(maximum) / 1e6) ms across 20 switches")
         }
 
-        @Test(.enabled(if: ProcessInfo.processInfo.environment["TESSEL_CAPTURE_WORKSPACES"] == "1", "local E37 visual capture"))
+        @Test("#2 E37: workspace menu capture", .enabled(if: ProcessInfo.processInfo.environment["TESSEL_CAPTURE_WORKSPACES"] == "1", "local E37 visual capture"))
         func captureWorkspaceMenuForOwnerReview() throws {
             let (a,b) = try split()
             let directory = root.appending(path: ".work/captures")

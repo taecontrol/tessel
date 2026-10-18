@@ -1063,7 +1063,7 @@ extension Acceptance {
             #expect(budget.measurements.count == 20 && budget.measurements.allSatisfy { $0 > 0 && $0 <= 200_000_000 } && UInt64(budget.sourceRun) != nil && budget.nanoseconds == min(200_000_000,(budget.measurements.max() ?? 0)*3))
             #expect(samples.allSatisfy { $0 <= budget.nanoseconds })
         }
-        @Test(.enabled(if:ProcessInfo.processInfo.environment["TESSEL_CAPTURE_WORKSPACES"] == "1","local E26 visual capture"))
+        @Test("#17 E26: rails status item capture", .enabled(if:ProcessInfo.processInfo.environment["TESSEL_CAPTURE_WORKSPACES"] == "1","local E26 visual capture"))
         func captureRailsStatusItem() throws {
             let ids = try setup()
             try focus(ids[0],since:flow.post(38,shift:true))

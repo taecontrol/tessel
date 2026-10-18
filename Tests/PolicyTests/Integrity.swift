@@ -34,7 +34,7 @@ import Testing
     }
 }
 
-private enum PolicyPurity {
+enum PolicyPurity {
     struct Violation { let line: Int; let rule: String }
     private static let rules = [
         ("sleep", #"\b(?:sleep|usleep|nanosleep)\s*\("#),
@@ -74,11 +74,12 @@ private enum PolicyPurity {
 
     // Mask comments and literals without changing line numbers. Interpolation
     // bodies remain code, including inside raw and multiline string literals.
-    private static func codeOnly(_ source: String) -> String {
-        let bytes = Array(source.utf8)
+    static func codeOnly(_ source: String) -> String {
+        // NSString and regular expressions use UTF-16 offsets.
+        let bytes = Array(source.utf16)
         var result = bytes
         var index = 0
-        func matches(_ text: [UInt8]) -> Bool {
+        func matches(_ text: [UInt16]) -> Bool {
             index + text.count <= bytes.count && Array(bytes[index..<(index + text.count)]) == text
         }
         func mask(_ count: Int) {
@@ -107,8 +108,8 @@ private enum PolicyPurity {
                         mask(hashes)
                         let quotes = matches([34, 34, 34]) ? 3 : 1
                         mask(quotes)
-                        let suffix = Array(repeating: UInt8(34), count: quotes) + Array(repeating: UInt8(35), count: hashes)
-                        let escape = [UInt8(92)] + Array(repeating: UInt8(35), count: hashes)
+                        let suffix = Array(repeating: UInt16(34), count: quotes) + Array(repeating: UInt16(35), count: hashes)
+                        let escape = [UInt16(92)] + Array(repeating: UInt16(35), count: hashes)
                         while index < bytes.count {
                             if matches(suffix) { mask(suffix.count); break }
                             if matches(escape) {
@@ -128,6 +129,6 @@ private enum PolicyPurity {
             }
         }
         scan()
-        return String(decoding: result, as: UTF8.self)
+        return String(decoding: result, as: UTF16.self)
     }
 }
