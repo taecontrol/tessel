@@ -42,7 +42,8 @@ Prove each acceptance example in exactly one layer:
   pieces are wired together.
 - **Latency.** Workspace switches and rail moves are measured from the real key
   post to the observer's sample, and gated on the 95th percentile of 100
-  samples each (200 ms).
+  samples each (200 ms). Six CI runs of 20 samples gave p95 81 ms for switches
+  and 96 ms for rails.
 
 Real-system checks wait for a final state within one 5 s margin; only the
 latency measurement judges elapsed time. The resource suite (ADR-0003) is
@@ -62,6 +63,11 @@ bare `swift test` never launches anything.
   assumption, a registry requires one contract per assumption, known-bug
   mutants must fail the deterministic layer in CI, and a pull request that
   changes the simulator without a contract change must state its evidence.
+  Their first runs on macOS 27 contradicted 10 of 35 assumptions, which were
+  corrected before any scenario relied on them.
+- The corrected simulator exposed policy races the end-to-end suite could hit
+  only by chance: a dying app's survivor stealing the rail selection, a stale
+  focus raised at startup, and focus intents lost to redraws.
 - Policy code may reach macOS only through the ports: no direct GCD, locks,
   wall clock or system calls, enforced by a purity check.
 - The simulator is a second model of macOS to maintain, about as large as the
