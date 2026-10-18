@@ -18,4 +18,68 @@ done
 if [[ ${#filters[@]} -eq 0 ]]; then
     filters=(--skip /Permission/)
 fi
+
+# Timed checks need this process scheduled like the apps it observes (issue
+# #21). A launchd job without ProcessType Interactive clamps its whole process
+# tree to utility QoS (priority 20) or background (4), and no child can lift
+# that clamp; a hosted runner's steps can inherit it. Run the tests as an
+# Interactive job in this user's GUI session instead, forwarding the
+# environment, output and exit status.
+priority=$(ps -o pri= -p $$ | tr -d ' ')
+if [[ -n ${TESSEL_VERIFY_JOB:-} ]]; then
+    echo "scripts/verify: running as an Interactive launchd job at scheduling priority $priority"
+elif (( priority < 31 )); then
+    echo "scripts/verify: scheduling priority $priority is clamped; running the tests as an Interactive launchd job"
+    job=$(mktemp -d "${TMPDIR:-/tmp}/tessel-verify.XXXXXX")
+    domain="gui/$(id -u)"
+    label="com.taecontrol.tessel.verify.$$"
+    trap 'launchctl bootout "$domain/$label" 2>/dev/null || true; rm -rf "$job"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    env -0 > "$job/environment"
+    cat > "$job/run" <<'EOF'
+#!/bin/bash
+job=$1
+shift
+while IFS= read -r -d '' variable; do export "$variable" 2>/dev/null || true; done < "$job/environment"
+TESSEL_VERIFY_JOB=1 "$@"
+echo $? > "$job/status.partial"
+mv "$job/status.partial" "$job/status"
+EOF
+    : > "$job/output"
+    plist="$job/job.plist"
+    plutil -create xml1 "$plist"
+    plutil -insert Label -string "$label" "$plist"
+    plutil -insert ProcessType -string Interactive "$plist"
+    plutil -insert WorkingDirectory -string "$root" "$plist"
+    plutil -insert StandardOutPath -string "$job/output" "$plist"
+    plutil -insert StandardErrorPath -string "$job/output" "$plist"
+    plutil -insert RunAtLoad -bool true "$plist"
+    plutil -insert ProgramArguments -array "$plist"
+    index=0
+    for value in /bin/bash "$job/run" "$job" "$root/scripts/verify" "$@"; do
+        plutil -insert "ProgramArguments.$index" -string "$value" "$plist"
+        index=$((index + 1))
+    done
+    launchctl bootstrap "$domain" "$plist"
+    shown=0
+    while true; do
+        finished=0
+        [[ -f $job/status ]] && finished=1
+        if (( !finished )) && launchctl print "$domain/$label" 2>/dev/null | grep -q 'state = not running'; then
+            [[ -f $job/status ]] && finished=1 || finished=2
+        fi
+        size=$(stat -f %z "$job/output")
+        if (( size > shown )); then
+            tail -c +$((shown + 1)) "$job/output" | head -c $((size - shown))
+            shown=$size
+        fi
+        (( finished == 1 )) && exit "$(cat "$job/status")"
+        if (( finished == 2 )); then
+            echo "scripts/verify: the launchd job ended without reporting a status" >&2
+            exit 1
+        fi
+        sleep 0.5
+    done
+fi
 exec swift test --package-path "$root" --no-parallel "${filters[@]}"
