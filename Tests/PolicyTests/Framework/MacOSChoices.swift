@@ -3,6 +3,11 @@ import Ports
 import Simulator
 import Testing
 
+private final class NativeRootEvents: @unchecked Sendable {
+    var names: [AXNotification] = []
+    var destroyed: [AXElement] = []
+}
+
 @Suite @MainActor struct MacOSChoices {
     @Test("prohibited lifecycle notifications may be delivered or omitted independently", arguments: ProhibitedNotifications.allCases)
     func prohibitedLifecycle(_ notifications: ProhibitedNotifications) {
@@ -51,13 +56,25 @@ import Testing
         let mac = SimulatedMac()
         defer { mac.shutdown() }
         let app = mac.launch(windows: 1)
-        let root = app.beginFullscreenTransition(1, publishingRoot: publishingRoot)
         let ax = mac.ax, application = ax.application(app.pid)
+        let events = NativeRootEvents()
+        let observer = try #require(ax.observer(app.pid) { notification, element in
+            events.names.append(notification)
+            if notification == .destroyed { events.destroyed.append(element) }
+        }.value)
+        observer.start()
+        #expect(observer.add(.windowCreated, to: application) == .success)
+        let root = app.beginFullscreenTransition(1, publishingRoot: publishingRoot)
+        var observedRoot: AXElement?
         for _ in 0..<2 {
             let roots = try #require(ax.copy(.windows, of: application).value?.elements)
             #expect(roots.count == (publishingRoot ? 2 : 1))
             if let root {
                 let handle = try #require(roots.first { ax.windowID($0).value == root })
+                if observedRoot == nil {
+                    #expect(observer.add(.destroyed, to: handle) == .success)
+                    observedRoot = handle
+                }
                 #expect(ax.copy(.role, of: handle).value?.string == "AXWindow")
                 #expect(ax.copy(.subrole, of: handle).value?.string == "AXUnknown")
                 #expect(ax.copy(.fullscreen, of: handle).value?.bool == false)
@@ -73,6 +90,8 @@ import Testing
         app.finishFullscreenTransition(1)
         #expect(ax.copy(.windows, of: application).value?.elements?.count == 1)
         #expect(mac.settle() == .settled)
+        #expect(events.names == (publishingRoot ? [.windowCreated, .destroyed] : []))
+        #expect(events.destroyed == observedRoot.map { [$0] } ?? [])
     }
 
     @Test("a successful AX position write may accept the point or retain the right-edge strip", arguments: PositionAcceptance.allCases)

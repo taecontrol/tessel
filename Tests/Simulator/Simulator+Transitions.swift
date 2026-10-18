@@ -21,16 +21,16 @@ extension SimulatedMac {
         windows[id] = Window(id: id, pid: pid, spec: WindowSpec(frame: frame, subrole: "AXUnknown", resizable: false), spaces: [active])
         fullscreenRoots[window] = id
         zOrder.insert(id, at: 0)
-        notify(.layoutChanged, node: .application(pid))
+        notify(.windowCreated, node: .application(pid))
         return id
     }
 
     @MainActor func finishFullscreenTransition(_ window: UInt32) {
         assume(.transientWindowLists)
         action("window \(window) finishes fullscreen transition")
-        guard let id = fullscreenRoots.removeValue(forKey: window), let root = windows[id] else { return }
+        guard let id = fullscreenRoots.removeValue(forKey: window) else { return }
         windows[id]?.closed = true
         zOrder.removeAll { $0 == id }
-        notify(.layoutChanged, node: .application(root.pid))
+        notify(.destroyed, node: .window(id))
     }
 }

@@ -90,8 +90,9 @@ interpret the resulting port calls.
 `beginFullscreenTransition(_:publishingRoot:)` chooses whether AppKit exposes
 an auxiliary display-sized `AXUnknown` root. It stays live across reads until
 `finishFullscreenTransition` removes it; `enterFullscreen` and `leaveFullscreen`
-set the ordinary window's final state independently. The workspace fullscreen
-example exercises both choices without changing its assertions.
+set the ordinary window's final state independently. Native creation and
+destruction notifications accompany the auxiliary root. The workspace fullscreen
+example exercises both choices and settles root removal before fullscreen exit.
 
 `WindowSpec.positionAcceptance` chooses exact AX position acceptance or the
 native right-edge clamp that leaves a 40-point strip (the default). App drag

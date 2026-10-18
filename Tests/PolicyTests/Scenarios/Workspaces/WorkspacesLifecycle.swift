@@ -204,7 +204,7 @@ import Testing
             let tessel = scenario.startTessel(.stack)
             scenario.settle()
             let frame = scenario.mac.frame(2)
-            app.beginFullscreenTransition(2, publishingRoot: transientRoot)
+            let auxiliary = app.beginFullscreenTransition(2, publishingRoot: transientRoot)
             app.enterFullscreen(2)
             scenario.settle()
             scenario.expect("fullscreen has explicit nil membership", WorkspaceScenarios.row(tessel, 2)?.state == .fullscreen && WorkspaceScenarios.row(tessel, 2)?.workspace == nil)
@@ -217,6 +217,9 @@ import Testing
             scenario.expect("fullscreen retains its frame and focus", scenario.mac.frame(2) == frame && scenario.mac.focusedWindow == 2)
             scenario.expect("no hide or AX write targets fullscreen", !scenario.mac.scheduler.trace.dropFirst(checkpoint).contains { $0.contains("ClosetPort.hide windows=[2") || $0.contains("AccessibilityPort.set") })
             app.finishFullscreenTransition(2)
+            scenario.settle()
+            if let auxiliary { scenario.expect("the completed transition retires its auxiliary root before fullscreen exit", WorkspaceScenarios.row(tessel, auxiliary) == nil) }
+            scenario.expect("completing the transition retains fullscreen focus and state", scenario.mac.focusedWindow == 2 && WorkspaceScenarios.row(tessel, 2)?.state == .fullscreen)
             app.leaveFullscreen(2)
             scenario.settle()
             WorkspaceScenarios.shown(scenario, 2)

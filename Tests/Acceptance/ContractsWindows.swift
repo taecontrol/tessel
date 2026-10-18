@@ -10,6 +10,8 @@ extension Acceptance.Contracts {
         let screen = try #require(try native("screen").screen)
         let display = [screen[0], 0, screen[2], screen[3]]
         var fullscreenTransition = false
+        var watchedRoot: UInt32?
+        try watch(["AXWindowCreated"])
         func sample() throws -> NativeContractReply {
             let state = try native()
             try #require(state.listError == 0 || state.listError == -25204, "native transition returned unmodeled AXWindows error \(state.listError ?? 1)")
@@ -22,6 +24,13 @@ extension Acceptance.Contracts {
                     try #require(root.frameError == 0 && desktop.near(root.frame, display) && !root.sizeSettable && root.settableError == 0)
                     try #require(root.fullscreen == false && root.fullscreenError == 0 && root.minimized == false && root.minimizedError == 0)
                     try #require(root.main == false && root.mainError == 0 && root.sheets.isEmpty && root.bar == nil)
+                    if watchedRoot == nil {
+                        try expectEvent("AXWindowCreated", id: root.id)
+                        let results = try native("watch", ["id": root.id, "notifications": ["AXUIElementDestroyed"]]).results
+                        try #require(results == [0] || results == [-25202])
+                        if results == [0] { watchedRoot = root.id }
+                        else { try watch(["AXWindowCreated"]) }
+                    }
                 }
                 try #require(state.roots.allSatisfy { $0.id == 0 || $0.roleError == 0 || $0.roleError == -25202 || $0.roleError == -25204 })
             }
@@ -38,6 +47,7 @@ extension Acceptance.Contracts {
             }
         }
         for fullscreen in [true, false] {
+            try desktop.activate(key: "b")
             fullscreenTransition = true
             try fixture.command("fullscreen", ["key": "b", "waitForTransition": false])
             try requireFinalState("the fullscreen transition returns a modeled list and final flag") {
@@ -49,6 +59,8 @@ extension Acceptance.Contracts {
         try requireFinalState("ordinary AXWindows recovers after native transitions") { Set(try sample().roots.map(\.id)) == Set([a, b]) }
         fullscreenTransition = false
         _ = try sample()
+        // Only this root is watched; a destroyed handle no longer exposes its CG ID.
+        if watchedRoot != nil { try expectEvent("AXUIElementDestroyed") }
     }
 
     @Test("closed-window-handles: retained AX handles become invalid after native close", contract(.closedWindowHandles))
