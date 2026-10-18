@@ -67,7 +67,9 @@ extension Acceptance {
         func expectShown(_ id: UInt32, since start: Double? = nil, within timeout: Double? = nil,
                          gap: Double = 10, floating: Bool = false, sourceLocation: SourceLocation = #_sourceLocation) throws {
             let remaining = max(0, (timeout ?? (start == nil ? 1 : budget)) - (start.map { monotonicSeconds() - $0 } ?? 0))
+            let diagStart = monotonicSeconds() // CIDIAG17
             let success = try eventually(within: remaining) { try shown(id, gap: gap, floating: floating) }
+            if !success { print("CIDIAG17 expectShown failure id", id, "since", start as Any, "waitStart", diagStart, "deadline", diagStart + remaining, "now", monotonicSeconds()) } // CIDIAG17
             try #require(success,
                          "fixture \(id) must be visible, focused, and correctly sized before the deadline", sourceLocation: sourceLocation)
         }
@@ -102,6 +104,7 @@ extension Acceptance {
                 if hasWindows { return observation.frontmostFixturePID == session.pid }
                 return try session.command("ping").active == true
             }
+            if !active { print("CIDIAG17 activate failure pid", session.pid, "target", target as Any, "now", monotonicSeconds()) } // CIDIAG17
             try #require(active, "the target fixture must be frontmost", sourceLocation: sourceLocation)
         }
 
@@ -149,6 +152,7 @@ extension Acceptance {
                 let observation = try observe(finder: verifyFinder, focusedOnly: true)
                 return managed.isDisjoint(with: observation.visibleIDs) && (!verifyFinder || observation.finderDesktop)
             }
+            if !empty { print("CIDIAG17 expectEmpty failure since", start, "now", monotonicSeconds()) } // CIDIAG17
             try #require(empty, "an empty workspace must hide managed windows and, when safe, focus Finder's desktop")
         }
 

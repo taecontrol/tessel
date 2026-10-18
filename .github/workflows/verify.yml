@@ -46,6 +46,7 @@ jobs:
             .work/switch-calibration.json
             .work/rails-calibration.json
             .work/captures/E26-*.png
+            .work/ci/diag/
           if-no-files-found: ignore
       - name: Remove ephemeral keychain
         if: always()
