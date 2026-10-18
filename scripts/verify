@@ -90,5 +90,4 @@ EOF
         sleep 0.5
     done
 fi
-export TESSEL_ACCEPTANCE=1
 exec swift test --package-path "$root" --no-parallel "${filters[@]}"
