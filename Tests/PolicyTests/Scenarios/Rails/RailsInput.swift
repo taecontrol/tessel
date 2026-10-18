@@ -99,7 +99,7 @@ import Testing
         })
     }
 
-    @Test("#17 E16; #17 E22: owner revalidation cannot override newer keyboard or native focus", arguments: ["keyboard", "external", "same-app"], WriteOrder.allCases)
+    @Test("#17 E16; #17 E22: owner revalidation cannot override newer keyboard or native focus", arguments: ["keyboard", "reorder", "external", "same-app"], WriteOrder.allCases)
     func supersededOwnerRead(action: String, order: WriteOrder) {
         requireScenario(Scenario.run("owner read superseded by \(action)", writes: order) { s in
             let f = RailFixture(s, widths: [0.25]), a = f.ids[0]
@@ -114,6 +114,7 @@ import Testing
             s.step("newer \(action) selection while the owner's AX lane is held") {
                 switch action {
                 case "keyboard": f.tessel.press("workspace 3")
+                case "reorder": f.tessel.press("move right")
                 case "external": third.activate()
                 default: other.select(b)
                 }
@@ -125,9 +126,9 @@ import Testing
                 f.focus(d)
                 s.expect("keyboard travel finishes before the owner answers", f.tessel.status.active == 3)
             }
-            s.settle(); f.focus(action == "same-app" ? b : d)
+            s.settle(); f.focus(action == "same-app" ? b : action == "reorder" ? a : d)
             s.expect("the newer selection owns its workspace and rail",
-                     f.tessel.status.active == (action == "same-app" ? 1 : 3) && f.tessel.status.rail == 1)
+                     f.tessel.status.active == (action == "same-app" || action == "reorder" ? 1 : 3) && f.tessel.status.rail == 1)
             s.expect("the superseded destination remains hidden", !f.mac.isVisible(c))
         })
     }
