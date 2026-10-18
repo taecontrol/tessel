@@ -1,25 +1,25 @@
 #!/bin/bash
 # Drive the signed app through its CLI and isolated AppKit fixtures.
-# With no suite or test name, runs all suites except disposable-runner permission checks.
+# With no suite or test name, runs all suites except disposable-runner permission steps.
 set -euo pipefail
 export TESSEL_ACCEPTANCE=1
 root=$(cd "$(dirname "$0")/.." && pwd)
-usage='Usage: scripts/verify [--functional] [--journeys] [--latency] [--resources] [--permission] [TEST...]'
+usage='Usage: scripts/verify [--contracts] [--journeys] [--latency] [--resources] [--permission] [TEST...]'
 filters=()
 for argument in "$@"; do
     case $argument in
-        --functional) filters+=(--filter /Functional/ --filter /FunctionalWorkspaces/ --filter /FunctionalRails/) ;;
+        --contracts) filters+=(--filter /Contracts/) ;;
         --journeys) filters+=(--filter /Journeys/) ;;
         --latency) filters+=(--filter /Latency/) ;;
         --resources) filters+=(--filter /Resources/ --filter /Verification/) ;;
-        --permission) filters+=(--filter /Permission/) ;;
+        --permission) filters+=(--filter permissionDenialAndRestart) ;;
         -h | --help) echo "$usage"; exit 0 ;;
         -*) echo "$usage" >&2; exit 2 ;;
         *) filters+=(--filter "$argument") ;;
     esac
 done
 if [[ ${#filters[@]} -eq 0 ]]; then
-    filters=(--skip /Permission/)
+    filters=(--skip permissionDenialAndRestart)
 fi
 filters+=(--skip '^PolicyTests[./]')
 

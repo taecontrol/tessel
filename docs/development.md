@@ -2,8 +2,9 @@
 
 Use macOS 27 or later on Apple silicon, with Xcode 27 selected by `xcode-select`.
 The app, its build tool, and the acceptance harness are Swift with Apple's
-frameworks; there are no package dependencies. `Package.swift` describes only
-the development tools ([ADR 0001](adr/0001-swift-for-build-and-verification-tooling.md)).
+frameworks; there are no package dependencies. `Package.swift` holds the
+development tools, internal policy libraries and test
+targets ([ADR 0004](adr/0004-verify-policy-against-a-simulated-macos.md)).
 Never launch one of its products as the app.
 
 ## Signing and launching
@@ -42,184 +43,135 @@ where LaunchServices cannot register them reliably.
 
 ## Verification
 
-Bare `swift test` runs the deterministic policy layer only; the real Acceptance
-target is compiled only with `TESSEL_ACCEPTANCE=1`, which `scripts/verify` sets.
-The simulator, scenario API, trace replay and assumption registry are described
-in [Policy scenarios](policy-scenarios.md). Current migrated policy coverage:
+Bare `swift test` runs the deterministic scenarios, simulator framework and
+integrity checks, and tooling tests. It compiles no Acceptance target, launches
+no app or fixture, creates no windows and needs no Accessibility permission.
+The tests run in seconds after compilation and print total test time plus one
+SHA-256 `trace digest:` line. `swift run tessel-check determinism --runs 100`
+requires every run to pass with the same digest.
 
-| Example | Layer | Scenario |
-| --- | --- | --- |
-| #2 E2 (stale native focus while enabling stack layout) | P | `Tests/PolicyTests/Scenarios/Enabling.swift` |
-| #17 E2 (stale native focus while enabling rails) | P | `Tests/PolicyTests/Scenarios/Enabling.swift` |
+The production catalog, Workspaces, Rails, closet recovery and config reload run
+against a simulated macOS behind small platform ports. Its virtual clock proves
+tessel's own delays; enumerated schedules expose races without depending on
+macOS timing. A failed scenario reports the expectation, schedule and port trace
+with virtual times, invented app aliases and window IDs. Unmodeled calls and
+runs that exceed a transition or virtual-time bound fail instead of inventing a
+result or hanging. See [Policy scenarios](policy-scenarios.md) for authoring and
+replay, and [ADR 0004](adr/0004-verify-policy-against-a-simulated-macos.md) for the seam.
 
-The remaining acceptance examples are being migrated by issue #24. Real-system
-checks below still require the signed bundle and isolated fixture harness.
+Simulator depends only on Ports and Assumptions, never Policy. Each modeled OS
+behavior declares an `assume(.caseName)` from `Tests/Assumptions`; a real contract
+in `Tests/Acceptance/Contracts*.swift` declares the matching
+`contract(.caseName)`. The registry rejects unknown IDs and missing behaviors or
+contracts. Contracts pin macOS assumptions through the signed independent
+observer; journeys check wiring; latency measures speed. Every accepted example
+has exactly one layer in the [example map](#acceptance-example-layers-24).
 
-Stop this worktree's development app and any other tessel instance managing
-windows before running the harness. Another instance can manage the fixture
-windows and contaminate verification. Run:
+For real-system verification, stop this worktree's development app and every
+other tessel instance managing windows. Use an awake, unlocked desktop:
 
 ```sh
 scripts/build
-scripts/verify --functional
+scripts/verify --contracts
+scripts/verify --journeys
+scripts/verify --latency
 scripts/verify --resources
 ```
 
-Use an awake, unlocked macOS desktop. The harness checks that precondition and
-holds a temporary `caffeinate` assertion until its processes are cleaned up.
-AX can expose incomplete application elements when the display sleeps.
+With no arguments, `scripts/verify` runs every real-system suite except the
+disposable-runner permission steps. `--journeys` includes those steps on CI;
+`--permission` selects just those steps. The signing-and-permission journey has
+separate signing and permission tests so the default can skip only the latter. Captures
+run only with `TESSEL_CAPTURE_WORKSPACES=1`. Select a suite as above or pass a test
+name fragment, such as `scripts/verify switchWorkspaces`. Empty selections fail
+before a GUI session starts. The script sets `TESSEL_ACCEPTANCE=1`; a direct
+`TESSEL_ACCEPTANCE=1 swift build --build-tests` compiles these suites without
+launching them.
 
-The harness launches the signed development bundle with `open`, an isolated
-temporary `XDG_CONFIG_HOME`, and real AppKit fixture processes. It drives those
-processes through a test-only local socket, observes tessel through its bundled
-CLI, and cleans up its processes and data. The harness always passes
-`--test-fixture-only`: only fixture processes are observed or managed, including
-startup crash recovery. This argument exists only in the signed `.dev` build and
-is rejected by the daily build. Before activating Finder for an empty workspace
-in fixture-only mode, tessel requires a successful AXWindows read without
-ordinary windows. Finder's desktop scroll area is allowed; unknown entries and
-failed reads block activation. A failed read is retried twice off the main
-thread, because a busy Finder or one answering its first AX client can miss a
-short timeout; only the render that requested it may then activate Finder.
-Tessel inspects no window content. Local tests still check that managed
-windows disappear and report
-when the Finder desktop assertion is skipped. CI requires the full assertion.
-Full window listings, real window titles, and personal configs are never
-printed or saved. The independent AX probe verifies the running code's signed
-fixture identifier before reading a window or posting a key. It revalidates the
-running signature on every operation, retaining audit-bound Security code
-objects to avoid repeating signature construction during timed observations.
-The audit binding rejects exec and PID reuse; denied task-name access keeps
-the stateless validation path. A fixture that replaces itself with a short-lived
-system process verifies that the observer rejects it while its PID is still alive.
-The oracle reads the frontmost application through AX; cached LaunchServices metadata can be absent
-briefly during activation. Fixtures cooperate with AppKit's activation handoff
-without ordering a window during the external-activation assertions.
-The fixture protocol reserves 64 KiB per-socket reply buffers: twenty-window AX
-observations exceed macOS's default 2 KiB datagram limit. It changes no system
-socket settings.
+All real-system state checks use the single generous 5 s `margin` in
+`Tests/Acceptance/Support.swift`, including setup, lifecycle, CLI transport,
+contracts and captures. Their final-state API accepts no per-call deadline.
+Only `Latency.swift` judges elapsed time. Compilation and CI permission
+provisioning have separate process limits; resource observation retains its
+ADR 0003 window and settle. The integrity check rejects shorter state waits and
+retired `since:` or `within:` APIs outside latency.
 
-`scripts/verify` runs both suites with Swift Testing. To select tests, pass part
-of a test name from `Tests/Acceptance`, such as `scripts/verify e08`. The
-functional suite covers foundation E1–E12 and E15–E21; foundation E13/E14 require visual evidence of
-the permission journey.
-The resource suite covers foundation E22 with the default config and workspace
-E36 with 20 fixture windows across ten workspaces. Each keeps its existing setup
-and one-second settle, then measures one 20-second idle window from outside the
-app with `proc_pid_rusage` (`rusage_info_v0`). Interrupt wakeups
-(`ri_interrupt_wkups`) must not exceed 11 and user + system CPU must not exceed
-100 ms. Mach ticks are converted with `mach_timebase_info`. Physical footprint
-(`ri_phys_footprint`) must be below 30 MB both at the start and at the end of the
-window; a start failure stops without waiting. Each test prints its measurements
-and limits, and failures identify the exceeded limit.
+### Signed fixture harness
 
-The wakeup limit targets work recurring every two seconds or less; the CPU cap
-also catches work that never sleeps. The footprint limit accounts for the app's
-own memory. The limits, spike measurements, and their rationale live in
-`Tests/Acceptance/resource-budget.json` and
-[ADR 0003](adr/0003-verify-idle-work-with-wakeups-cpu-and-footprint.md).
-Changing these limits requires an owner decision backed by new evidence.
-LaunchServices notifications can increase local CPU while the workspace
-experiment is idle (issue #15). Keep the desktop awake and stop other tessel
-instances before interpreting an outlier. Do not run `sample` during a measured
-window: it suspends the process and changes its counters.
+The harness checks the desktop session and holds a temporary `caffeinate`
+assertion until cleanup. It launches the signed development bundle through
+`open`, an isolated temporary `XDG_CONFIG_HOME`, real AppKit fixtures and an
+independent signed AX/CG observer. A test-only local socket drives the fixtures;
+tessel is observed through its bundled CLI. The harness cleans up its own
+processes and data. It always passes `--test-fixture-only`, so only fixture
+processes are observed or managed, including crash recovery. The daily build
+rejects that argument. Another tessel instance can contaminate these fixtures.
 
-CI runs permission, functional, and resource verification sequentially in one
-acceptance job. The resource command has a 90-second budget, and the whole job
-has a fifteen-minute (900-second) timeout. With the rails suite, the functional
-command takes about 245 seconds locally; `xcode-27` runners have taken 1.2 to
-1.8 times as long, so the whole job needs about 500 to 710 seconds. The
-workspace switch timing artifact is still uploaded.
+The observer validates the running fixture's signed identifier before reading a
+window or posting a key, revalidating on every operation. Audit-bound Security
+code objects avoid repeated construction during latency sampling; exec and PID
+reuse invalidate the binding, and denied task-name access retains stateless
+validation. A journey replaces a fixture's code and checks rejection while its
+PID still lives. No full window listing, title or personal config is printed or
+saved. Fixture replies reserve 64 KiB per socket because twenty-window AX
+observations exceed macOS's default 2 KiB datagram limit; no system socket
+settings change.
 
-A full observation, used by setup and one-shot reads, gives each AX read
-100 ms. A timed-out read means the app did not answer, so it must not count as
-an absent or unfocused window. The system-wide focused-application read is
-answered by the frontmost app, and a 20 ms limit missed busy fixtures even on
-an idle Mac. Focused-only observations, which timed checks poll, keep 20 ms so
-a busy app is asked again rather than consuming the deadline.
+Full setup observations allow 100 ms per AX read; focused-only observations use
+20 ms so a busy app can be sampled again. A timeout is an unanswered read, not
+proof that a window is absent or unfocused. The oracle reads the frontmost app
+through live AX because cached LaunchServices metadata can lag activation.
+Fixtures cooperate with AppKit's activation handoff without ordering windows.
+Their minimize/restore acknowledgement follows AppKit's completion notification,
+after the Dock animation, when macOS sends the AX event.
 
-Timed checks are judged by when their inputs were produced, not by when this
-test process received them (issue #21). Each observation carries the raw
-monotonic time at which the observer finished it, and a JSON CLI answer counts
-at its `answeredAt`. A fixture reply, an answer without that field, an empty
-window list, or another subprocess counts at its receipt. An evaluation counts at its latest
-input, and one without recorded inputs counts when it returns. On xcode-27 the
-test process alone was descheduled for up to 709 ms. In run 39090280471, a
-switch the observer saw complete in about 14 ms was received 242 ms late.
-Deadlines and budgets are unchanged: an observation taken after its deadline
-still fails, and a stall that prevents any sample before the deadline still
-fails. Switch and rail calibrations measure from the key post to the sample
-time that met the check.
+Each observation carries raw monotonic `sampledAt`; JSON CLI answers carry
+`answeredAt`. A final-state evaluation uses its latest input's production time,
+or receipt time when no timestamp exists, so descheduling the test process does
+not turn an earlier observer sample into tessel latency (issue #21). The script
+prints its scheduling priority and relaunches a clamped process tree as an
+`Interactive` launchd job in the user's GUI session, forwarding environment,
+output and exit status. Priority below 31 indicates a utility/background clamp
+that child QoS changes cannot lift. Interrupting verification removes the job.
 
-`scripts/verify` also makes sure the test process is scheduled like the apps
-it observes. A launchd job whose `ProcessType` is not `Interactive`, as
-`Standard` or an unset one, clamps its whole process tree to utility QoS: `ps -o pri=`
-reports 20 instead of 31, and `Background` or `Adaptive` report 4. No child
-can lift a clamp, not even with `taskpolicy -a` or spawn attributes. Under a
-`Standard` job a thread sleeping 10 ms woke 40 ms or more late about 13 times
-a second, the rate the xcode-27 test process showed in issue #21, while the
-apps it launched with `open` were unaffected. When its priority is below 31,
-`scripts/verify` reruns itself as an `Interactive` job in the user's GUI
-session (`launchctl bootstrap gui/<uid>`), forwarding the environment, output
-and exit status, and prints the priority both times. Interrupting it boots
-the job out. Locally, a functional run under `taskpolicy -c utility` without
-the relaunch missed 10 waits; four relaunched runs missed 1, 5, 0 and 1, and
-two unclamped runs 0 and 2.
+### Resources
 
-For minimize and restore, the 500 ms observation deadline begins at AppKit's
-completion notification, after the Dock animation. macOS sends the AX event
-at that point; the animation itself can take longer than 500 ms. The fixture
-acknowledges those commands on completion, without changing the assertion's
-deadline. Other window operations use the ordinary command acknowledgement.
+`Resources.swift` keeps foundation E22's twenty default-config windows, workspace
+E36's twenty windows across ten workspaces, and rails E29's twenty windows
+across five workspaces and multiple rails. Each retains its setup and one-second
+settle, then observes one 20-second idle window from outside the app with
+`proc_pid_rusage` (`rusage_info_v0`). Interrupt wakeups must be at most 11;
+user + system CPU must be at most 100 ms, converting Mach ticks with
+`mach_timebase_info`. Physical footprint must be below 30 MB at both boundaries;
+a start failure stops before the idle wait. Measurements and exceeded limits
+are printed. The CPU oracle remains a named journey self-check.
 
-Native tab groups have one front entry while visible or hidden. When a group is
-minimized, macOS 27 exposes each tab as an AX window, and only one reports the
-group's tab count. Tessel lists those minimized entries as reported; it does not
-guess which windows belong together. Restoring the group returns to one entry.
-Keeping one entry while minimized needs further investigation beyond #1.
+The wakeup limit targets work recurring every two seconds or less; CPU also
+catches work that never sleeps. `Tests/Acceptance/resource-budget.json` and
+[ADR 0003](adr/0003-verify-idle-work-with-wakeups-cpu-and-footprint.md) retain the
+limits and evidence. Changing a limit requires an owner decision and new
+evidence. LaunchServices notifications can raise local idle CPU (issue #15).
+Do not run `sample` during a measured window: it suspends the app and changes
+its counters.
 
-`AXTabGroup` alone also describes content controls. On macOS 27, AppKit's native
-tab bar publishes its `AXTabs` buttons within `AXContents`; an `NSTabView`
-publishes the selected page's content instead. Tessel uses that identity
-relationship and counts only `AXTabs`, excluding an optional New Tab button.
-Fixtures cover empty and populated content tabs, segmented controls, native
-tabs without close buttons, and native windows containing more content tabs.
-Their independent native-count oracle is `NSWindow.tabGroup.windows`.
-This relationship follows the installed AppKit implementation, rather than a
-public guarantee about future OS versions or custom Accessibility publishers.
-AXWindows can temporarily omit a live window during a Space move, fullscreen,
-or an app hide/unhide. The catalog revalidates known AX handles and retains sheet
-ownership. A native tab's bar keeps its AX identity when selection replaces the
-front window, so that identity retires the old tab root without retaining an
-extra window. A read can find the old root without its bar before focus or the
-moved bar identifies the successor, and AXWindows can keep listing a retired
-root afterwards. An unfocused root without a bar keeps the bar identity it last
-showed, so the successor retires it and it stays retired while another listed
-window holds that bar. A focused window without a bar, such as a tab dragged
-out of its group, is an ordinary window. A queued presentation never writes to
-a tab that is no longer its group's front, rechecked before each focus write,
-and a classification change reasserts focus only when the app reports another
-window, so a raise cannot select the former tab again over the user's choice.
-Minimized tab entries continue to follow AppKit's published list.
-The catalog carries a native front's replacement relationship into Workspaces,
-which preserves membership, arrival position, and focus history. Its next render
-reconciles visibility for the replacement CG window, including hidden groups.
-The group's last fill result also follows its front; an ordinary show retries
-that result without resizing the group merely because another tab was selected.
-The close fixture can retain a closed NSWindow object to verify that revalidation
-still retires its AX window.
+### CI
 
-CI runs the same commands on `xcode-27` (macOS 27). It first hides the
-runner's Dock. On the runner's 1024×768 display the visible frame's bottom
-edge, where the Dock sits, moved by up to two points during a test, so a window
-tessel had just filled no longer matched the frame the observer read. Each
-fixture process adds a Dock icon; a local desktop with a hidden Dock kept the
-same visible frame while 28 fixture apps launched and quit. Its short-lived certificate
-is created in a temporary keychain; no signing material is stored in GitHub.
-Only the disposable runner provisions its Accessibility database, for the
-denial and restart checks in `scripts/verify --permission`; elsewhere that
-suite is skipped. Local verification uses the permission granted to the signed
-development bundle.
+CI runs on `xcode-27` (macOS 27). The Policy job runs bare tests, the layer check,
+known-bug mutants, trace repetition and the simulator-evidence guard. The
+Acceptance job signs and builds once, then runs contracts, journeys (including
+permission denial/restart), latency, resources and the rails status-item capture.
+Resources retain their 90 s command budget. The job has a ten-minute timeout for
+these suites, signed rebuilds and runner setup, with margin for a slower runner.
+Latency samples and the app-rendered rails capture are uploaded even on failure.
+
+The runner first hides the Dock: fixture Dock icons can move the visible frame's
+bottom edge by two points on its 1024×768 display. It creates a short-lived
+certificate in a temporary keychain, removed at the end; no signing material is
+stored in GitHub. Before any harness suite, `scripts/ci-accessibility` grants the
+development app and fixture access on that disposable runner. Only `CI=true`
+together with `GITHUB_ACTIONS=true` enables
+Accessibility denial and restart steps. Local runs use the signed development
+bundle's existing permission and never provision the Accessibility database.
 
 ## Configuration and observation
 
@@ -274,31 +226,64 @@ count, `workspace` (1…10 or null), `visible` (CG on-screen membership), and
 `workspaces.enabled`, `reason`, `active`, `gaps`, and the effective `keys`.
 With the experiment disabled, tessel observes without managing ordinary windows.
 
-`Tests/Acceptance/Workspaces.swift` covers issue #2 E1–E35 at the CLI and
-independent AX/CG boundary. The trusted fixture posts the real Carbon shortcuts
-as CGEvents only after confirming a fixture window is frontmost and on screen.
-Transient safety refusals are retried before posting, for at most one second;
-transport failures and posted events are never retried. Switch timing still
-starts at the actual event post. CI checks Finder desktop focus throughout the
-existing switch deadline rather than requiring its first AX sample to succeed.
-Only empty-workspace observations inspect Finder, so unrelated AX reads do not
-consume the fixture's timed visibility, frame, and focus checks.
-Timed checks read `AXFocusedWindow` directly, including a focused sheet's parent:
-`AXWindows` can temporarily omit a live window during a Space move. CG membership
-supplies fixture visibility independently, including the empty-workspace check.
-The focused window's frame and main state are read together in one AX request;
-ordinary focused-only observations omit unrelated child controls. Sheet and full
-observations retain their parent and child relationships.
-When the destination app is known, `expectedPID` restricts focused-only AX reads
-to that app while retaining CG visibility for every fixture. An early foreground
-sample can otherwise send a timed check into a source app that has since been hidden.
-Cached LaunchServices activation metadata is read only by setup observations;
-timed checks retain the live system-wide AX focus check.
-The active number is observed through the signed app's status-item AX label
-inside the switch deadline; CLI fields are checked afterward so process startup
-does not consume that deadline. The blocked-initial-AX regression deliberately
-suspends the fixture, checks that its orphan stays hidden, and times recovery from
-resume. The ordinary crash-recovery test retains its one-second restart deadline.
+Native tab groups have one front entry while visible or hidden. When a group is
+minimized, macOS 27 exposes each tab as an AX window, and only one reports the
+group's tab count. Tessel lists those minimized entries as reported; it does not
+guess which windows belong together. Restoring the group returns to one entry.
+Keeping one entry while minimized needs further investigation beyond #1.
+
+`AXTabGroup` alone also describes content controls. On macOS 27, AppKit's native
+tab bar publishes its `AXTabs` buttons within `AXContents`; an `NSTabView`
+publishes the selected page's content instead. Tessel uses that identity
+relationship and counts only `AXTabs`, excluding an optional New Tab button.
+Fixtures cover empty and populated content tabs, segmented controls, native
+tabs without close buttons, and native windows containing more content tabs.
+Their independent native-count oracle is `NSWindow.tabGroup.windows`.
+This relationship follows the installed AppKit implementation, rather than a
+public guarantee about future OS versions or custom Accessibility publishers.
+AXWindows can temporarily omit a live window during a Space move, fullscreen,
+or an app hide/unhide. The catalog revalidates known AX handles and retains sheet
+ownership. A native tab's bar keeps its AX identity when selection replaces the
+front window, so that identity retires the old tab root without retaining an
+extra window. A read can find the old root without its bar before focus or the
+moved bar identifies the successor, and AXWindows can keep listing a retired
+root afterwards. An unfocused root without a bar keeps the bar identity it last
+showed, so the successor retires it and it stays retired while another listed
+window holds that bar. A focused window without a bar, such as a tab dragged
+out of its group, is an ordinary window. A queued presentation never writes to
+a tab that is no longer its group's front, rechecked before each focus write,
+and a classification change reasserts focus only when the app reports another
+window, so a raise cannot select the former tab again over the user's choice.
+Minimized tab entries continue to follow AppKit's published list.
+The catalog carries a native front's replacement relationship into Workspaces,
+which preserves membership, arrival position, and focus history. Its next render
+reconciles visibility for the replacement CG window, including hidden groups.
+The group's last fill result also follows its front; an ordinary show retries
+that result without resizing the group merely because another tab was selected.
+The close fixture can retain a closed NSWindow object to verify that revalidation
+still retires its AX window.
+
+Policy scenarios prove workspace decisions; real journeys drive Carbon and
+observe AX frames/focus and CG visibility independently. The trusted fixture
+posts CGEvents only while a fixture window is frontmost and on screen. Safety
+refusals are retried before posting within the final-state margin; transport
+failures and posted events are never retried. Latency starts at the actual post.
+
+Focused-only reads use `AXFocusedWindow` directly, including a focused sheet's
+parent: AXWindows can omit a live window during a Space move. CG independently
+supplies fixture visibility. Focused frame and main state are read together;
+full/sheet observations retain parent-child relationships. `expectedPID` can
+restrict AX reads to the known destination while CG still observes every
+fixture. Only observations explicitly checking an empty workspace inspect
+Finder, so unrelated AX reads cannot delay a sample.
+
+In fixture-only mode, activating Finder requires a successful AXWindows read
+without ordinary windows. Its desktop scroll area is allowed; unknown entries
+and failures block activation. Failed reads retry twice off the main thread,
+and only the render that requested them may activate Finder. No window content
+is inspected. The simulator proves the decision; real contracts pin Finder's AX
+shape. Crash-recovery journeys check that a blocked initial AX read keeps orphans
+hidden and recovery follows the first successful enumeration.
 The fixture includes AppKit and SwiftUI width constraints, dialogs, sheets,
 native fullscreen, and separate instances for activation and hung-app checks.
 `--test-missing-skylight` (requiring fixture-only development mode) tests safe
@@ -318,15 +303,7 @@ reason in those images. The capture facility is absent from the daily build.
 Run this capture only when owner review requires new evidence; it is separate
 from the automated gates. The issue #2 delivery's E37 capture is already accepted.
 
-Switch completion means visible, filled, and focused, measured from posting the
-event to the observer sample that showed it. The functional suite records 20 switches in `.work/switch-calibration.json`.
-`Tests/Acceptance/switch-budget.json` enforces three times the maximum of the
-delivery's 20 CI measurements, capped at 200 ms. Recalibrate on `xcode-27`, retain
-its run ID and measurements in that file, and rerun against the resulting budget.
-The delivery calibration recorded a 114.393042 ms maximum in run 38947144837,
-giving the 200 ms cap. Missing or inconsistent calibration data fails verification.
-Workspace E36 enforces the same idle wakeup, CPU, and footprint limits as E22.
-
+Workspace E36 enforces the same unchanged idle limits as foundation E22.
 Before the first public release (#6), revisit the bundle IDs, config schema,
 and read-only CLI contract. A command that changes state or exposes titles needs
 an architecture decision before implementation.
@@ -401,43 +378,27 @@ item shows the workspace number and one bar per rail, highlighting the current
 one; its AX label includes the current rail and total. The map overlay belongs
 to #18, and the floating layer to #19.
 
-`Tests/Acceptance/Rails.swift` and `RailsReload.swift` exercise #17 at the same
-signed CLI and independent AX/CG boundary as #2. The fixture accepts width fractions of the
-usable area, keeping fitting and overflowing scenarios independent of screen
-size. Rail setups allow 2 s for every opened fixture window to be listed. This is a
-setup precondition, not an example deadline: six- and twenty-window setups
-missed 0.5 s on xcode-27 (issues #21, #22). Run `scripts/verify FunctionalRails`; resource E29 is included in
-`scripts/verify --resources` with the unchanged ADR 0003 limits. Rails E28
-records 20 completed scrolls and elevator trips in `.work/rails-calibration.json`;
-`Tests/Acceptance/rails-budget.json` retains the authorized xcode-27 run and
-uses three times its maximum, capped at 200 ms. The delivery calibration
-recorded a 99.779542 ms maximum in run 39084887323, giving the 200 ms cap. Timing starts at the real key
-post and ends at the observer sample whose AX position, size, focus and CG
-visibility met every check. Capture the app's own status button, without desktop content, with:
+Rail scenarios prove geometry, membership, native-tab replacement, retries and
+focus ordering in virtual time. Journeys check real scroll/elevator hotkeys,
+CLI fields, the status-item AX label and recovery. Fixtures accept width
+fractions of the usable area, keeping fitting and overflowing setups independent
+of screen size. Resource E29 runs with `scripts/verify --resources` and the
+unchanged ADR 0003 limits. Capture the app's own status button with:
 
 ```sh
 TESSEL_CAPTURE_WORKSPACES=1 scripts/verify captureRailsStatusItem
 ```
 
-The PNGs are written to `.work/captures/E26-workspace-1-rail-{1,2}.png`.
+The PNGs are `.work/captures/E26-workspace-1-rail-{1,2}.png`. Both owner captures
+live in `Tests/Acceptance/Captures.swift` and require the capture environment flag.
 
 ## Journeys and latency (#24)
 
-Run `scripts/verify --journeys` for the eight end-to-end journeys and
-`scripts/verify --latency` for latency. Both use the signed development bundle,
-isolated fixtures and independent observer described above. The selectors also
-accept test-name fragments (`scripts/verify Journeys` or `scripts/verify Latency`).
-`scripts/verify` sets `TESSEL_ACCEPTANCE=1` for the real-system targets.
-The existing functional, resource and permission selectors remain available
-during the migration.
-
-Journeys and contracts wait only for a final state, using the generous 5 s
-`margin` declared once in `Tests/Acceptance/Support.swift`. Their wait API has
-no per-call deadline or timeout. Harness lifecycle and CLI transport operations
-use that same margin. Compilation and runner permission provisioning retain
-separate process limits. Foundation E11 and E14 print elapsed times without a
-shorter assertion while the owner's #24 timing question remains open; permission
-denial and restart still run only on the disposable CI runner.
+`scripts/verify --journeys` runs eight journeys. The signing-and-permission
+journey includes the disposable-runner-only permission steps under the guard
+described above. Foundation E11 (CLI failure) and E14 (permission restart) report
+elapsed time while judging only the final state within 5 s; #24 assigns real
+speed checks to the percentile latency measurement.
 
 The journey steps carry these example IDs; decision examples belong to the
 deterministic policy layer and are not tagged in these files:
@@ -481,7 +442,7 @@ and R in `Tests/Acceptance/Resources.swift`. X tests use `capture*` function
 names in Acceptance, or live in `Tests/Acceptance/Captures*.swift`.
 Contracts carry assumption IDs, never example IDs. The E20 integrity check
 rejects missing tags, unmapped tags, duplicate map rows and tags in another
-layer. During migration only the missing P tags are a named known issue.
+layer. Every mapped ID must have a tagged test in its own layer.
 
 | Example | Layer |
 | --- | --- |

@@ -37,15 +37,16 @@ extension Acceptance {
                      focusedOnly: Bool = false, check: (Observation) -> Bool) throws -> UInt64 {
             let start = try post()
             let deadline = start + margin
-            let observation = try eventualValue(within: max(0, deadline - monotonicSeconds())) { () throws -> Observation? in
+            while true {
                 let observation = try desktop.observe(focusedOnly: focusedOnly)
-                guard let sample = observation.sampledAt, sample >= start, sample <= deadline, check(observation) else { return nil }
-                return observation
+                if let sample = observation.sampledAt, sample >= start, sample <= deadline, check(observation) {
+                    return UInt64((sample - start) * 1e9)
+                }
+                if monotonicSeconds() >= deadline {
+                    throw HarnessError("\(kind) sample \(index + 1)/100 did not complete within the final-state margin")
+                }
+                sleep(seconds: 0.015)
             }
-            guard let sample = observation?.sampledAt else {
-                throw HarnessError("\(kind) sample \(index + 1)/100 did not complete within the final-state margin")
-            }
-            return UInt64((sample - start) * 1e9)
         }
 
         func printSummary(_ kind: String, _ samples: [UInt64]) {
@@ -135,8 +136,7 @@ extension Acceptance {
                                     $0.id == ids[0] && desktop.near($0.frame, [area[0] + 10, area[1] + 10, width, area[3] - 20])
                                 } && Set(ids.dropFirst()).isDisjoint(with: observation.visibleIDs)
                             }
-                            // The worked four-window ring from the original
-                            // calibration: focus at the reveal edge, then its
+                            // Worked four-window ring: focus at the reveal edge, then its
                             // next, opposite and previous neighbors.
                             let offsets = [0.0, step, -2 * step, -step]
                             return ids.dropFirst().enumerated().allSatisfy { position, id in

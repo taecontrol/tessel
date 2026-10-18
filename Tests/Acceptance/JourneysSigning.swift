@@ -70,10 +70,11 @@ extension Acceptance.Journeys {
             try #require(after.permission == "granted")
             try requireFinalState("the same fixture observed after rebuilding") { try harness.row(window)?.state == "tiled" }
         }
-        guard onDisposableRunner else {
-            print("SKIP: #1 E13 and #1 E14 change Accessibility only on the disposable CI runner; visual permission evidence is separate.")
-            return
-        }
+    }
+
+    @Test("permission steps of the signing and permission journey",
+          .enabled(if: onDisposableRunner, "changes the Accessibility database of a disposable GitHub runner only"))
+    func permissionDenialAndRestart() throws {
         let provision = root.appending(path: "scripts/ci-accessibility").path
         var initialPID: pid_t = 0
         try step("#1 E13 missing Accessibility permission is reported") {

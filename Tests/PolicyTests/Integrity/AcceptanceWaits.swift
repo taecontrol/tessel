@@ -9,8 +9,7 @@ enum AcceptanceWaits {
 
     static func violations(in source: String) -> [Violation] {
         let code = PolicyPurity.codeOnly(source) as NSString
-        // Current harness APIs: eventualValue/eventually/converges, focus,
-        // expectShown/expectEmpty, wait(until:), Process waits and socket limits.
+        // Retired spellings stay guarded so a shorter deadline cannot return.
         let labels = try! NSRegularExpression(pattern: #"\b(since|within|timeout|deadline|until|seconds)\s*:"#)
         var consumed = 0, line = 1
         let explicit: [Violation] = labels.matches(in: code as String, range: NSRange(location: 0, length: code.length)).compactMap { match in
@@ -19,13 +18,22 @@ enum AcceptanceWaits {
             let spelling = code.substring(with: match.range(at: 1))
             let call = containingCall(before: match.range.location, code: code)
             if spelling == "seconds", call?.name != "setTimeout" { return nil }
+            let expression = argument(after: NSMaxRange(match.range), code: code)
+            if let call, ["run", "setTimeout", "init"].contains(call.name),
+               code.substring(to: call.open).range(of: #"\b(?:func\s+\w+|init)\s*$"#, options: .regularExpression) != nil,
+               ["Double", "Double = margin"].contains(expression) { return nil }
+            // Transport primitives forward the caller's checked limit. Their
+            // declarations may default only to margin; all call sites are scanned.
+            if call?.name == "wait", expression.range(of: #"^\.now\(\)\s*\+\s*timeout$"#, options: .regularExpression) != nil,
+               insideWrapper("func run", at: match.range.location, code: code) { return nil }
+            if call?.name == "setTimeout", expression == "timeout",
+               insideWrapper("init", at: match.range.location, code: code) { return nil }
             if let call, call.name == "run" {
                 let arguments = (source as NSString).substring(from: call.open + 1)
                 // Compiler and CI permission provisioning process limits do not
                 // judge a real-system state. All app/CLI waits still use margin.
                 if nonStateProcess(arguments) { return nil }
             }
-            let expression = argument(after: NSMaxRange(match.range), code: code)
             if spelling != "since", expression == "margin" || expression.range(of: #"^\.now\(\)\s*\+\s*margin$"#, options: .regularExpression) != nil { return nil }
             return Violation(line: line, spelling: spelling + ": " + expression)
         }
@@ -62,6 +70,22 @@ enum AcceptanceWaits {
 
     private static func nonStateProcess(_ arguments: String) -> Bool {
         arguments.range(of: #"^\s*\[\s*(?:buildTool\.path\b|provision\b|"xcrun")"#, options: .regularExpression) != nil
+    }
+
+    private static func insideWrapper(_ name: String, at location: Int, code: NSString) -> Bool {
+        let declarations = try! NSRegularExpression(pattern: #"\b"# + name + #"\s*\("#)
+        for declaration in declarations.matches(in: code as String, range: NSRange(location: 0, length: location)) {
+            let open = code.range(of: "{", range: NSRange(location: NSMaxRange(declaration.range), length: code.length - NSMaxRange(declaration.range))).location
+            guard open != NSNotFound, open < location else { continue }
+            var depth = 1, end = open + 1
+            while end < code.length && depth > 0 {
+                if code.character(at: end) == 123 { depth += 1 }
+                if code.character(at: end) == 125 { depth -= 1 }
+                end += 1
+            }
+            if location < end { return true }
+        }
+        return false
     }
 
     private static func argument(after start: Int, code: NSString) -> String {
@@ -106,13 +130,17 @@ enum AcceptanceWaits {
                        "wait(timeout: .now() + 0.2)", "expectShown(1, within: remaining)", "poll(deadline: end)",
                        "run([cli.path], timeout: 1)", "setTimeout(socket, seconds: 0.9)", "eventually { true }",
                        "eventualValue { 1 }", "eventually({ true })", "converges { $0.isEmpty }", "run([cli.path])",
-                       "run(command(timeout: margin))", "run([cli.path], check: try run([cli.path], timeout: margin).status == 0)"] {
+                       "run(command(timeout: margin))", "run([cli.path], check: try run([cli.path], timeout: margin).status == 0)",
+                       "func run(_ command: [String], timeout: Double = 1) {}",
+                       "exited.wait(timeout: .now() + timeout)", "setTimeout(socket, seconds: timeout)"] {
             #expect(!AcceptanceWaits.violations(in: source).isEmpty, "Accepted \(source)")
         }
         for source in ["eventually(within: margin) { true }", "wait(timeout: .now() + margin)", "setTimeout(socket, seconds: margin)",
                        "finalState { true }", "run([buildTool.path], timeout: 600)", "run([provision], timeout: 30)",
                        "run([\"xcrun\", \"swiftc\"], timeout: 120)", "run([cli.path], timeout: margin)", "try process.run()",
                        "run(commands.map { $0 }, timeout: margin)",
+                       "func run(_ command: [String], timeout: Double = margin) throws -> ProcessResult { exited.wait(timeout: .now() + timeout) }",
+                       "init(path: String, timeout: Double) throws { setTimeout(socket, seconds: timeout) }",
                        "// focus(1, since: start)\nlet text = \"within: 0.5\""] {
             #expect(AcceptanceWaits.violations(in: source).isEmpty, "Rejected \(source)")
         }
@@ -121,21 +149,13 @@ enum AcceptanceWaits {
 
     @Test("E17: only latency judges real-system elapsed time")
     func sourceWaits() throws {
-        let legacyFiles: Set<String> = ["Functional.swift", "Workspaces.swift", "Rails.swift", "RailsReload.swift", "Permission.swift", "Resources.swift", "Support.swift"]
-        var legacy: [String] = [], current: [String] = []
+        var current: [String] = []
         for file in try IntegritySources.files(in: "Tests/Acceptance") where URL(fileURLWithPath: file.path).lastPathComponent != "Latency.swift" {
             for violation in AcceptanceWaits.violations(in: file.source) {
                 let message = "\(file.path):\(violation.line): \(violation.spelling)"
-                if legacyFiles.contains(URL(fileURLWithPath: file.path).lastPathComponent) { legacy.append(message) }
-                else { current.append(message) }
+                current.append(message)
             }
         }
         #expect(current.isEmpty, "Real-system waits must use margin:\n\(current.joined(separator: "\n"))")
-        if !legacy.isEmpty {
-            withKnownIssue("old tests are deleted by the final slice") {
-                let clean = legacy.isEmpty
-                #expect(clean, "\(legacy.count) legacy deadline uses; first 12:\n\(legacy.prefix(12).joined(separator: "\n"))")
-            }
-        }
     }
 }

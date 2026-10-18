@@ -92,8 +92,6 @@ A new OS behavior gets a stable kebab-case ID and a one-sentence statement in
 Real contracts in `Tests/Acceptance/Contracts*.swift` declare
 `contract(.caseName)`. The source registry locates both from `#filePath`, rejects
 unknown IDs, and rejects declared assumptions with no simulator behavior.
-Only the missing-contract half is temporarily wrapped in `withKnownIssue`;
-the contracts slice removes that wrapper when real evidence is present.
 A simulator change needs contract evidence under the project's review rules.
 An unmodeled port/operation/attribute must stop the run, never return a plausible
 successful value.

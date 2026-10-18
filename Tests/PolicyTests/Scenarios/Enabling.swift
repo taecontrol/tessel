@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 import Simulator
 import Testing
 @testable import Policy
@@ -43,6 +44,39 @@ import Testing
 }
 
 @Suite @MainActor struct Enabling {
+    @Test("#2 E2; #17 E2: startup and enabling preserve membership, native focus, rail widths and arrival order",
+          arguments: [false, true], [Layout.stack, .rails])
+    func existingWindows(startup: Bool, layout: Layout) {
+        for secondWidth in [0.4, 1.2] {
+            requireScenario(Scenario.run("existing windows startup=\(startup) layout=\(layout) width=\(secondWidth)") { scenario in
+                let mac = scenario.mac, area = WorkspaceScenarios.area(mac)
+                let app = mac.launch()
+                let first = app.open(WindowSpec(frame: CGRect(x: 40, y: 60, width: floor(area.width * 0.25), height: 400)))
+                let second = app.open(WindowSpec(frame: CGRect(x: 40, y: 60, width: floor(area.width * secondWidth), height: 400)))
+                app.select(first)
+                let widths = [mac.frame(first)!.width, mac.frame(second)!.width]
+                let tessel = scenario.startTessel(startup ? layout : .off)
+                scenario.settle()
+                if !startup { tessel.configure(layout); scenario.settle() }
+                scenario.expect("every existing window belongs to workspace 1", tessel.windows.count == 2 && tessel.windows.allSatisfy { $0.workspace == 1 })
+                scenario.expect("workspace 1 and the native selection remain active", tessel.status.active == 1 && mac.focusedWindow == first)
+                if layout == .stack {
+                    WorkspaceScenarios.shown(scenario, first)
+                    scenario.expect("the other stack window is hidden", !mac.isVisible(second))
+                } else {
+                    let rows = tessel.windows.sorted { ($0.slot ?? 0) < ($1.slot ?? 0) }
+                    scenario.expect("one rail keeps arrival order", rows.map(\.id) == [first, second] && rows.map(\.rail) == [1, 1] && rows.map(\.slot) == [1, 2])
+                    for (index, id) in [first, second].enumerated() {
+                        let frame = mac.frame(id)!
+                        scenario.expect("window \(id) keeps its width capped at the rail area", frame.width == min(widths[index], area.width))
+                        scenario.expect("window \(id) takes the rail height and top", frame.height == area.height && frame.minY == area.minY)
+                        scenario.expect("window \(id) starts in arrival order", frame.minX == area.minX + (index == 0 ? 0 : widths[0] + 10))
+                    }
+                }
+            })
+        }
+    }
+
     @Test("#17 E2; #2 E2: enabling preserves native selection under every allowed order", arguments: [Layout.rails, .stack])
     func enabling(layout: Layout) {
         let schedules = EnablingScenarios.schedules

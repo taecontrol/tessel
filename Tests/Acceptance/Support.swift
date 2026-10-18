@@ -28,11 +28,24 @@ func monotonicSeconds() -> Double {
     Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1e9
 }
 
-// The generous final-state margin for real-system journeys and contracts.
+// The generous final-state margin for every real-system state check.
 let margin = 5.0
 
 func finalValue<T>(_ predicate: () throws -> T?) rethrows -> T? {
-    try eventualValue(within: margin, predicate)
+    let deadline = monotonicSeconds() + margin
+    while true {
+        SampleClock.begin()
+        var ended = false
+        defer { if !ended { _ = SampleClock.end() } }
+        let value = try predicate()
+        let sampled = SampleClock.end()
+        ended = true
+        if let result = value {
+            return (sampled ?? monotonicSeconds()) <= deadline ? result : nil
+        }
+        if monotonicSeconds() >= deadline { return nil }
+        usleep(15_000)
+    }
 }
 
 func finalState(_ predicate: () throws -> Bool) rethrows -> Bool {
@@ -53,9 +66,6 @@ func requireFinalState(_ expectation: String, _ predicate: () throws -> Bool) th
 /// of milliseconds after a sample was taken; that delay is not tessel's latency.
 enum SampleClock {
     nonisolated(unsafe) private static var evaluations: [Double?] = []
-    /// The time the most recent successful wait was judged by.
-    nonisolated(unsafe) private(set) static var lastJudged: Double = 0
-
     static func record(_ time: Double) {
         guard let current = evaluations.indices.last else { return }
         evaluations[current] = max(evaluations[current] ?? time, time)
@@ -67,34 +77,6 @@ enum SampleClock {
         if let time { record(time) }
         return time
     }
-    fileprivate static func judged(_ time: Double) { lastJudged = time }
-}
-
-/// Polls until the predicate holds. A result counts only if its inputs were
-/// produced by the deadline (see `SampleClock`); a predicate without recorded
-/// inputs is judged when it returns.
-func eventualValue<T>(within timeout: Double = 0.5, _ predicate: () throws -> T?) rethrows -> T? {
-    let deadline = monotonicSeconds() + timeout
-    while true {
-        SampleClock.begin()
-        var ended = false
-        defer { if !ended { _ = SampleClock.end() } }
-        let value = try predicate()
-        let sampled = SampleClock.end()
-        ended = true
-        if let result = value {
-            let judged = sampled ?? monotonicSeconds()
-            guard judged <= deadline else { return nil }
-            SampleClock.judged(judged)
-            return result
-        }
-        if monotonicSeconds() >= deadline { return nil }
-        usleep(15_000)
-    }
-}
-
-func eventually(within timeout: Double = 0.5, _ predicate: () throws -> Bool) rethrows -> Bool {
-    try eventualValue(within: timeout) { try predicate() ? true : nil } != nil
 }
 
 func sleep(seconds: Double) {
@@ -120,7 +102,7 @@ private final class Collected: @unchecked Sendable {
 
 /// Runs a command, killing it at the timeout. A bare command name is found on PATH.
 @discardableResult
-func run(_ command: [String], environment: [String: String]? = nil, timeout: Double = 10, check: Bool = false,
+func run(_ command: [String], environment: [String: String]? = nil, timeout: Double = margin, check: Bool = false,
          recordsReceipt: Bool = true) throws -> ProcessResult {
     let process = Process()
     if command[0].hasPrefix("/") {
@@ -146,10 +128,10 @@ func run(_ command: [String], environment: [String: String]? = nil, timeout: Dou
     if exited.wait(timeout: .now() + timeout) == .timedOut {
         kill(process.processIdentifier, SIGKILL)
         exited.wait()
-        _ = reading.wait(timeout: .now() + 1)
+        _ = reading.wait(timeout: .now() + margin)
         throw ProcessTimeout(description: "\(URL(fileURLWithPath: command[0]).lastPathComponent) timed out after \(timeout) seconds")
     }
-    _ = reading.wait(timeout: .now() + 1)
+    _ = reading.wait(timeout: .now() + margin)
     if recordsReceipt { SampleClock.record(monotonicSeconds()) }
     let result = ProcessResult(status: process.terminationStatus, outputData: collected[0], errorData: collected[1])
     if check, result.status != 0 {
@@ -160,7 +142,7 @@ func run(_ command: [String], environment: [String: String]? = nil, timeout: Dou
 
 func processIDs(_ executable: URL) -> [pid_t] {
     let pattern = "^" + executable.path.replacing(/[.^$|?*+()\[\]{}\\]/) { "\\" + $0.output } + "( |$)"
-    let result = try? run(["pgrep", "-f", pattern])
+    let result = try? run(["pgrep", "-f", pattern], timeout: margin)
     return result?.output.split(whereSeparator: \.isWhitespace).compactMap { pid_t($0) } ?? []
 }
 
