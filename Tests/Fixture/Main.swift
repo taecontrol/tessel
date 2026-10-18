@@ -15,6 +15,32 @@ final class NewTabWindow: NSWindow {
     override func newWindowForTab(_ sender: Any?) {}
 }
 
+// TEMPORARY CI DIAGNOSTIC (CIDIAG17): IDs, AX error codes and timings only.
+enum CIDiag17 {
+    static let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent().appending(path: ".work/ci/diag")
+    static var now: Double { Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1e9 }
+    static func log(_ name: String, _ object: [String: Any]) {
+        var object = object
+        object["t"] = now
+        guard let data = try? JSONSerialization.data(withJSONObject: object) else { return }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appending(path: "\(name)-\(getpid()).jsonl")
+        let line = data + Data("\n".utf8)
+        if let handle = try? FileHandle(forWritingTo: url) { handle.seekToEndOfFile(); handle.write(line); try? handle.close() }
+        else { try? line.write(to: url) }
+    }
+    /// Categories only: never record another app's identity.
+    static func category(_ pid: pid_t?) -> String {
+        guard let pid else { return "none" }
+        let id = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? ""
+        if id == "com.taecontrol.tessel.fixture" { return "fixture" }
+        if id.hasPrefix("com.taecontrol.tessel") { return "tessel" }
+        if id == "com.apple.finder" { return "finder" }
+        return "other"
+    }
+}
+
 @MainActor
 final class FixtureApplication: NSApplication {
     var windowList: [NSWindow]?
@@ -48,6 +74,19 @@ final class Fixture: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.current = self
+        if !CommandLine.arguments.contains(where: { $0.hasSuffix("f999.sock") }) { // CIDIAG17
+            for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification, NSWindow.didBecomeMainNotification] {
+                NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { note in
+                    nonisolated(unsafe) let object = note.object
+                    MainActor.assumeIsolated { CIDiag17.log("fixture", ["event": name.rawValue, "id": (object as? NSWindow)?.windowNumber ?? 0]) }
+                }
+            }
+            for name in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification, NSApplication.didHideNotification, NSApplication.didUnhideNotification] {
+                NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+                    MainActor.assumeIsolated { CIDiag17.log("fixture", ["event": name.rawValue, "key": NSApp.keyWindow?.windowNumber ?? 0]) }
+                }
+            }
+        }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             MainActor.assumeIsolated { self?.keyCount += 1 }
             return event
@@ -181,8 +220,14 @@ final class Fixture: NSObject, NSApplicationDelegate {
             } else {
                 let background = command["background"] as? Bool ?? false
                 let window = makeWindow(key: key, kind: kind, title: command["title"] as? String, show: !background)
+                if let fraction = command["widthFraction"] as? Double, let screen = NSScreen.screens.first {
+                    var frame = window.frame
+                    frame.size.width = ((screen.visibleFrame.width - 20) * fraction).rounded(.down)
+                    window.setFrame(frame, display: true)
+                }
                 if background { window.orderBack(nil) }
             }
+        case "detachTab": windows[key]?.moveTabToNewWindow(nil)
         case "tab": windows[key]?.makeKeyAndOrderFront(nil)
         case "windowList":
             // Model AppKit's lagging AXWindows enumeration with real windows.
@@ -197,9 +242,10 @@ final class Fixture: NSObject, NSApplicationDelegate {
             // bar has left the former root. Publishing announces the real focus.
             guard let application = NSApp as? FixtureApplication else { return ["error": "focusedWindow requires the fixture application"] }
             application.withholdsFocusedWindow = command["published"] as? Bool != true
-            if !application.withholdsFocusedWindow, let window = NSApp.keyWindow {
-                NSAccessibility.post(element: window, notification: .focusedWindowChanged)
-                NSAccessibility.post(element: window, notification: .mainWindowChanged)
+            if !application.withholdsFocusedWindow {
+                // Inactive apps can expose real AX focus without a key window.
+                NSAccessibility.post(element: application, notification: .focusedWindowChanged)
+                NSAccessibility.post(element: application, notification: .mainWindowChanged)
             }
         case "addTab":
             if let reference = windows[command["reference"] as? String ?? "tabs0"] {
@@ -218,7 +264,11 @@ final class Fixture: NSObject, NSApplicationDelegate {
         case "restore": windows[key]?.deminiaturize(nil)
         case "hide": NSApp.hide(nil)
         case "show": NSApp.unhide(nil)
-        case "yieldActivation": NSApp.yieldActivation(toApplicationWithBundleIdentifier: "com.taecontrol.tessel.fixture")
+        case "yieldActivation":
+            // Every fixture shares one bundle ID; yield to the intended process.
+            guard let pid = command["pid"] as? Int32, FixtureProbe.isFixture(pid),
+                  let target = NSRunningApplication(processIdentifier:pid) else { return ["error":"activation yields accept fixture processes only"] }
+            NSApp.yieldActivation(to:target)
         case "fixtureReady":
             var reply = snapshot
             if let pid = command["pid"] as? Int32, FixtureProbe.isFixture(pid) {
@@ -226,7 +276,13 @@ final class Fixture: NSObject, NSApplicationDelegate {
             } else { reply["ready"] = false }
             return reply
         case "activate":
-            NSApp.activate(ignoringOtherApps: true)
+            if let sourcePID = FixtureProbe.frontmostPID(), FixtureProbe.isFixture(sourcePID),
+               let source = NSRunningApplication(processIdentifier:sourcePID) {
+                _ = NSRunningApplication.current.activate(from:source,options:[])
+            } else {
+                // Initial activation has no fixture handoff source.
+                NSApp.activate(ignoringOtherApps:true)
+            }
             if let window = windows[key] { window.makeKeyAndOrderFront(nil) }
         case "activateFixture":
             guard let pid = command["pid"] as? Int32,
@@ -250,6 +306,11 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 let height = NSScreen.screens.first?.frame.height ?? 0
                 windows[key]?.setFrame(NSRect(x: frame[0], y: height - frame[1] - frame[3], width: frame[2], height: frame[3]), display: true)
             }
+        case "limitWidth":
+            if let window = windows[key], let width = command["width"] as? Double {
+                let chrome = window.frame.width - window.contentRect(forFrameRect: window.frame).width
+                window.contentMaxSize = NSSize(width:width-chrome,height:10000)
+            }
         case "limitHeight":
             if let window = windows[key], let height = command["height"] as? Double {
                 let chrome = window.frame.height - window.contentRect(forFrameRect: window.frame).height
@@ -260,9 +321,14 @@ final class Fixture: NSObject, NSApplicationDelegate {
             guard let pids = command["pids"] as? [Int32], pids.allSatisfy(FixtureProbe.isFixture) else {
                 return ["error": "the observer accepts fixture processes only"]
             }
+            let focusedOnly = command["focusedOnly"] as? Bool == true
+            let expectedPID = command["expectedPID"] as? Int32
+            if let expectedPID, !focusedOnly || !pids.contains(expectedPID) {
+                return ["error": "the focused target must belong to the observed fixture processes"]
+            }
             var reply = snapshot
             reply["observation"] = observe(pids, inspectFinder: command["finder"] as? Bool == true,
-                                           focusedOnly: command["focusedOnly"] as? Bool == true)
+                                           focusedOnly: focusedOnly, expectedPID: expectedPID)
             return reply
         case "menu":
             guard let pid = command["pid"] as? Int32,
@@ -420,8 +486,15 @@ final class Fixture: NSObject, NSApplicationDelegate {
     }
 
     /// An independent AX/CG client; all returned window data belongs to fixtures.
-    func observe(_ pids: [pid_t], inspectFinder: Bool, focusedOnly: Bool) -> [String: Any] {
-        let front = FixtureProbe.frontmostPID()
+    func observe(_ pids: [pid_t], inspectFinder: Bool, focusedOnly: Bool, expectedPID: pid_t? = nil) -> [String: Any] {
+        // Timed checks poll focused-only observations against a deadline, so a
+        // busy app is asked again rather than allowed to consume that deadline.
+        // Setup and one-shot reads wait for a briefly busy app to answer.
+        let timeout: Float = focusedOnly ? 0.02 : FixtureProbe.observationTimeout
+        let diagStart = CIDiag17.now // CIDIAG17
+        var diagErrors: [[String: Any]] = []
+        let front = FixtureProbe.frontmostPID(timeout: timeout)
+        let diagFrontError = FixtureProbe.lastFrontError, diagFrontMS = (CIDiag17.now - diagStart) * 1000
         let listed = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
         let visible = Set(listed.compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
         let visibleIDs = listed.compactMap { item -> UInt32? in
@@ -433,20 +506,25 @@ final class Fixture: NSObject, NSApplicationDelegate {
         })
         var result: [[String: Any]] = []
         for pid in pids {
-            if focusedOnly && front != pid { continue }
+            // A command can change frontmost apps after that early snapshot.
+            // Never block a destination check on the now-hidden source's AX.
+            if focusedOnly && (front != pid || expectedPID != nil && expectedPID != pid) { continue }
             let application = AXUIElementCreateApplication(pid)
-            AXUIElementSetMessagingTimeout(application, 0.02)
+            AXUIElementSetMessagingTimeout(application, timeout)
             var focusedID: UInt32 = 0
             var focusedElement: AXUIElement?
-            if let focused = FixtureProbe.value(application, kAXFocusedWindowAttribute), CFGetTypeID(focused) == AXUIElementGetTypeID() {
+            var diagFocused: CFTypeRef? // CIDIAG17: same single read, keeping its error code
+            let diagFocusedError = AXUIElementCopyAttributeValue(application, kAXFocusedWindowAttribute as CFString, &diagFocused)
+            if diagFocusedError != .success { diagErrors.append(["pid": pid, "focusedWindow": Int(diagFocusedError.rawValue)]) }
+            if let focused = diagFocused, CFGetTypeID(focused) == AXUIElementGetTypeID() {
                 let element = focused as! AXUIElement
-                AXUIElementSetMessagingTimeout(element, 0.02)
+                AXUIElementSetMessagingTimeout(element, timeout)
                 focusedElement = element
                 _ = fixtureWindowID(element, &focusedID)
             }
             let focusedSheet = focusedElement.map { FixtureProbe.value($0, kAXRoleAttribute) as? String == kAXSheetRole } ?? false
             func describe(_ window: AXUIElement, parent: UInt32? = nil, knownID: UInt32? = nil) {
-                AXUIElementSetMessagingTimeout(window, 0.02)
+                AXUIElementSetMessagingTimeout(window, timeout)
                 var id: CGWindowID = knownID ?? 0
                 if knownID == nil { _ = fixtureWindowID(window, &id) }
                 guard id != 0 else { return }
@@ -455,8 +533,11 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 let attributes = [kAXPositionAttribute, kAXSizeAttribute, kAXMainAttribute, "AXFullScreen"]
                     + (includeChildren ? [kAXChildrenAttribute] : [])
                 var values: CFArray?
-                guard AXUIElementCopyMultipleAttributeValues(window, attributes as CFArray, [], &values) == .success,
-                      let fields = values as? [AnyObject], fields.count == attributes.count else { return }
+                let diagCode = AXUIElementCopyMultipleAttributeValues(window, attributes as CFArray, [], &values) // CIDIAG17
+                guard diagCode == .success,
+                      let fields = values as? [AnyObject], fields.count == attributes.count else {
+                    diagErrors.append(["id": id, "window": Int(diagCode.rawValue)]); return
+                }
                 var position = CGPoint.zero, size = CGSize.zero
                 if CFGetTypeID(fields[0]) == AXValueGetTypeID() {
                     _ = AXValueGetValue(fields[0] as! AXValue, .cgPoint, &position)
@@ -477,7 +558,10 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 }
             }
             if !focusedOnly || focusedSheet {
-                for window in FixtureProbe.value(application, kAXWindowsAttribute) as? [AXUIElement] ?? [] { describe(window) }
+                var diagWindows: CFTypeRef? // CIDIAG17: same single read, keeping its error code
+                let diagCode = AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &diagWindows)
+                if diagCode != .success { diagErrors.append(["pid": pid, "windows": Int(diagCode.rawValue)]) }
+                for window in diagWindows as? [AXUIElement] ?? [] { describe(window) }
             }
             // A Space move can temporarily omit even the focused AX window.
             // Read its live handle directly, including a focused sheet's parent.
@@ -486,7 +570,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 if focusedSheet, let parent = FixtureProbe.value(focusedElement, kAXParentAttribute),
                    CFGetTypeID(parent) == AXUIElementGetTypeID() {
                     var id: UInt32 = 0
-                    AXUIElementSetMessagingTimeout(parent as! AXUIElement, 0.02)
+                    AXUIElementSetMessagingTimeout(parent as! AXUIElement, timeout)
                     _ = fixtureWindowID(parent as! AXUIElement, &id)
                     if id != 0 {
                         parentID = id
@@ -502,7 +586,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
         var finderHasNoOrdinaryWindows: Bool?
         if inspectFinder, let finder = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first {
             let application = AXUIElementCreateApplication(finder.processIdentifier)
-            AXUIElementSetMessagingTimeout(application, 0.02)
+            AXUIElementSetMessagingTimeout(application, timeout)
             if let windows = FixtureProbe.value(application, kAXWindowsAttribute) as? [AXUIElement] {
                 finderHasNoOrdinaryWindows = true
                 for window in windows {
@@ -523,6 +607,12 @@ final class Fixture: NSObject, NSApplicationDelegate {
             }
         }
         let frontmostFixture = front.map { pids.contains($0) } ?? false
+        CIDiag17.log("observer", ["start": diagStart, "focusedOnly": focusedOnly, "finder": inspectFinder,
+            "expectedPID": expectedPID.map { Int($0) } ?? 0, "front": front.map { pids.contains($0) ? Int($0) : 0 } ?? -1,
+            "frontCategory": CIDiag17.category(front), "frontError": Int(diagFrontError), "frontMS": diagFrontMS,
+            "focused": result.compactMap { $0["focused"] as? Bool == true ? $0["id"] : nil },
+            "main": result.compactMap { $0["main"] as? Bool == true ? $0["id"] : nil },
+            "windows": result.count, "errors": diagErrors, "desktop": desktop, "ms": (CIDiag17.now - diagStart) * 1000])
         // Cached activation metadata serves setup, outside the switch deadline.
         let workspaceFront = focusedOnly ? nil : NSWorkspace.shared.frontmostApplication?.processIdentifier
         return ["windows": result, "visibleIDs": visibleIDs, "frontmostFixture": frontmostFixture,
@@ -607,10 +697,19 @@ enum FixtureProbe {
 
     @MainActor static func isFixture(_ pid: pid_t) -> Bool { hasSignature(pid, identifier: "com.taecontrol.tessel.fixture") }
 
-    static func frontmostPID() -> pid_t? {
+    /// A timed-out AX read means the app did not answer, not that a window is
+    /// absent or unfocused. The system-wide focused-application read is also
+    /// answered by the frontmost app. A briefly busy main thread can miss
+    /// 20 ms; a stopped app still costs one bounded wait per read.
+    static let observationTimeout: Float = 0.1
+
+    nonisolated(unsafe) static var lastFrontError: Int32 = 0 // CIDIAG17
+    static func frontmostPID(timeout: Float = observationTimeout) -> pid_t? {
         let system = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(system, 0.02)
-        guard let application = value(system, kAXFocusedApplicationAttribute), CFGetTypeID(application) == AXUIElementGetTypeID() else { return nil }
+        AXUIElementSetMessagingTimeout(system, timeout)
+        var diagValue: CFTypeRef? // CIDIAG17: same single read, keeping its error code
+        lastFrontError = AXUIElementCopyAttributeValue(system, kAXFocusedApplicationAttribute as CFString, &diagValue).rawValue
+        guard let application = diagValue, CFGetTypeID(application) == AXUIElementGetTypeID() else { return nil }
         var pid: pid_t = 0
         guard AXUIElementGetPid(application as! AXUIElement, &pid) == .success else { return nil }
         return pid

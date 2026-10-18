@@ -12,6 +12,8 @@ struct Row: Decodable, Equatable, Hashable {
     let tabs: Int
     let workspace: Int?
     let visible: Bool?
+    let rail: Int?
+    let slot: Int?
 }
 
 struct Status: Decodable {
@@ -27,6 +29,7 @@ struct Status: Decodable {
     }
     struct ConfigError: Decodable {
         let line: Int
+        let message: String
     }
     let permission: String
     let config: Config
@@ -37,6 +40,8 @@ struct Status: Decodable {
         let enabled: Bool
         let reason: String
         let active: Int
+        let layout: String?
+        let rail: Int?
         let gaps: Gaps
         let keys: [String: String]
         struct Gaps: Decodable { let outer: Double }

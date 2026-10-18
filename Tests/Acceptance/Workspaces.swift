@@ -34,9 +34,11 @@ extension Acceptance {
                          "the accepted workspaces configuration must enable the experiment")
         }
 
-        func observe(_ sessions: [FixtureSession]? = nil, finder: Bool = false, focusedOnly: Bool = false) throws -> Observation {
-            try #require(try harness.observer.command("observe", ["pids": (sessions ?? [fixture] + harness.otherFixtures).map(\.pid),
-                "finder": finder, "focusedOnly": focusedOnly]).observation)
+        func observe(_ sessions: [FixtureSession]? = nil, finder: Bool = false, focusedOnly: Bool = false, expectedPID: pid_t? = nil) throws -> Observation {
+            var arguments: [String:Any] = ["pids": (sessions ?? [fixture] + harness.otherFixtures).map(\.pid),
+                "finder": finder, "focusedOnly": focusedOnly]
+            if let expectedPID { arguments["expectedPID"] = expectedPID }
+            return try #require(try harness.observer.command("observe", arguments).observation)
         }
 
         func window(_ id: UInt32) throws -> Observation.Window? { try observe().windows.first { $0.id == id } }
@@ -65,7 +67,9 @@ extension Acceptance {
         func expectShown(_ id: UInt32, since start: Double? = nil, within timeout: Double? = nil,
                          gap: Double = 10, floating: Bool = false, sourceLocation: SourceLocation = #_sourceLocation) throws {
             let remaining = max(0, (timeout ?? (start == nil ? 1 : budget)) - (start.map { monotonicSeconds() - $0 } ?? 0))
+            let diagStart = monotonicSeconds() // CIDIAG17
             let success = try eventually(within: remaining) { try shown(id, gap: gap, floating: floating) }
+            if !success { print("CIDIAG17 expectShown failure id", id, "since", start as Any, "waitStart", diagStart, "deadline", diagStart + remaining, "now", monotonicSeconds()) } // CIDIAG17
             try #require(success,
                          "fixture \(id) must be visible, focused, and correctly sized before the deadline", sourceLocation: sourceLocation)
         }
@@ -100,6 +104,7 @@ extension Acceptance {
                 if hasWindows { return observation.frontmostFixturePID == session.pid }
                 return try session.command("ping").active == true
             }
+            if !active { print("CIDIAG17 activate failure pid", session.pid, "target", target as Any, "now", monotonicSeconds()) } // CIDIAG17
             try #require(active, "the target fixture must be frontmost", sourceLocation: sourceLocation)
         }
 
@@ -107,7 +112,7 @@ extension Acceptance {
             let observation = try observe()
             let front = observation.activeFixturePID != 0 ? observation.activeFixturePID : observation.frontmostFixturePID
             if front != session.pid, let source = ([fixture] + harness.otherFixtures).first(where: { $0.pid == front }) {
-                try source.command("yieldActivation")
+                try source.command("yieldActivation",["pid":session.pid])
             }
         }
 
@@ -147,6 +152,7 @@ extension Acceptance {
                 let observation = try observe(finder: verifyFinder, focusedOnly: true)
                 return managed.isDisjoint(with: observation.visibleIDs) && (!verifyFinder || observation.finderDesktop)
             }
+            if !empty { print("CIDIAG17 expectEmpty failure since", start, "now", monotonicSeconds()) } // CIDIAG17
             try #require(empty, "an empty workspace must hide managed windows and, when safe, focus Finder's desktop")
         }
 
@@ -740,6 +746,7 @@ extension Acceptance {
             let d = try fixture.open(kind: "dialog", key: "dialog")
             try expectShown(d, floating: true)
             let frame = try #require(try window(d)).frame
+            try #require(try eventually { try harness.row(d) != nil }, "native dialog focus can precede its catalog arrival")
             #expect(try harness.row(d)?.workspace == 2)
             try key(1)
             try #require(try eventually(within: budget) { try !visible(d) })

@@ -14,6 +14,7 @@ enum ConfigParser {
         var tables = Set<String>()
         var keys = Set<String>()
         var table = ""
+        var overrides: [String:String] = [:]
         for (index, source) in text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n").enumerated() {
             let lineNumber = index + 1
             guard !source.unicodeScalars.contains(where: { ($0.value < 0x20 && $0.value != 9) || $0.value == 0x7f }) else {
@@ -39,8 +40,8 @@ enum ConfigParser {
             let canonical = table == "keys" ? KeyChord(key)?.name ?? key : key
             guard keys.insert(table + "." + canonical).inserted else { throw ConfigError(line: lineNumber, message: "Duplicate configuration key") }
             switch (table, key) {
-            case ("experiments", "workspaces"):
-                guard ["true", "false"].contains(value) else { throw ConfigError(line: lineNumber, message: "workspaces must be a boolean") }
+            case ("experiments", "workspaces"), ("experiments", "rails"):
+                guard ["true", "false"].contains(value) else { throw ConfigError(line: lineNumber, message: "\(key) must be a boolean") }
                 configuration.experiments[key] = value == "true"
             case ("gaps", "outer"):
                 guard let gap = number(value), gap.isFinite, gap >= 0 else { throw ConfigError(line: lineNumber, message: "outer must be a nonnegative TOML number") }
@@ -48,12 +49,13 @@ enum ConfigParser {
             case ("keys", _):
                 guard let chord = KeyChord(key) else { throw ConfigError(line: lineNumber, message: "Invalid key or modifier; use alt, shift, ctrl, cmd and a letter or digit") }
                 guard let command = string(value), command.isEmpty || WorkspaceCommand(command) != nil else {
-                    throw ConfigError(line: lineNumber, message: "Unknown command; use workspace 1…10, send 1…10, focus next, or focus previous")
+                    throw ConfigError(line: lineNumber, message: "Unknown command; use workspace 1…10, send 1…10, focus next|previous|left|right|up|down, or move left|right|up|down")
                 }
-                configuration.keys[chord.name] = command
+                overrides[chord.name] = command
             default: throw ConfigError(line: lineNumber, message: "Unknown configuration key")
             }
         }
+        configuration.keys = (configuration.experiments["rails"] == true ? KeyChord.railDefaults : KeyChord.defaults).merging(overrides) { _,new in new }
         return configuration
     }
 

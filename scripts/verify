@@ -7,7 +7,7 @@ usage='Usage: scripts/verify [--functional] [--resources] [--permission] [TEST..
 filters=()
 for argument in "$@"; do
     case $argument in
-        --functional) filters+=(--filter /Functional/ --filter /FunctionalWorkspaces/) ;;
+        --functional) filters+=(--filter /Functional/ --filter /FunctionalWorkspaces/ --filter /FunctionalRails/) ;;
         --resources) filters+=(--filter /Resources/ --filter /Verification/) ;;
         --permission) filters+=(--filter /Permission/) ;;
         -h | --help) echo "$usage"; exit 0 ;;

@@ -13,6 +13,8 @@ struct WindowRecord: Codable, Sendable {
     let tabs: Int
     var workspace: Int? = nil
     var visible: Bool = false
+    var rail: Int? = nil
+    var slot: Int? = nil
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -24,6 +26,8 @@ struct WindowRecord: Codable, Sendable {
         try container.encode(tabs, forKey: .tabs)
         try container.encode(workspace, forKey: .workspace)
         try container.encode(visible, forKey: .visible)
+        try container.encode(rail, forKey: .rail)
+        try container.encode(slot, forKey: .slot)
     }
 }
 
@@ -46,6 +50,9 @@ struct WorkspaceStatus: Codable, Sendable, Equatable {
     var enabled = false
     var reason = "experiment off"
     var active = 1
+    var layout = "stack"
+    var rail: Int? = nil
+    var railCount = 0
     var gaps = Gaps()
     var keys = KeyChord.defaults
 }

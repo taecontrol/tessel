@@ -11,7 +11,7 @@ jobs:
   acceptance:
     name: Acceptance
     runs-on: xcode-27
-    timeout-minutes: 8
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Configure ephemeral certificate signing
@@ -36,11 +36,17 @@ jobs:
             echo "Resources suite exceeded the 90 second limit" >&2
             exit 1
           fi
+      - name: Capture rails status item for review
+        run: TESSEL_CAPTURE_WORKSPACES=1 scripts/verify captureRailsStatusItem
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: switch-calibration
-          path: .work/switch-calibration.json
+          path: |
+            .work/switch-calibration.json
+            .work/rails-calibration.json
+            .work/captures/E26-*.png
+            .work/ci/diag/
           if-no-files-found: ignore
       - name: Remove ephemeral keychain
         if: always()
