@@ -376,7 +376,9 @@ to #18, and the floating layer to #19.
 `Tests/Acceptance/Rails.swift` and `RailsReload.swift` exercise #17 at the same
 signed CLI and independent AX/CG boundary as #2. The fixture accepts width fractions of the
 usable area, keeping fitting and overflowing scenarios independent of screen
-size. Run `scripts/verify FunctionalRails`; resource E29 is included in
+size. Rail setups allow 2 s for every opened fixture window to be listed. This is a
+setup precondition, not an example deadline: six- and twenty-window setups
+missed 0.5 s on xcode-27 (issues #21, #22). Run `scripts/verify FunctionalRails`; resource E29 is included in
 `scripts/verify --resources` with the unchanged ADR 0003 limits. Rails E28
 records 20 completed scrolls and elevator trips in `.work/rails-calibration.json`;
 `Tests/Acceptance/rails-budget.json` retains the authorized xcode-27 run and

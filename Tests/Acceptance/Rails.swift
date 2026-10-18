@@ -42,11 +42,17 @@ extension Acceptance {
         func near(_ actual: [Double], _ expected: [Double], sourceLocation: SourceLocation = #_sourceLocation) {
             #expect(zip(actual,expected).allSatisfy { abs($0 - $1) <= 1 }, "actual \(actual), expected \(expected)", sourceLocation: sourceLocation)
         }
+        /// Setup precondition, not an example deadline: every fixture window a
+        /// rail scenario opens must be listed before anything is measured. A
+        /// burst of windows in one app is read one after another, so it gets
+        /// the same allowance as twenty-window initial sizing.
+        static let setupArrivalSeconds = 2.0
         func setup(_ widths: [Double] = [0.3,0.3,0.3]) throws -> [UInt32] {
             var ids: [UInt32] = []
             for (i,w) in widths.enumerated() { ids.append(try open("w\(i)", width: w)) }
             try flow.activate(key: "w0")
-            try #require(try converges { Set($0.map(\.id)) == Set(ids) })
+            try #require(try converges(within: Self.setupArrivalSeconds) { Set($0.map(\.id)) == Set(ids) },
+                         "setup precondition: every opened fixture window must be listed")
             try enable()
             try focus(ids[0])
             try order(ids)
