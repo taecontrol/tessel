@@ -120,7 +120,7 @@ extension SimulatedMac {
             guard let handle = handle(element, operation: "perform \(action.rawValue)") else { return .cannotComplete }
             var status = unavailable(handle) ?? .success
             if status == .success {
-                if case .window(let id) = handle.node { mac.focus(id) }
+                if case .window(let id) = handle.node { mac.selectFromAX(id) }
                 else { mac.scheduler.failUnmodeled("AccessibilityPort.perform \(action.rawValue) \(mac.name(handle.node))"); status = .cannotComplete }
             }
             finish(handle, operation: "perform \(action.rawValue)", status: status)
@@ -171,6 +171,10 @@ extension SimulatedMac {
                 return AXResult(.success, .bool(apps[pid]!.hidden))
             case .focusedWindow:
                 assume(.axFocus)
+                if apps[pid]?.publishesFocus == false {
+                    assume(.nativeTabPublication)
+                    return AXResult(.noValue)
+                }
                 return apps[pid]?.key.map { AXResult(.success, .element(element(.window($0)))) } ?? AXResult(.noValue)
             case .frontmost:
                 assume(.applicationActivation)
@@ -223,6 +227,10 @@ extension SimulatedMac {
             guard window.pid == pid, !window.closed, window.spec.parent == nil else { return false }
             return window.group.flatMap { groups[$0]?.selected == window.id || window.minimized } ?? true
         }.map(\.id).sorted()
+        if let published = apps[pid]?.publishedWindows {
+            assume(.nativeTabPublication)
+            ids = published
+        }
         if apps[pid]?.hidden == true && apps[pid]?.omitHiddenWindows == true { ids = [] }
         apps[pid]?.zeroIDs.removeAll()
         if let reply = apps[pid]?.windowLists.first {
@@ -245,11 +253,10 @@ extension SimulatedMac {
         switch (node, attribute, value) {
         case (.application(let pid), .frontmost, .bool(true)):
             assume(.applicationActivation)
-            front = pid
-            post(.activated, pid: pid)
+            activateFromAX(pid)
         case (.window(let id), .main, .bool(true)):
             assume(.axFocus)
-            focus(id)
+            selectFromAX(id)
         case (.window(let id), .position, .point(let point)):
             assume(.windowGeometryWrites)
             applyPosition(id, point)

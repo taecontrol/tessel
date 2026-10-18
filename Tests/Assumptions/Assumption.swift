@@ -22,6 +22,13 @@ package enum Assumption: String, CaseIterable, Sendable {
     case closetMembership = "closet-membership"
     case finderDesktop = "finder-desktop"
 
+    // #17 scenarios
+    case sizeLimitChanges = "size-limit-changes"
+    case terminationActivationOrder = "termination-activation-order"
+    case nativeTabPublication = "native-tab-publication"
+    case deferredAXActivation = "deferred-ax-activation"
+    case minimizeFocusInterruption = "minimize-focus-interruption"
+
     package var statement: String {
         switch self {
         case .applicationLifecycle: "Application metadata and lifecycle notifications describe launch, termination, activation policy and process liveness."
@@ -46,6 +53,13 @@ package enum Assumption: String, CaseIterable, Sendable {
         case .closetMoves: "SkyLight moves windows and their sheets between the active Space and an invisible closet without changing native focus."
         case .closetMembership: "Ordinary Space queries omit invisible closets while all-Space queries retain their opaque membership."
         case .finderDesktop: "Finder exposes its desktop as an AXScrollArea without a window ID or subrole and can activate it without reopening windows."
+
+        // #17 scenarios
+        case .sizeLimitChanges: "Changing an AppKit window's maximum size leaves its current frame intact and clamps the next size write."
+        case .terminationActivationOrder: "A process is no longer alive when macOS promotes a surviving app before delivering the terminated process's lifecycle notification."
+        case .nativeTabPublication: "A native tab's bar can identify its successor while AXWindows still lists the former root and AXFocusedWindow is temporarily unpublished."
+        case .deferredAXActivation: "AX can accept activation, main and raise requests while the app remains inactive until another activation request completes it."
+        case .minimizeFocusInterruption: "An AX main or raise request during the Dock transition can cancel minimization before AXMinimized becomes true."
         }
     }
 }
