@@ -74,7 +74,7 @@ package enum Assumption: String, CaseIterable, Sendable {
         case .nativeTabInsertion: "Adding a native tab preserves bar identity and shared frame while selecting the new front; its new root belongs to the active desktop and may become CG-visible even when inserted into a closeted background group."
         // #17 scenarios
         case .sizeLimitChanges: "Changing an AppKit window's maximum size leaves its current frame intact and clamps the next size write."
-        case .terminationActivationOrder: "A process is no longer alive when macOS promotes a surviving app before delivering the terminated process's lifecycle notification."
+        case .terminationActivationOrder: "A dying process may still satisfy a liveness probe when macOS activates a survivor before termination notification delivery; window destruction, process exit and lifecycle delivery are separate."
         case .nativeTabPublication: "A native tab's bar can identify its successor while AXWindows still lists the former root and AXFocusedWindow is temporarily unpublished."
         case .deferredAXActivation: "AX can accept activation before the app becomes active; pending activation may complete asynchronously, on a main or raise write, or on another activation request."
         case .minimizeFocusInterruption: "An AX main or raise request during the Dock transition can cancel minimization before AXMinimized becomes true."

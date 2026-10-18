@@ -9,6 +9,34 @@ private final class NativeRootEvents: @unchecked Sendable {
 }
 
 @Suite @MainActor struct MacOSChoices {
+    @Test("survivor activation can precede process exit while the dying app's windows are gone", arguments: TerminationExitOrder.allCases, [false, true])
+    func termination(_ exitOrder: TerminationExitOrder, _ automaticNotice: Bool) throws {
+        let mac = SimulatedMac()
+        defer { mac.shutdown() }
+        let survivor = mac.launch(windows: 1), dying = mac.launch(windows: 1)
+        let ax = mac.ax, application = ax.application(dying.pid)
+        let window = try #require(ax.copy(.windows, of: application).value?.elements?.first)
+        #expect(mac.settle() == .settled)
+        var promotions: [Bool] = [], terminations: [Bool] = []
+        let observation = mac.applications.observe { event, app in
+            if event == .activated && app.pid == survivor.pid { promotions.append(mac.applications.isAlive(dying.pid)) }
+            if event == .terminated && app.pid == dying.pid { terminations.append(mac.applications.isAlive(dying.pid)) }
+        }
+        dying.terminate(activating: 1, crash: true, publishesNotification: automaticNotice, exitOrder: exitOrder)
+        #expect(mac.applications.isAlive(dying.pid) == (exitOrder == .afterPromotion))
+        #expect(ax.copy(.role, of: window).status == .invalidUIElement)
+        #expect(mac.windowOrder.onScreenOrder() == [1])
+        #expect(mac.settle() == .settled)
+        #expect(promotions == [exitOrder == .afterPromotion])
+        if !automaticNotice {
+            #expect(terminations.isEmpty && mac.applications.isAlive(dying.pid) == (exitOrder == .afterPromotion))
+            dying.publishTermination()
+            #expect(mac.settle() == .settled)
+        }
+        #expect(terminations == [false] && !mac.applications.isAlive(dying.pid))
+        withExtendedLifetime(observation) {}
+    }
+
     @Test("native tab insertion publishes the new root on the active desktop even from a closeted reference", arguments: [false, true])
     func nativeTabInsertion(_ closeted: Bool) throws {
         let mac = SimulatedMac()

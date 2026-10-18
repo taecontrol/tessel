@@ -120,6 +120,13 @@ confirmed. Completion can follow a main/raise write (the default), arrive as a
 native event, or wait for another activation request. Retry scenarios select
 the last choice explicitly; native completion does not require that retry.
 
+`terminate(activating:crash:publishesNotification:exitOrder:)` separates a dying
+app's destroyed windows from the process-existence probe. The process can exit
+before promotion or remain unreaped through survivor activation (the default).
+Publishing termination completes process exit before lifecycle delivery.
+The rail termination example enumerates both exit orders without changing its
+adjacent-rail landing assertion.
+
 A new OS behavior gets a stable kebab-case ID and a one-sentence statement in
 `Assumption`, and an `assume(.caseName)` call at its simulator definition.
 Real contracts in `Tests/Acceptance/Contracts*.swift` declare

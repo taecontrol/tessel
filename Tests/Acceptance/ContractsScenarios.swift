@@ -210,7 +210,7 @@ extension Acceptance.Contracts {
         }
     }
 
-    @Test("termination-activation-order: promotion before termination delivery sees a dead process", contract(.terminationActivationOrder))
+    @Test("termination-activation-order: survivor activation may precede process reaping", contract(.terminationActivationOrder))
     func terminationActivationOrder() throws {
         _ = try fixture.open()
         try desktop.activate()
@@ -236,11 +236,14 @@ extension Acceptance.Contracts {
             }
             let events = Array((try native("lifecycle").lifecycle ?? []).dropFirst(offset))
             let terminated = try #require(events.firstIndex { $0.knownPID == pid && $0.name == "NSWorkspaceDidTerminateApplicationNotification" })
+            let exited = try #require(events[terminated].alivePIDs)
+            try #require(events[terminated].mainThread && !exited.contains(pid), "termination delivery must observe process exit")
             let promotions = events.prefix(terminated).filter { $0.knownPID == fixture.pid && $0.name == "NSWorkspaceDidActivateApplicationNotification" }
             print("Termination activation: crash=\(crash), promotions before termination delivery=\(promotions.count)")
             for event in promotions {
                 let alive = try #require(event.alivePIDs)
-                try #require(!alive.contains(pid) && alive.contains(fixture.pid), "promotion before lifecycle delivery must not precede process exit (crash=\(crash))")
+                try #require(event.mainThread && alive.contains(fixture.pid), "native promotion must name a surviving fixture")
+                print("Termination activation: crash=\(crash), dying process still exists at promotion=\(alive.contains(pid))")
             }
         }
     }

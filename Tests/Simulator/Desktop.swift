@@ -57,7 +57,7 @@ extension SimulatedMac {
         func isAlive(_ pid: Int32) -> Bool {
             mac.assume(.applicationLifecycle)
             mac.scheduler.call("ApplicationPort.isAlive pid=\(pid)")
-            return mac.apps[pid]?.terminated == false
+            return mac.apps[pid]?.processExists == true
         }
         var primaryScreen: ScreenGeometry? {
             mac.assume(.primaryScreenGeometry)

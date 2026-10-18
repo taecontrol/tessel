@@ -4,6 +4,7 @@ import CoreGraphics
 package enum DeferredActivationCompletion: String, CaseIterable, Sendable {
     case focusWrite, nativeEvent, nextRequest
 }
+package enum TerminationExitOrder: String, CaseIterable, Sendable { case beforePromotion, afterPromotion }
 
 extension SimulatedApp {
     @MainActor package func beginMinimize(_ window: UInt32) {
@@ -29,17 +30,23 @@ extension SimulatedApp {
         mac.action("\(alias) limit window \(window) to \(maximum.width)x\(maximum.height)")
         mac.windows[window]?.spec.maximumSize = maximum
     }
-    @MainActor package func terminate(activating successor: UInt32, crash: Bool, publishesNotification: Bool = true) {
+    @MainActor package func terminate(activating successor: UInt32, crash: Bool, publishesNotification: Bool = true,
+                                     exitOrder: TerminationExitOrder = .afterPromotion) {
         mac.assume(.terminationActivationOrder)
-        mac.action("\(crash ? "crash" : "quit") \(alias), promoting window \(successor) before notification")
+        mac.action("\(crash ? "crash" : "quit") \(alias), promoting window \(successor) before notification, exit=\(exitOrder.rawValue)")
         mac.apps[pid]?.terminated = true
+        mac.apps[pid]?.processExists = exitOrder == .afterPromotion
         for id in mac.windows.keys.sorted() where mac.windows[id]?.pid == pid { mac.windows[id]?.closed = true }
         mac.focus(successor)
-        if publishesNotification { mac.post(.terminated, pid: pid) }
+        if publishesNotification {
+            if exitOrder == .afterPromotion { mac.scheduler.nativeEvent { self.publishTermination() } }
+            else { mac.post(.terminated, pid: pid) }
+        }
     }
     @MainActor package func publishTermination() {
         mac.assume(.terminationActivationOrder)
         mac.action("publish termination of \(alias)")
+        mac.apps[pid]?.processExists = false
         mac.post(.terminated, pid: pid)
     }
     @MainActor package func publishWindows(_ windows: [UInt32]?) {

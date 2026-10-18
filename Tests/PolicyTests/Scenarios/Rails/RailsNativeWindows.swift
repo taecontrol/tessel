@@ -7,25 +7,27 @@ import Testing
 @Suite @MainActor struct RailNativeWindows {
     @Test("#17 E11: native activation before termination cannot replace the adjacent-rail landing", arguments: [false, true], WriteOrder.allCases)
     func termination(crash: Bool, order: WriteOrder) {
-        for earlyNotice in [false, true] {
-            requireScenario(Scenario.run("termination crash=\(crash) earlyNotice=\(earlyNotice)", writes: order) { s in
-                let f = RailFixture(s, widths: [0.22, 0.22]), a = f.ids[0], b = f.ids[1]
-                let other = f.mac.launch(), middle = other.open(WindowSpec())
-                s.settle(); f.focus(middle)
-                f.press("move down", focus: middle); f.press("focus up", focus: a)
-                f.press("focus right", focus: b); f.press("move down", focus: b); f.press("move down", focus: b)
-                f.press("focus up", focus: middle); f.press("focus up", focus: a)
-                let dialog = f.app.open(WindowSpec(subrole: "AXDialog"))
-                s.settle(); f.focus(dialog); f.select(middle)
-                s.step("native termination promotes app-A") { other.terminate(activating: a, crash: crash, publishesNotification: earlyNotice) }
-                s.settle()
-                if !earlyNotice {
-                    s.step("deliver termination after native activation facts") { other.publishTermination() }
+        for exitOrder in TerminationExitOrder.allCases {
+            for earlyNotice in [false, true] {
+                requireScenario(Scenario.run("termination crash=\(crash) earlyNotice=\(earlyNotice) exit=\(exitOrder.rawValue)", writes: order) { s in
+                    let f = RailFixture(s, widths: [0.22, 0.22]), a = f.ids[0], b = f.ids[1]
+                    let other = f.mac.launch(), middle = other.open(WindowSpec())
+                    s.settle(); f.focus(middle)
+                    f.press("move down", focus: middle); f.press("focus up", focus: a)
+                    f.press("focus right", focus: b); f.press("move down", focus: b); f.press("move down", focus: b)
+                    f.press("focus up", focus: middle); f.press("focus up", focus: a)
+                    let dialog = f.app.open(WindowSpec(subrole: "AXDialog"))
+                    s.settle(); f.focus(dialog); f.select(middle)
+                    s.step("native termination promotes app-A") { other.terminate(activating: a, crash: crash, publishesNotification: earlyNotice, exitOrder: exitOrder) }
                     s.settle()
-                }
-                f.focus(b); f.order([a]); f.order([b], rail: 2)
-                s.expect("the terminated app has no rows", !f.tessel.windows.contains { $0.id == middle })
-            })
+                    if !earlyNotice {
+                        s.step("deliver termination after native activation facts") { other.publishTermination() }
+                        s.settle()
+                    }
+                    f.focus(b); f.order([a]); f.order([b], rail: 2)
+                    s.expect("the terminated app has no rows", !f.tessel.windows.contains { $0.id == middle })
+                })
+            }
         }
     }
 
