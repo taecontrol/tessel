@@ -67,10 +67,11 @@ order. Neither detail may be an oracle in a scenario. Transition and absolute
 virtual-time limits stop unsettled runs and report pending lanes and timers.
 Every failed run must still call `shutdown` to release its parked threads.
 
-The framework catalog includes the enabling enumeration, omitted handles and
-subscription removal. It replays twice, compares each SHA-256 trace digest,
-and prints one aggregate `trace digest:` line plus elapsed time. Its inputs,
-iteration order, and trace text are independent of Swift hash seeds.
+Every `Scenario.run` contributes its schedule name and SHA-256 trace digest to
+a process-wide aggregate, sorted so that test execution order cannot change it;
+the process prints one `trace digest:` line at exit. One small omitted-handles
+and subscription-removal scenario is replayed twice in process. Inputs,
+iteration order and trace text are independent of Swift hash seeds.
 
 ## Adding scenarios and assumptions
 
