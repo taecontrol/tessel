@@ -153,3 +153,5 @@ missing revalidation checkpoints were not counted as evidence of that bug.
 S15 killed all fourteen patches, including the new minimize-between-focus-writes
 mutant in 20.978 s. The sum was 867.501 s, including a 601.789 s outlier for
 zero-window-id; the other thirteen totaled 265.712 s. No runner budget changed.
+An immediate rerun of the full set on the integrated branch killed all
+fourteen in 317.8 s, zero-window-id in 22.6 s; the outlier did not recur.
