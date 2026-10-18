@@ -4,32 +4,62 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct RailReload {
-    @Test("#17 E16: a layout/gap reload preserves unpublished cross-app dialog focus and its send intent", arguments: [false, true], ["layout", "gaps", "both"])
+    @Test("#17 E2; #17 E16: a layout/gap reload preserves unpublished dialog focus and its send intent", arguments: [false, true], ["layout", "gaps", "both"])
     func delayedDialog(rails: Bool, change: String) {
-        requireScenario(Scenario.run("cross-app reload rails=\(rails) change=\(change)") { s in
-            let f = RailFixture(s, widths: [0.25]), a = f.ids[0]
-            let startsInRails = change == "gaps" ? rails : !rails
-            f.tessel.configure(startsInRails ? .rails : .stack); s.settle()
-            let other = f.mac.launch(), dialog = other.open(WindowSpec(subrole: "AXDialog"))
-            s.settle(); f.select(a)
-            s.step("select dialog, then stop its AX replies before publication") { other.select(dialog); other.hang() }
-            let gap = change == "layout" ? 10 : 11
-            f.tessel.changeConfig("[experiments]\n\(rails ? "rails" : "workspaces") = true\n[gaps]\nouter = \(gap)\n")
-            var reloaded = false, retained = false
-            // Queue behind the 30 ms config debounce. AX timeouts may delay
-            // this main callback; there is no deadline on the native operation.
-            f.mac.scheduler.main.after(milliseconds: 31) {
-                reloaded = f.tessel.status.layout == (rails ? "rails" : "stack") && f.tessel.status.gaps.outer == Double(gap)
-                retained = f.mac.focusedWindow == dialog && f.mac.frontmostApp == other.pid
-                other.resume()
+        for crossApp in [false, true] {
+            requireScenario(Scenario.run("reload rails=\(rails) change=\(change) crossApp=\(crossApp)") { s in
+                let f = RailFixture(s, widths: [0.25]), a = f.ids[0]
+                let startsInRails = change == "gaps" ? rails : !rails
+                f.tessel.configure(startsInRails ? .rails : .stack); s.settle()
+                let other = crossApp ? f.mac.launch() : f.app, dialog = other.open(WindowSpec(subrole: "AXDialog"))
+                s.settle(); f.select(a)
+                s.step("select dialog, then stop its AX replies before publication") { other.select(dialog); other.hang() }
+                let gap = change == "layout" ? 10 : 11
+                f.tessel.changeConfig("[experiments]\n\(rails ? "rails" : "workspaces") = true\n[gaps]\nouter = \(gap)\n")
+                var reloaded = false, retained = false
+                // Queue behind the 30 ms config debounce. AX timeouts may delay
+                // this main callback; there is no deadline on the native operation.
+                f.mac.scheduler.main.after(milliseconds: 31) {
+                    reloaded = f.tessel.status.layout == (rails ? "rails" : "stack") && f.tessel.status.gaps.outer == Double(gap)
+                    retained = f.mac.focusedWindow == dialog && f.mac.frontmostApp == other.pid
+                    other.resume()
+                }
+                s.settle()
+                s.expect("reload completes before the publisher resumes", reloaded)
+                s.expect("reload leaves the unpublished native dialog selected", retained)
+                f.focus(dialog)
+                s.expect("the dialog retains its original workspace", f.tessel.windows.first { $0.id == dialog }?.workspace == 1)
+                f.press("send 2", focus: dialog)
+                s.expect("the unpublished native selection also owns send", f.tessel.windows.first { $0.id == dialog }?.workspace == 2)
+            })
+        }
+    }
+
+    @Test("#17 E2: reloading stack into rails retains workspace membership and caps filled widths")
+    func stackMembership() {
+        requireScenario(Scenario.run("stack to rails membership") { s in
+            let f = RailFixture(s, widths: [0.3, 0.3]), a = f.ids[0], b = f.ids[1]
+            f.tessel.configure(.stack); s.settle()
+            f.select(b); f.press("send 2", focus: b)
+            f.tessel.configure(.rails); s.settle()
+            f.focus(b); f.order([a], workspace: 1); f.order([b], workspace: 2)
+            s.expect("the current workspace is retained", f.tessel.status.active == 2)
+            f.near(f.frame(b).width, f.area.width, "a previously filled window is capped at the rail area")
+        })
+    }
+
+    @Test("#17 E2; #17 E18: a gap reload sizes unconstrained windows and clamps only oversized widths")
+    func gapGeometry() {
+        requireScenario(Scenario.run("rail gap geometry") { s in
+            let f = RailFixture(s, widths: [0.25, 1.0]), a = f.ids[0], b = f.ids[1]
+            let width = f.frame(a).width
+            f.tessel.changeConfig("[experiments]\nrails = true\n[gaps]\nouter = 30\n"); s.settle()
+            f.near(f.frame(a).width, width, "the ordinary width is retained")
+            f.near(f.frame(b).width, f.area.width - 40, "the oversized width is clamped to the new area")
+            for id in [a, b] {
+                f.near(f.frame(id).height, f.area.height - 40, "the new gap sets height")
+                f.near(f.frame(id).minY, f.area.minY + 20, "the new gap sets top")
             }
-            s.settle()
-            s.expect("reload completes before the publisher resumes", reloaded)
-            s.expect("reload leaves the unpublished native dialog selected", retained)
-            f.focus(dialog)
-            s.expect("the dialog retains its original workspace", f.tessel.windows.first { $0.id == dialog }?.workspace == 1)
-            f.press("send 2", focus: dialog)
-            s.expect("the unpublished native selection also owns send", f.tessel.windows.first { $0.id == dialog }?.workspace == 2)
         })
     }
 
