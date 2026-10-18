@@ -1,0 +1,20 @@
+# Bug: A transient zero CG window ID erases a live catalog row.
+# Fixing commit: 647500d2573a0187580e8bd9493a6fd98393508a
+diff --git a/Sources/Policy/WindowCatalog.swift b/Sources/Policy/WindowCatalog.swift
+--- a/Sources/Policy/WindowCatalog.swift
++++ b/Sources/Policy/WindowCatalog.swift
+@@ -394,13 +394,7 @@
+         let identifier = ax.windowID(window)
+         try check(identifier.status)
+         let id = identifier.value ?? 0
+-        if id == 0 {
+-            // Losing a known handle's CG ID is an incomplete read, not closure.
+-            // Keep its complete snapshot and use the bounded read retries.
+-            if elementsByID.values.contains(where: { $0 == window }) { throw AXReadError.changed }
+-            return
+-        }
+-        guard !result.contains(where: { $0.id == id }) else { return }
++        guard id != 0, !result.contains(where: { $0.id == id }) else { return }
+         let minimized = try value(window, .minimized)?.bool ?? false
+         let fullscreen = try value(window, .fullscreen)?.bool ?? false
+         let subrole = try value(window, .subrole)?.string ?? "AXUnknown"

@@ -1,0 +1,29 @@
+# Bug: A later AXWindows read resurrects a retired native tab root as an ordinary window.
+# Fixing commit: 97f790d382a65054c44cb18c48d17ed632815b5b
+# Forget retired roots' bars as well as allowing their later enumeration again.
+diff --git a/Sources/Policy/WindowCatalog.swift b/Sources/Policy/WindowCatalog.swift
+--- a/Sources/Policy/WindowCatalog.swift
++++ b/Sources/Policy/WindowCatalog.swift
+@@ -335,11 +335,7 @@
+             }.map(\.id))
+             // AXWindows can keep listing a retired root after its successor's
+             // read. It stays retired while another window holds its last bar.
+-            let stillRetired = Set(next.filter { window in
+-                !oldIDs.contains(window.id) && !window.minimized && window.nativeTabGroups.isEmpty
+-                    && next.contains { $0.id != window.id && !$0.minimized && $0.shares(lastBar(window.id)) }
+-            }.map(\.id))
+-            next.removeAll { retired.contains($0.id) || stillRetired.contains($0.id) }
++            next.removeAll { retired.contains($0.id) }
+             let replacements = Dictionary(uniqueKeysWithValues: next.compactMap { window -> (UInt32, UInt32)? in
+                 guard let previous = facts.first(where: {
+                     retired.contains($0.id) && window.shares($0.nativeTabGroups.isEmpty ? lastBar($0.id) : $0.nativeTabGroups)
+@@ -356,9 +352,6 @@
+                 let bar = fact.nativeTabGroups.isEmpty ? lastBar(fact.id) : fact.nativeTabGroups
+                 if !bar.isEmpty { bars[fact.id] = bar }
+             }
+-            for (id, groups) in nativeBars where !newIDs.contains(id) && next.contains(where: { !$0.minimized && $0.shares(groups) }) {
+-                bars[id] = groups
+-            }
+             nativeBars = bars
+             facts = next
+             elementsByID = handles.filter { newIDs.contains($0.key) }
