@@ -15,6 +15,10 @@ final class NewTabWindow: NSWindow {
     override func newWindowForTab(_ sender: Any?) {}
 }
 
+final class UnconstrainedWindow: NSWindow {
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
+}
+
 @MainActor
 final class FixtureApplication: NSApplication {
     var windowList: [NSWindow]?
@@ -40,6 +44,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
     var transitions: [UUID: NSObjectProtocol] = [:]
     var keyCount = 0
     var keyMonitor: Any?
+    let contracts = FixtureContracts()
 
     override init() {
         super.init()
@@ -102,17 +107,24 @@ final class Fixture: NSObject, NSApplicationDelegate {
             let operation = UUID()
             let destination = sender
             let destinationLength = length
+            let respondsOnCompletion = command["waitForTransition"] as? Bool != false
+            guard let margin = command["transitionMargin"] as? Double else {
+                send(["error": "native transition requires the harness margin"], to: sender, length: length)
+                return
+            }
             let name = action == "fullscreen"
                 ? (window.styleMask.contains(.fullScreen) ? NSWindow.didExitFullScreenNotification : NSWindow.didEnterFullScreenNotification)
                 : (action == "minimize" ? NSWindow.didMiniaturizeNotification : NSWindow.didDeminiaturizeNotification)
             transitions[operation] = NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.finishTransition(operation, to: destination, length: destinationLength)
+                    self?.finishTransition(operation, to: destination, length: destinationLength, responding: respondsOnCompletion)
                 }
             }
             _ = perform(command)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.finishTransition(operation, to: destination, length: destinationLength, error: "native window transition did not finish")
+            if !respondsOnCompletion { send(snapshot, to: sender, length: length) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + margin) { [weak self] in
+                self?.finishTransition(operation, to: destination, length: destinationLength, responding: respondsOnCompletion,
+                                       error: "native window transition did not finish")
             }
             return
         }
@@ -123,10 +135,10 @@ final class Fixture: NSObject, NSApplicationDelegate {
         }
     }
 
-    func finishTransition(_ operation: UUID, to sender: sockaddr_un, length: socklen_t, error: String? = nil) {
+    func finishTransition(_ operation: UUID, to sender: sockaddr_un, length: socklen_t, responding: Bool, error: String? = nil) {
         guard let token = transitions.removeValue(forKey: operation) else { return }
         NotificationCenter.default.removeObserver(token)
-        send(error.map { ["error": $0] } ?? snapshot, to: sender, length: length)
+        if responding { send(error.map { ["error": $0] } ?? snapshot, to: sender, length: length) }
     }
 
     func send(_ response: [String: Any], to sender: sockaddr_un, length: socklen_t) {
@@ -146,10 +158,19 @@ final class Fixture: NSObject, NSApplicationDelegate {
         let action = command["action"] as? String ?? ""
         let key = command["key"] as? String ?? "window"
         switch action {
+        case "contract":
+            var reply = snapshot
+            do { reply["contract"] = try contracts.perform(command) }
+            catch { return ["error": String(describing: error)] }
+            return reply
+        case "quit":
+            DispatchQueue.main.async { NSApp.terminate(nil) }
         case "ping":
             if CommandLine.arguments.contains("--swiftui"), windows["window"] == nil,
                let window = NSApp.windows.first(where: { $0.styleMask.contains(.titled) }) { windows["window"] = window }
         case "reset":
+            transitions.values.forEach { NotificationCenter.default.removeObserver($0) }
+            transitions.removeAll()
             (NSApp as? FixtureApplication)?.windowList = nil
             (NSApp as? FixtureApplication)?.withholdsFocusedWindow = false
             NSApp.unhide(nil)
@@ -277,6 +298,11 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 let chrome = window.frame.height - window.contentRect(forFrameRect: window.frame).height
                 window.contentMaxSize = NSSize(width: 10000, height: height - chrome)
             }
+        case "limits":
+            guard let window = windows[key], let minimum = command["minimum"] as? [Double], minimum.count == 2 else {
+                return ["error": "minimum size requires an existing fixture window and two numbers"]
+            }
+            window.contentMinSize = NSSize(width: minimum[0], height: minimum[1])
         case "fullscreen": windows[key]?.toggleFullScreen(nil)
         case "observe":
             guard let pids = command["pids"] as? [Int32], pids.allSatisfy(FixtureProbe.isFixture) else {
@@ -376,7 +402,12 @@ final class Fixture: NSObject, NSApplicationDelegate {
     }
 
     var snapshot: [String: Any] {
-        ["pid": getpid(), "active": NSApp.isActive, "keyCount": keyCount, "windows": windows.mapValues { $0.windowNumber },
+        ["pid": getpid(), "active": NSApp.isActive, "keyCount": keyCount, "transitionCount": transitions.count, "windows": windows.mapValues { $0.windowNumber },
+         "axWindowOrder": (NSApp.accessibilityWindows() ?? []).compactMap { ($0 as? NSWindow).map { $0.windowNumber } },
+         "frames": windows.mapValues { window in
+             let frame = window.frame
+             return [frame.minX, frame.minY, frame.width, frame.height]
+         },
          "nativeTabs": windows.mapValues { $0.tabGroup?.windows.count ?? 1 },
          "closable": windows.mapValues { $0.styleMask.contains(.closable) },
          "contentPages": windows.mapValues { window in
@@ -400,6 +431,8 @@ final class Fixture: NSObject, NSApplicationDelegate {
             window = DialogWindow(contentRect: rect, styleMask: style, backing: .buffered, defer: false)
         } else if kind == "newTabButton" {
             window = NewTabWindow(contentRect: rect, styleMask: style, backing: .buffered, defer: false)
+        } else if kind == "unconstrained" {
+            window = UnconstrainedWindow(contentRect: rect, styleMask: style, backing: .buffered, defer: false)
         } else {
             window = NSWindow(contentRect: rect, styleMask: style, backing: .buffered, defer: false)
         }
@@ -731,6 +764,7 @@ struct Main {
             return
         }
         let app = FixtureApplication.shared
+        if args.contains("--prohibited"), !app.setActivationPolicy(.prohibited) { exit(6) }
         let delegate = Fixture()
         app.delegate = delegate
         withExtendedLifetime(delegate) { app.run() }

@@ -32,7 +32,9 @@ jobs:
           sleep 3
       - name: Grant Accessibility for the signed harness
         run: scripts/ci-accessibility
-      # Simulator contracts run here before the end-to-end journeys.
+      - name: Real macOS assumption contracts
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: scripts/verify --contracts
       - name: End-to-end journeys
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: scripts/verify --journeys
