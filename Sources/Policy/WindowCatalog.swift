@@ -298,7 +298,7 @@ private final class AppWindows: @unchecked Sendable {
                 focusedElement = element
                 omitted.append(element)
             }
-            omitted += elementsByID.values
+            omitted += elementsByID.keys.sorted().compactMap { elementsByID[$0] }
             for window in omitted where !elements.contains(where: { $0 == window }) {
                 let cached = facts.first { fact in elementsByID[fact.id].map { $0 == window } == true }
                 if let cached, next.contains(where: { $0.id != cached.id && $0.shares(cached.nativeTabGroups) }) { continue }

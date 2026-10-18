@@ -42,6 +42,19 @@ where LaunchServices cannot register them reliably.
 
 ## Verification
 
+Bare `swift test` runs the deterministic policy layer only; the real Acceptance
+target is compiled only with `TESSEL_ACCEPTANCE=1`, which `scripts/verify` sets.
+The simulator, scenario API, trace replay and assumption registry are described
+in [Policy scenarios](policy-scenarios.md). Current migrated policy coverage:
+
+| Example | Layer | Scenario |
+| --- | --- | --- |
+| #2 E2 (stale native focus while enabling stack layout) | P | `Tests/PolicyTests/Scenarios/Enabling.swift` |
+| #17 E2 (stale native focus while enabling rails) | P | `Tests/PolicyTests/Scenarios/Enabling.swift` |
+
+The remaining acceptance examples are being migrated by issue #24. Real-system
+checks below still require the signed bundle and isolated fixture harness.
+
 Stop this worktree's development app and any other tessel instance managing
 windows before running the harness. Another instance can manage the fixture
 windows and contaminate verification. Run:

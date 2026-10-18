@@ -13,7 +13,7 @@ struct ElementSubscriptions<Element, Name: Hashable> {
     mutating func update(_ elements: [Element], equal: (Element, Element) -> Bool,
                          add: (Element, Name) -> Bool, remove: (Element, Name) -> Void) {
         for old in entries where !elements.contains(where: { equal(old.element, $0) }) {
-            for name in old.names { remove(old.element, name) }
+            for name in names where old.names.contains(name) { remove(old.element, name) }
         }
         var next: [Entry] = []
         for element in elements {
