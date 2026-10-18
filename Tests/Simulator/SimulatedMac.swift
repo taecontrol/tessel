@@ -3,6 +3,8 @@ import CoreGraphics
 import Ports
 import Assumptions
 
+package enum PositionAcceptance: String, CaseIterable, Sendable { case requested, rightEdgeStrip }
+
 package struct WindowSpec: Sendable {
     package var frame: CGRect
     package var subrole: String
@@ -10,11 +12,14 @@ package struct WindowSpec: Sendable {
     package var minimumSize: CGSize
     package var maximumSize: CGSize
     package var parent: UInt32?
+    package var positionAcceptance: PositionAcceptance
     package init(frame: CGRect = CGRect(x: 40, y: 60, width: 451, height: 400), subrole: String = "AXStandardWindow",
                  resizable: Bool = true, minimumSize: CGSize = CGSize(width: 1, height: 1),
-                 maximumSize: CGSize = CGSize(width: 100_000, height: 100_000), parent: UInt32? = nil) {
+                 maximumSize: CGSize = CGSize(width: 100_000, height: 100_000), parent: UInt32? = nil,
+                 positionAcceptance: PositionAcceptance = .rightEdgeStrip) {
         self.frame = frame; self.subrole = subrole; self.resizable = resizable
         self.minimumSize = minimumSize; self.maximumSize = maximumSize; self.parent = parent
+        self.positionAcceptance = positionAcceptance
     }
 }
 

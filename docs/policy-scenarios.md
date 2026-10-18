@@ -93,6 +93,10 @@ an auxiliary display-sized `AXUnknown` root. It stays live across reads until
 set the ordinary window's final state independently. The workspace fullscreen
 example exercises both choices without changing its assertions.
 
+`WindowSpec.positionAcceptance` chooses exact AX position acceptance or the
+native right-edge clamp that leaves a 40-point strip (the default). App drag
+actions keep their requested position. Size constraints remain independent.
+
 A new OS behavior gets a stable kebab-case ID and a one-sentence statement in
 `Assumption`, and an `assume(.caseName)` call at its simulator definition.
 Real contracts in `Tests/Acceptance/Contracts*.swift` declare

@@ -182,9 +182,10 @@ extension Acceptance.Contracts {
         let screen = try #require(try native("screen").screen)
         let outside = [screen[0] + screen[2] + 100, position[1]]
         try #require(try write(id, "AXPosition", outside) == 0)
-        try requireFinalState("the AX position write accepts the requested point independently of size") {
+        let clamped = [screen[0] + screen[2] - 40, position[1]]
+        try requireFinalState("the successful position write accepts the point or leaves the modeled 40-point strip") {
             let frame = try native().roots.first { $0.id == id }?.frame ?? []
-            return desktop.near(frame, outside + size)
+            return desktop.near(frame, outside + size) || desktop.near(frame, clamped + size)
         }
     }
 

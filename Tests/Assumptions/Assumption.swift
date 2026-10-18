@@ -56,7 +56,7 @@ package enum Assumption: String, CaseIterable, Sendable {
         case .minimizeRestore: "Minimize and restore change AX and CG state, with notifications after the Dock operation and a selectable successor."
         case .nativeFullscreen: "A native fullscreen window occupies a separate Space and leaves ordinary desktop visibility until exit."
         case .nativeTabIdentity: "Native tabs share a frame and retain their AX bar identity across selected roots, while minimized tabs are listed separately."
-        case .windowGeometryWrites: "AX position and size writes change frame independently and can publish move/resize notifications."
+        case .windowGeometryWrites: "AX position and size writes are independent and notify; a successful position write may accept the requested point or clamp it at the display's right edge to leave a 40-point visible strip."
         case .cgOnScreenOrder: "CG lists intersecting windows on the active Space in front-to-back order, excluding hidden and minimized windows."
         case .primaryScreenGeometry: "The primary screen exposes full and visible frames in bottom-origin coordinates while AX uses top-origin coordinates."
         case .closetMoves: "SkyLight moves windows and their sheets between the active Space and an invisible closet without changing native focus."

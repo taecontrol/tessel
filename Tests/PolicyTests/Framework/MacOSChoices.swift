@@ -74,4 +74,22 @@ import Testing
         #expect(ax.copy(.windows, of: application).value?.elements?.count == 1)
         #expect(mac.settle() == .settled)
     }
+
+    @Test("a successful AX position write may accept the point or retain the right-edge strip", arguments: PositionAcceptance.allCases)
+    func positionAcceptance(_ acceptance: PositionAcceptance) throws {
+        let mac = SimulatedMac()
+        defer { mac.shutdown() }
+        let app = mac.launch()
+        let id = app.open(WindowSpec(positionAcceptance: acceptance))
+        let ax = mac.ax, application = ax.application(app.pid)
+        let window = try #require(ax.copy(.windows, of: application).value?.elements?.first)
+        let before = try #require(mac.frame(id))
+        let point = CGPoint(x: 1124, y: 85)
+        #expect(ax.set(.position, of: window, to: .point(point)) == .success)
+        let expected = CGPoint(x: acceptance == .requested ? 1124 : 984, y: 85)
+        #expect(mac.frame(id) == CGRect(origin: expected, size: before.size))
+        app.drag(id, to: point)
+        #expect(mac.frame(id) == CGRect(origin: point, size: before.size))
+        #expect(mac.settle() == .settled)
+    }
 }
