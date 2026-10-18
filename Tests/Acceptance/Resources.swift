@@ -4,7 +4,11 @@ import Testing
 extension Acceptance {
     @Suite(AppSession())
     @MainActor
-    struct Resources: AppSessionTest {
+    struct Resources {
+        let desktop = Desktop()
+        var harness: Harness { desktop.harness }
+        var fixture: FixtureSession { desktop.fixture }
+
         init() throws { try Harness.shared.reset() }
 
         struct Budget: Decodable {
@@ -35,56 +39,65 @@ extension Acceptance {
             try #require(after.footprintBytes < budget.footprintBytes, "End footprint must be below the footprint limit")
         }
 
-        @Test func e22TwentyIdleWindowsStayWithinWakeupCPUAndFootprintLimits() throws {
+        @Test("#1 E22: idle resource budget") func e22TwentyIdleWindowsStayWithinWakeupCPUAndFootprintLimits() throws {
             for index in 0..<20 { _ = try fixture.open(key: "idle\(index)") }
-            try #require(try converges(within: 2) { $0.count == 20 })
+            try requireFinalState("twenty idle fixture windows listed") { try harness.rows().count == 20 }
             sleep(seconds: 1)  // Let the bounded new-window settling work finish.
             try verifyIdleResources("E22")
         }
 
-        @Test func e36TwentyWindowsAcrossTenWorkspacesKeepTheFoundationBudget() throws {
-            let flow = try Acceptance.FunctionalWorkspaces()
-            try flow.enable()
+        @Test("#2 E36: resources across ten workspaces") func e36TwentyWindowsAcrossTenWorkspacesKeepTheFoundationBudget() throws {
+            try harness.reset()
+            try desktop.configure(desktop.stack, layout: "stack")
             for index in 0..<20 {
                 print("E36 preparing fixture window \(index + 1)/20")
                 fflush(nil)
                 let window = try fixture.open(key: "idle\(index)")
-                try flow.activate(key: "idle\(index)")
-                try flow.expectShown(window)
+                try desktop.activate(key: "idle\(index)")
+                try desktop.expectShown(window)
                 if index.isMultiple(of: 2), index > 0 {
-                    try flow.expectShown(window, since: flow.key(index / 2 + 1, send: true))
+                    try desktop.key(index / 2 + 1, send: true)
+                    try desktop.expectShown(window)
                 }
             }
-            try #require(try converges { rows in
-                rows.count == 20 && Set(rows.compactMap(\.workspace)) == Set(1...10)
-            })
+            try requireFinalState("twenty fixtures across ten workspaces") {
+                let rows = try harness.rows()
+                return rows.count == 20 && Set(rows.compactMap(\.workspace)) == Set(1...10)
+            }
             sleep(seconds: 1)
             try verifyIdleResources("E36")
         }
-        @Test func e29RailsAcrossWorkspacesKeepTheIdleResourceBudget() throws {
-            let flow = try Acceptance.FunctionalRails()
-            try flow.enable()
+        @Test("#17 E29: rails idle resource budget") func e29RailsAcrossWorkspacesKeepTheIdleResourceBudget() throws {
+            try harness.reset()
+            try desktop.configure(desktop.rails, layout: "rails")
             for index in 0..<20 {
-                let id = try flow.open("idle\(index)", width: 0.4)
-                try flow.flow.activate(key: "idle\(index)")
-                try flow.focus(id)
+                let id = try fixture.open(key: "idle\(index)", ["widthFraction": 0.4])
+                try desktop.activate(key: "idle\(index)")
+                try desktop.expectFocus(id)
                 // Native focus can precede the catalog's new-window arrival.
                 // Finish each setup command before opening the next fixture.
-                try #require(try eventually { try harness.row(id)?.workspace == harness.status().workspaces?.active })
+                try requireFinalState("the resource fixture assigned to the active workspace") {
+                    try harness.row(id)?.workspace == harness.status().workspaces?.active
+                }
                 if index.isMultiple(of: 2) {
                     let rail = try #require(try harness.row(id)?.rail)
-                    try flow.focus(id, since: flow.flow.post(38, shift: true))
-                    try #require(try eventually { try harness.row(id)?.rail == (index == 0 ? rail : rail + 1) })
+                    try desktop.post(38, shift: true)
+                    try desktop.expectFocus(id)
+                    try requireFinalState("the resource fixture moved down a rail") { try harness.row(id)?.rail == (index == 0 ? rail : rail + 1) }
                 }
                 if index.isMultiple(of: 4), index > 0 {
                     let workspace = index / 4 + 1
-                    try flow.focus(id, since: flow.flow.key(workspace, send: true))
-                    try #require(try eventually {
+                    try desktop.key(workspace, send: true)
+                    try desktop.expectFocus(id)
+                    try requireFinalState("the resource fixture sent to its workspace") {
                         try harness.row(id)?.workspace == workspace && harness.status().workspaces?.active == workspace
-                    })
+                    }
                 }
             }
-            try #require(try converges { $0.count == 20 && Set($0.compactMap(\.workspace)).count == 5 && $0.contains { ($0.rail ?? 0) > 1 } })
+            try requireFinalState("twenty rail fixtures across five workspaces") {
+                let rows = try harness.rows()
+                return rows.count == 20 && Set(rows.compactMap(\.workspace)).count == 5 && rows.contains { ($0.rail ?? 0) > 1 }
+            }
             sleep(seconds: 1)
             try verifyIdleResources("Rails E29")
         }

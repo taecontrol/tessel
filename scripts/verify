@@ -1,23 +1,31 @@
 #!/bin/bash
 # Drive the signed app through its CLI and isolated AppKit fixtures.
-# With no suite or test name, runs the functional and resource suites.
+# With no suite or test name, runs all suites except disposable-runner permission steps.
 set -euo pipefail
+export TESSEL_ACCEPTANCE=1
 root=$(cd "$(dirname "$0")/.." && pwd)
-usage='Usage: scripts/verify [--functional] [--resources] [--permission] [TEST...]'
+usage='Usage: scripts/verify [--contracts] [--journeys] [--latency] [--resources] [--permission] [TEST...]'
 filters=()
 for argument in "$@"; do
     case $argument in
-        --functional) filters+=(--filter /Functional/ --filter /FunctionalWorkspaces/ --filter /FunctionalRails/) ;;
+        --contracts) filters+=(--filter /Contracts/) ;;
+        --journeys) filters+=(--filter /Journeys/) ;;
+        --latency) filters+=(--filter /Latency/) ;;
         --resources) filters+=(--filter /Resources/ --filter /Verification/) ;;
-        --permission) filters+=(--filter /Permission/) ;;
+        --permission) filters+=(--filter permissionDenialAndRestart) ;;
         -h | --help) echo "$usage"; exit 0 ;;
         -*) echo "$usage" >&2; exit 2 ;;
         *) filters+=(--filter "$argument") ;;
     esac
 done
 if [[ ${#filters[@]} -eq 0 ]]; then
-    filters=(--skip /Permission/)
+    filters=(--skip permissionDenialAndRestart)
 fi
+filters+=(--skip '^PolicyTests[./]')
+
+# SwiftPM succeeds on an empty selection. Reject it before any suite or GUI job
+# starts; the Swift tool lists tests without executing their scopes.
+swift run --package-path "$root" --scratch-path "$root/.build/tools" --quiet tessel-verify-selection "$root" "${filters[@]}"
 
 # Timed checks need this process scheduled like the apps it observes (issue
 # #21). A launchd job without ProcessType Interactive clamps its whole process

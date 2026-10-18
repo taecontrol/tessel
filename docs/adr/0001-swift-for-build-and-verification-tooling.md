@@ -3,6 +3,10 @@
 Date: 2026-10-16
 Status: Accepted
 
+Amended by [ADR-0004](0004-verify-policy-against-a-simulated-macos.md): the root package
+also holds internal libraries and test targets for deterministic policy
+verification.
+
 ## Context
 
 tessel is written in Swift with Apple's frameworks, and the project's agent

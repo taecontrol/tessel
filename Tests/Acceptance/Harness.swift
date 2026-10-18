@@ -2,6 +2,10 @@ import Darwin
 import Foundation
 import Testing
 
+/// Real-system suites share one desktop and run serially.
+@Suite(.serialized)
+enum Acceptance {}
+
 /// One window record from `tessel windows --json`.
 struct Row: Decodable, Equatable, Hashable {
     let id: UInt32
@@ -50,6 +54,14 @@ struct Status: Decodable {
 
 /// The fixture's own description of its windows, keyed by the test's names.
 struct FixtureReply: Decodable {
+    struct MinimizeEvent: Decodable {
+        let name: String
+        let minimized: Bool
+        let key: Bool
+        let main: Bool
+        let active: Bool
+        let sampledAt: Double
+    }
     let pid: pid_t
     let windows: [String: UInt32]
     let nativeTabs: [String: Int]
@@ -61,6 +73,14 @@ struct FixtureReply: Decodable {
     let menuContains: Bool?
     let ready: Bool?
     let active: Bool?
+    let contract: NativeContractReply?
+    let frames: [String: [Double]]?
+    let axWindowOrder: [UInt32]?
+    let transitionCount: Int?
+    let keyWindow: UInt32?
+    let mainWindow: UInt32?
+    let minimizeEvents: [String: [MinimizeEvent]]?
+    let miniaturized: [String: Bool]?
 }
 
 struct Observation: Decodable {
@@ -109,7 +129,12 @@ final class FixtureSession {
     private let clientPath: String
     private let socket: Int32
 
-    init(directory: URL, number: Int, swiftUI: Bool = false) throws {
+    private struct Unreachable: Error, CustomStringConvertible {
+        let code: Int32
+        var description: String { "cannot reach the fixture: errno \(code)" }
+    }
+
+    init(directory: URL, number: Int, swiftUI: Bool = false, prohibited: Bool = false) throws {
         path = directory.appending(path: "f\(number).sock").path
         clientPath = directory.appending(path: "c\(number).sock").path
         socket = Darwin.socket(AF_UNIX, SOCK_DGRAM, 0)
@@ -125,19 +150,26 @@ final class FixtureSession {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(socket, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }
         guard bound == 0 else { throw HarnessError("cannot bind the fixture client socket: errno \(errno)") }
-        setTimeout(socket, seconds: 3)
+        setTimeout(socket, seconds: margin)
         try run(["open", "-n"] + (swiftUI ? [] : ["-g"]) + ["--stdout", "/dev/null", "--stderr", "/dev/null", fixtureBundle.path, "--args", "--socket", path]
-                + (swiftUI ? ["--swiftui"] : []), check: true)
-        let path = path
-        guard eventually(within: 5, { FileManager.default.fileExists(atPath: path) }) else {
-            throw HarnessError("fixture did not launch")
-        }
-        pid = try command("ping").pid
+                + (swiftUI ? ["--swiftui"] : []) + (prohibited ? ["--prohibited"] : []), timeout: margin, check: true)
+        // The path can appear before bind attaches its socket. Keep one ping
+        // in flight so a late startup reply cannot answer a later command.
+        var sent = false
+        guard let reply = try finalValue({ () throws -> FixtureReply? in
+            if !sent {
+                do { try send("ping", [:], flags: MSG_DONTWAIT) }
+                catch let error as Unreachable where error.code == ENOENT || error.code == ECONNREFUSED { return nil }
+                sent = true
+            }
+            return try receive("ping", flags: MSG_DONTWAIT)
+        }) else { throw HarnessError("fixture did not launch and answer ping within the final-state margin") }
+        pid = reply.pid
     }
 
     @discardableResult
     func command(_ action: String, _ arguments: [String: Any] = [:]) throws -> FixtureReply {
-        let deadline = monotonicSeconds() + 1
+        let deadline = monotonicSeconds() + margin
         while true {
             do {
                 return try request(action, arguments)
@@ -151,20 +183,31 @@ final class FixtureSession {
     }
 
     private func request(_ action: String, _ arguments: [String: Any]) throws -> FixtureReply {
+        try send(action, arguments)
+        guard let reply = try receive(action) else { throw HarnessError("fixture did not answer \(action)") }
+        return reply
+    }
+
+    private func send(_ action: String, _ arguments: [String: Any], flags: Int32 = 0) throws {
         var request = arguments
         request["action"] = action
+        request["transitionMargin"] = margin
         let data = try JSONSerialization.data(withJSONObject: request)
         var address = try unixAddress(path)
         let sent = data.withUnsafeBytes { bytes in
             withUnsafePointer(to: &address) {
                 $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    sendto(socket, bytes.baseAddress, data.count, 0, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+                    sendto(socket, bytes.baseAddress, data.count, flags, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
                 }
             }
         }
-        guard sent == data.count else { throw HarnessError("cannot reach the fixture: errno \(errno)") }
+        guard sent == data.count else { throw Unreachable(code: errno) }
+    }
+
+    private func receive(_ action: String, flags: Int32 = 0) throws -> FixtureReply? {
         var buffer = [UInt8](repeating: 0, count: 65_536)
-        let received = recv(socket, &buffer, buffer.count, 0)
+        let received = recv(socket, &buffer, buffer.count, flags)
+        if received < 0, flags & MSG_DONTWAIT != 0, errno == EWOULDBLOCK { return nil }
         guard received > 0 else {
             throw HarnessError("fixture did not answer \(action)")
         }
@@ -186,7 +229,7 @@ final class FixtureSession {
 
     func stop() {
         kill(pid, SIGKILL)
-        _ = eventually(within: 1) { kill(pid, 0) != 0 }
+        _ = finalState { kill(pid, 0) != 0 }
         disconnect()
     }
 
@@ -213,7 +256,7 @@ final class Harness {
     private var cleanups: [() -> Void] = []
     private var contracts: URL?
 
-    func start() throws {
+    func start(launchApp: Bool = true) throws {
         let required = [cli, fixtureExecutable, buildTool]
         guard required.allSatisfy({ FileManager.default.fileExists(atPath: $0.path) }) else {
             throw HarnessError("Run scripts/build first; the build tool and the signed app and fixture bundles are required")
@@ -221,7 +264,7 @@ final class Harness {
         guard processIDs(appExecutable).isEmpty else {
             throw HarnessError("This worktree's development app is already running; stop it before verification")
         }
-        guard try run([fixtureExecutable.path, "--check-session"], timeout: 2).status == 0 else {
+        guard try run([fixtureExecutable.path, "--check-session"], timeout: margin).status == 0 else {
             throw HarnessError("Wake and unlock the Mac before running GUI verification")
         }
         let power = Process()
@@ -246,7 +289,7 @@ final class Harness {
         cleanups.append { [unowned self] in fixture.stop() }
         cleanups.append { [unowned self] in stopApp() }
         cleanups.append { [unowned self] in otherFixtures.forEach { $0.stop() } }
-        try startApp()
+        if launchApp { try startApp() }
     }
 
     func shutdown() {
@@ -257,18 +300,17 @@ final class Harness {
         let capture = ProcessInfo.processInfo.environment["TESSEL_CAPTURE_WORKSPACES"] == "1" ? ["--test-capture-ui"] : []
         try run(["open", "-n", "-g", "--stdout", "/dev/null", "--stderr", "/dev/null",
                  "--env", "XDG_CONFIG_HOME=" + environment["XDG_CONFIG_HOME"]!, app.path,
-                 "--args", "--test-fixture-only"] + capture + arguments, check: true)
-        guard let pid = eventualValue(within: 5, { processIDs(appExecutable).first }) else {
+                 "--args", "--test-fixture-only"] + capture + arguments, timeout: margin, check: true)
+        guard let pid = finalValue({ processIDs(appExecutable).first }) else {
             throw HarnessError("signed development app did not launch")
         }
         appPID = pid
-        // Launch readiness is separate from the 500 ms event deadlines.
-        guard try eventually(within: 5, { try invoke("status", "--json").status == 0 }) else {
+        guard try finalState({ try invoke("status", "--json").status == 0 }) else {
             throw HarnessError("signed development app did not expose its status endpoint")
         }
         guard fixtureReady else { return }
         // Socket readiness does not prove that startup AX subscriptions exist.
-        // Exercise one generic window before starting event-specific deadlines.
+        // Exercise one generic window before driving the app.
         let health = try fixture.open(key: "startupHealth")
         func listed() throws -> Bool? {
             let result = try invoke("windows", "--json")
@@ -276,18 +318,18 @@ final class Harness {
             return try JSONDecoder().decode([Row].self, from: result.outputData)
                 .contains { $0.bundleId == fixtureID && $0.id == health }
         }
-        guard try eventually(within: 5, { try listed() == true }) else {
+        guard try finalState({ try listed() == true }) else {
             throw HarnessError("signed development app did not observe the fixture startup window")
         }
         try fixture.command("close", ["key": "startupHealth"])
-        guard try eventually(within: 1, { try listed() == false }) else {
+        guard try finalState({ try listed() == false }) else {
             throw HarnessError("signed development app did not retire the fixture startup window")
         }
     }
 
     func stopApp() {
         for pid in processIDs(appExecutable) { kill(pid, SIGTERM) }
-        _ = eventually(within: 3) { processIDs(appExecutable).isEmpty }
+        _ = finalState { processIDs(appExecutable).isEmpty }
     }
 
     var appIsRunning: Bool { !processIDs(appExecutable).isEmpty }
@@ -297,7 +339,7 @@ final class Harness {
     }
 
     func invoke(_ arguments: [String]) throws -> ProcessResult {
-        let result = try run([cli.path] + arguments, environment: environment, timeout: 1.2, recordsReceipt: false)
+        let result = try run([cli.path] + arguments, environment: environment, timeout: margin, recordsReceipt: false)
         // Judge a JSON answer by when tessel produced it; anything else by receipt.
         let json = try? JSONSerialization.jsonObject(with: result.outputData)
         let answer = (json as? [String: Any]) ?? (json as? [[String: Any]])?.first
@@ -307,7 +349,7 @@ final class Harness {
 
     /// The app's only Unix socket: the CLI endpoint.
     func endpoint() throws -> String {
-        let result = try run(["/usr/sbin/lsof", "-a", "-p", String(appPID), "-U", "-Fn"], check: true)
+        let result = try run(["/usr/sbin/lsof", "-a", "-p", String(appPID), "-U", "-Fn"], timeout: margin, check: true)
         let paths = result.output.split(separator: "\n").filter { $0.hasPrefix("n/") && $0.hasSuffix(".sock") }
         guard paths.count == 1 else { throw HarnessError("expected one tessel endpoint, found \(paths.count)") }
         return String(paths[0].dropFirst())
@@ -343,9 +385,9 @@ final class Harness {
         var command = ["open", "-n", "-g", "--stdout", output.path, "--stderr", "/dev/null", fixtureBundle.path,
                        "--args", "--probe", String((session ?? fixture).pid)]
         if let resizeID { command.append(String(resizeID)) }
-        try run(command, timeout: 3, check: true)
+        try run(command, timeout: margin, check: true)
         struct Reply: Decodable { let windows: [ProbeWindow]? }
-        let reply = try eventualValue(within: 2) { () throws -> Reply? in
+        let reply = try finalValue { () throws -> Reply? in
             guard let data = FileManager.default.contents(atPath: output.path), !data.isEmpty else { return nil }
             return try? JSONDecoder().decode(Reply.self, from: data)
         }
@@ -360,7 +402,7 @@ final class Harness {
         let executable = directory.appending(path: "NativeContracts")
         let shared = try FileManager.default.contentsOfDirectory(at: root.appending(path: "Sources/Shared"), includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "swift" }.sorted { $0.path < $1.path }
-        let sources = shared + [root.appending(path: "Sources/App/AXSubscriptions.swift"), root.appending(path: "Tests/Contracts/Main.swift")]
+        let sources = shared + [root.appending(path: "Sources/Policy/ElementSubscriptions.swift"), root.appending(path: "Sources/App/AXSubscriptions.swift"), root.appending(path: "Tests/Contracts/Main.swift")]
         let compiled = try run(["xcrun", "swiftc", "-parse-as-library", "-swift-version", "6", "-O", "-target", "arm64-apple-macos27.0"]
                                + sources.map(\.path) + ["-o", executable.path], timeout: 120)
         guard compiled.status == 0 else { throw HarnessError("native contracts did not compile:\n" + compiled.error) }
@@ -372,7 +414,7 @@ final class Harness {
     func reset() throws {
         if !appIsRunning { try startApp(fixtureReady: false) }
         try? FileManager.default.removeItem(at: configFile)
-        guard try eventually(within: 1, { try status().config.state == "defaults" }) else {
+        guard try finalState({ try status().config.state == "defaults" }) else {
             throw HarnessError("tessel did not return to the default configuration")
         }
         for other in otherFixtures { other.stop() }
@@ -383,6 +425,8 @@ final class Harness {
 
 /// Starts the harness once around a suite and always cleans up its processes and data.
 struct AppSession: SuiteTrait, TestScoping {
+    var launchesApp = true
+
     func provideScope(for test: Test, testCase: Test.Case?, performing function: @Sendable () async throws -> Void) async throws {
         let harness = await MainActor.run {
             let harness = Harness()
@@ -390,7 +434,7 @@ struct AppSession: SuiteTrait, TestScoping {
             return harness
         }
         do {
-            try await MainActor.run { try harness.start() }
+            try await MainActor.run { try harness.start(launchApp: launchesApp) }
             try await function()
         } catch {
             await MainActor.run { harness.shutdown() }

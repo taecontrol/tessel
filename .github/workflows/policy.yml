@@ -1,0 +1,36 @@
+name: Policy
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited]
+permissions:
+  contents: read
+concurrency:
+  group: policy-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  policy:
+    name: Deterministic policy
+    runs-on: xcode-27
+    # Fourteen mutants take about 5.5 minutes locally; runners can be 1.8x slower.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Deterministic tests
+        run: swift test
+      - name: Keep real-system tests out of the bare package
+        run: swift run tessel-check layers
+      - name: Known bugs and architecture guards
+        run: swift run tessel-check mutants
+      - name: Repeat trace digest
+        run: swift run tessel-check determinism --runs 3
+      - name: Require evidence for simulator changes
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          body_file="$RUNNER_TEMP/tessel-pr-body.txt"
+          printf '%s' "$PR_BODY" > "$body_file"
+          swift run tessel-check simulator-evidence --base "origin/$BASE_REF" --body-file "$body_file"

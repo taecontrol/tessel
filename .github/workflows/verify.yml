@@ -11,7 +11,9 @@ jobs:
   acceptance:
     name: Acceptance
     runs-on: xcode-27
-    timeout-minutes: 15
+    # Journeys (including signed rebuilds), contracts, 200 latency samples and
+    # three 20 s idle windows share setup; ten minutes leaves runner margin.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Configure ephemeral certificate signing
@@ -28,11 +30,24 @@ jobs:
           defaults write com.apple.dock autohide -bool true
           killall Dock
           sleep 3
-      - name: Verify permission denial and automatic restart
-        run: scripts/verify --permission
-      - name: Functional acceptance suite
-        run: scripts/verify --functional
-      # Run even when the functional suite fails, so each run reports both.
+      - name: Grant Accessibility for the signed harness
+        run: scripts/ci-accessibility
+      - name: Real macOS assumption contracts
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: scripts/verify --contracts
+      - name: End-to-end journeys
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: scripts/verify --journeys
+      - name: Workspace and rail latency
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: scripts/verify --latency
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: latency
+          path: .work/latency.json
+          if-no-files-found: ignore
+      # Run even when a journey or latency check fails, so each run reports resources.
       - name: Resource acceptance suite (90 second budget)
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         timeout-minutes: 2
@@ -45,15 +60,13 @@ jobs:
             exit 1
           fi
       - name: Capture rails status item for review
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: TESSEL_CAPTURE_WORKSPACES=1 scripts/verify captureRailsStatusItem
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: switch-calibration
-          path: |
-            .work/switch-calibration.json
-            .work/rails-calibration.json
-            .work/captures/E26-*.png
+          name: rails-status-item
+          path: .work/captures/E26-*.png
           if-no-files-found: ignore
       - name: Remove ephemeral keychain
         if: always()

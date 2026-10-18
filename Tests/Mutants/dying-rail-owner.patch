@@ -1,0 +1,34 @@
+# Bug: A dying rail owner loses its adjacent-rail landing to native survivor activation while its PID still exists.
+# Fixed in: #24
+diff --git a/Sources/Policy/Workspaces.swift b/Sources/Policy/Workspaces.swift
+index 8f9e624..7c6801c 100644
+--- a/Sources/Policy/Workspaces.swift
++++ b/Sources/Policy/Workspaces.swift
+@@ -443,24 +443,10 @@ final class Workspaces {
+         // macOS can re-activate the already selected app when another process
+         // exits. Its visible window has not been shown again or switched.
+         guard id != focused || workspace != status.active || closeted.contains(id) || !layoutWindows.isEmpty else { return }
+-        // Window destruction can precede process exit and its notification.
+-        // Preserve the dying rail owner so removal selects its adjacent rail.
++        // macOS promotes another app before delivering process termination.
++        // Preserve the dead rail owner so removal selects its adjacent rail.
+         if railEnabled, let focused, let owner = entries[focused]?.pid,
+-           let pid = entries[id]?.pid, owner != pid {
+-            guard applications.isAlive(owner) else { return }
+-            catalog?.windowIsGone(pid: owner, id: focused) { [weak self] gone in
+-                guard let self, !gone, self.status.enabled,
+-                      self.focused == focused, self.available(id), self.appFocus[pid] == id,
+-                      self.applications.frontmostPID == pid else { return }
+-                self.selectExternalFocus(id, layoutWindows: layoutWindows)
+-            }
+-            return
+-        }
+-        selectExternalFocus(id, layoutWindows: layoutWindows)
+-    }
+-
+-    private func selectExternalFocus(_ id: UInt32, layoutWindows: Set<UInt32>) {
+-        guard let workspace = entries[id]?.workspace else { return }
++           owner != entries[id]?.pid, !applications.isAlive(owner) { return }
+         status.active = workspace
+         remember(id)
+         // The native operation already selected this window. A queued raise

@@ -1,0 +1,22 @@
+# Bug: An unpublished native tab replacement abandons its current rail presentation.
+# Fixed in: #20 (branch commit 28093c6)
+diff --git a/Sources/Policy/Workspaces.swift b/Sources/Policy/Workspaces.swift
+--- a/Sources/Policy/Workspaces.swift
++++ b/Sources/Policy/Workspaces.swift
+@@ -313,15 +313,11 @@
+         } else if needsRender || resizedRail {
+             // A hidden app's first snapshot can precede the front app's.
+             // Discovering it must not activate Finder or an older selection.
+             let selection = focused ?? preferred(in: status.active)
+             render(focusing: selection, relayout: false, takeFocus: !firstSnapshot || selection != nil && expectedFocus == selection,
+                    layoutWindows: hiddenReplacements)
+         } else if !replacements.isEmpty {
+-            if let focused, replacements.contains(focused), railPresentation?.pending.contains(focused) == true {
+-                // The old native root rejected this current presentation. Its
+-                // successor owns the unfinished position and focus intent.
+-                render(focusing: focused, relayout: false)
+-            } else if frontmost, front == pid, let reportedFocus, replacements.contains(reportedFocus), available(reportedFocus) {
++            if frontmost, front == pid, let reportedFocus, replacements.contains(reportedFocus), available(reportedFocus) {
+                 followExternalFocus(reportedFocus, layoutWindows: hiddenReplacements)
+             } else if !hiddenReplacements.isEmpty {
+                 render(focusing: focused, relayout: false, takeFocus: false)

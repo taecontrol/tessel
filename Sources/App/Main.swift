@@ -49,14 +49,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let trusted = AXIsProcessTrusted()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let config = ConfigManager()
+        let scheduler = SystemScheduler()
+        let applications = SystemApplications()
+        let ax = SystemAccessibility()
+        let file = ConfigFile()
+        let config = ConfigManager(path: file.file.path, main: scheduler.main, load: { try file.load() }, watch: { file.watch() })
+        file.onChange = { [weak config] in config?.scheduleReload() }
         self.config = config
         let store = SnapshotStore(status: appStatus(config.status))
         self.store = store
         do { server = try SocketServer { store.reply(to: $0) } }
         catch { NSApp.terminate(nil); return }
         let workspaces = Workspaces(store: store, trusted: trusted, configuration: config.status.effective,
-                                    simulateMissing: LaunchOptions.missingSkyLight, simulateFailedHide: LaunchOptions.failedHide)
+                                    applications: applications, ax: ax, screens: SystemScreen(), windowOrder: SystemWindowOrder(),
+                                    scheduler: scheduler, hotkeys: SystemHotkeys(), fixtureOnly: LaunchOptions.fixtureOnly) {
+            try SkyLightCloset(simulateMissing: LaunchOptions.missingSkyLight, simulateFailedHide: LaunchOptions.failedHide)
+        }
         self.workspaces = workspaces
         workspaces.onChange = { [weak self] in
             guard let self else { return }
@@ -72,7 +80,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         updateMenu()
         if trusted {
-            windows = WindowCatalog(workspaces: workspaces, fixtureOnly: LaunchOptions.fixtureOnly)
+            windows = WindowCatalog(workspaces: workspaces, applications: applications, ax: ax, scheduler: scheduler,
+                                    fixtureBundleID: LaunchOptions.fixtureOnly ? "com.taecontrol.tessel.fixture" : nil)
             workspaces.catalog = windows
         } else {
             let monitor = PermissionMonitor { [weak self] in self?.relaunch() }

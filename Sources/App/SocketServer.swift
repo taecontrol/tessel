@@ -63,7 +63,7 @@ final class SocketServer: @unchecked Sendable {
 }
 
 /// The CLI serves only committed snapshots. It never waits for an AX round trip.
-final class SnapshotStore: @unchecked Sendable {
+final class SnapshotStore: WindowPublishing, @unchecked Sendable {
     private let lock = NSLock()
     private var windows: [pid_t: [WindowRecord]] = [:]
     private var status: AppStatus

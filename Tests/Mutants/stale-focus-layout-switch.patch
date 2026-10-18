@@ -1,0 +1,16 @@
+# Bug: Switching layouts raises an old focus over an unpublished native selection.
+# Fixed in: #20 (branch commit 5549050)
+diff --git a/Sources/Policy/Workspaces.swift b/Sources/Policy/Workspaces.swift
+--- a/Sources/Policy/Workspaces.swift
++++ b/Sources/Policy/Workspaces.swift
+@@ -99,9 +99,7 @@
+                 if let focused { rails.select(focused) }
+             }
+             installKeys()
+-            // A layout change retains the native selection. Its notification
+-            // can still be queued behind an app's current AX read.
+-            render(focusing: focused, relayout: true, takeFocus: false)
++            render(focusing: focused, relayout: true)
+         }
+         if !status.enabled {
+             do { try closet.start() }

@@ -1,0 +1,35 @@
+# Bug: A queued AXRaise restores a window minimized while the preceding focus reply returns.
+# Fixed in: #24
+diff --git a/Sources/Policy/WindowCatalog.swift b/Sources/Policy/WindowCatalog.swift
+--- a/Sources/Policy/WindowCatalog.swift
++++ b/Sources/Policy/WindowCatalog.swift
+@@ -547,8 +547,7 @@ private final class AppWindows: @unchecked Sendable {
+                     guard presentationLock.withLock({ presentation == token }), isNativeFront(window, id: id) else { return }
+                     try check(ax.set(.main, of: window, to: .bool(true)))
+                     // AXMain leaves a completed minimize alone; AXRaise restores it.
+-                    guard presentationLock.withLock({ presentation == token }), try value(window, .minimized)?.bool != true,
+-                          isNativeFront(window, id: id) else { return }
++                    guard presentationLock.withLock({ presentation == token }), isNativeFront(window, id: id) else { return }
+                     try check(ax.perform(.raise, on: window))
+                 }
+                 publishSnapshot()
+@@ -599,8 +598,7 @@ private final class AppWindows: @unchecked Sendable {
+                 try check(ax.set(.frontmost, of: application, to: .bool(true)))
+                 guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return }
+                 try check(ax.set(.main, of: window, to: .bool(true)))
+-                guard presentationLock.withLock({ presentation == token }), try value(window, .minimized)?.bool != true,
+-                      isNativeFront(window,id:id) else { return }
++                guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return }
+                 try check(ax.perform(.raise, on: window))
+                 // AX accepts an activation request before it necessarily
+                 // becomes active. Retry once only while it is unconfirmed.
+@@ -615,8 +613,7 @@ private final class AppWindows: @unchecked Sendable {
+                         try self.check(self.ax.set(.frontmost, of: self.application, to: .bool(true)))
+                         guard self.presentationLock.withLock({ self.presentation == token }), self.isNativeFront(window,id:id) else { return }
+                         try self.check(self.ax.set(.main, of: window, to: .bool(true)))
+-                        guard self.presentationLock.withLock({ self.presentation == token }), try self.value(window, .minimized)?.bool != true,
+-                              self.isNativeFront(window,id:id) else { return }
++                        guard self.presentationLock.withLock({ self.presentation == token }), self.isNativeFront(window,id:id) else { return }
+                         try self.check(self.ax.perform(.raise, on: window))
+                         self.publishSnapshot()
+                     } catch { /* Another app and newer focus intents remain independent. */ }

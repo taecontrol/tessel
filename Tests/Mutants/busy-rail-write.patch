@@ -1,0 +1,33 @@
+# Bug: A busy app drops a rail geometry write permanently instead of retrying.
+# Fixed in: #20 (branch commit c38ae75)
+diff --git a/Sources/Policy/WindowCatalog.swift b/Sources/Policy/WindowCatalog.swift
+--- a/Sources/Policy/WindowCatalog.swift
++++ b/Sources/Policy/WindowCatalog.swift
+@@ -539,8 +539,8 @@
+ 
+     private func presentRail(id: UInt32, target: CGRect?, position: Bool, resize: Bool, focus: Bool, token: UUID,
+                              failures: Int, completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
+-        var accepted: CGRect?, retrying = false
+-        defer { if !retrying { let result = accepted; scheduler.main.async { completion(result) } } }
++        var accepted: CGRect?
++        defer { let result = accepted; scheduler.main.async { completion(result) } }
+         guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
+         do {
+             guard try canPresent(window,id:id) else { return }
+@@ -594,16 +594,6 @@
+                 railActivationCheck = (token,check)
+             }
+             publishSnapshot()
+-        } catch AXReadError.unresponsive where target != nil && accepted == nil && failures < 4 {
+-            // A busy or briefly hung app can time out every write of the
+-            // render that moved it, leaving a stale frame over its
+-            // neighbors once it answers. Back off like failed reads, while
+-            // no newer render supersedes this one; a hung app then costs nothing.
+-            retrying = true
+-            queue.after(milliseconds: 50 << (failures+1)) { [weak self] in
+-                self?.presentRail(id:id,target:target,position:position,resize:resize,focus:focus,token:token,
+-                                  failures:failures+1,completion:completion)
+-            }
+         } catch { /* Another app's queue and the CLI remain independent. */ }
+     }
+ 

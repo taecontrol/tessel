@@ -1,0 +1,18 @@
+# Bug: Omitting a still-minimized live AX handle erases its catalog row.
+# Fixed in: #24
+diff --git a/Sources/Policy/WindowCatalog.swift b/Sources/Policy/WindowCatalog.swift
+--- a/Sources/Policy/WindowCatalog.swift
++++ b/Sources/Policy/WindowCatalog.swift
+@@ -305,11 +305,8 @@
+                 // AppKit publishes every minimized tab, then only the selected
+                 // window after restore. Its focused window is checked above.
+                 let isFocused = focusedElement.map { $0 == window } == true
++                if cached?.minimized == true && !hidden && !isFocused { continue }
+                 do {
+-                    // Only restored background tabs disappear from AXWindows.
+-                    // A still-minimized omitted handle remains a live window.
+-                    if cached?.minimized == true && !hidden && !isFocused,
+-                       try value(window, .minimized)?.bool == false { continue }
+                     try inspect(window, into: &next, elements: &elements, handles: &handles, parent: cached?.parent)
+                 } catch AXReadError.gone { continue }
+             }
