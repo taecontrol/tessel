@@ -31,6 +31,12 @@ package enum Assumption: String, CaseIterable, Sendable {
     case closeFocusPromotion = "close-focus-promotion"
     case sheetFocusOwnership = "sheet-focus-ownership"
     case nativeTabInsertion = "native-tab-insertion"
+    // #17 scenarios
+    case sizeLimitChanges = "size-limit-changes"
+    case terminationActivationOrder = "termination-activation-order"
+    case nativeTabPublication = "native-tab-publication"
+    case deferredAXActivation = "deferred-ax-activation"
+    case minimizeFocusInterruption = "minimize-focus-interruption"
 
     package var statement: String {
         switch self {
@@ -66,6 +72,12 @@ package enum Assumption: String, CaseIterable, Sendable {
         case .closeFocusPromotion: "Closing a key window can promote a closeted sibling before the destruction notification is delivered."
         case .sheetFocusOwnership: "An attached sheet keeps key focus when its parent is raised or made main, while the parent owns AXMain."
         case .nativeTabInsertion: "Adding a native tab preserves the group's bar identity, shared frame and Space while selecting the new front."
+        // #17 scenarios
+        case .sizeLimitChanges: "Changing an AppKit window's maximum size leaves its current frame intact and clamps the next size write."
+        case .terminationActivationOrder: "A process is no longer alive when macOS promotes a surviving app before delivering the terminated process's lifecycle notification."
+        case .nativeTabPublication: "A native tab's bar can identify its successor while AXWindows still lists the former root and AXFocusedWindow is temporarily unpublished."
+        case .deferredAXActivation: "AX can accept activation, main and raise requests while the app remains inactive until another activation request completes it."
+        case .minimizeFocusInterruption: "An AX main or raise request during the Dock transition can cancel minimization before AXMinimized becomes true."
         }
     }
 }

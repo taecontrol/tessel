@@ -89,11 +89,16 @@ package final class SimulatedMac: @unchecked Sendable {
         var key: UInt32?, main: UInt32?
         var windowLists: [WindowListReply] = []
         var zeroIDs: Set<UInt32> = []
+        var publishedWindows: [UInt32]?
+        var publishesFocus = true
+        var deferredActivations = 0
+        var activationPending = false
     }
     struct Window {
         let id: UInt32, pid: Int32
         var spec: WindowSpec
         var minimized = false, fullscreen = false, closed = false
+        var minimizing = false
         var space: UInt64 = 1
         var group: Int?
     }
@@ -167,7 +172,7 @@ package final class SimulatedMac: @unchecked Sendable {
         action("select window \(id) \(apps[window.pid]!.alias)")
         focus(id, notifications: notifications)
     }
-    func focus(_ id: UInt32, notifications: NotificationOrder = .focusThenMain) {
+    func focus(_ id: UInt32, notifications: NotificationOrder = .focusThenMain, activating: Bool = true) {
         guard let window = windows[id], !window.closed else { return }
         if let sheet = windows.keys.sorted().first(where: { windows[$0]?.spec.parent == id && windows[$0]?.closed == false }) {
             assume(.sheetFocusOwnership)
@@ -175,8 +180,8 @@ package final class SimulatedMac: @unchecked Sendable {
             return
         }
         if let group = window.group { groups[group]?.selected = id }
-        let activated = front != window.pid
-        front = window.pid
+        let activated = activating && front != window.pid
+        if activating { front = window.pid }
         apps[window.pid]?.key = id
         apps[window.pid]?.main = window.spec.parent ?? id
         zOrder.removeAll { $0 == id }; zOrder.insert(id, at: 0)
