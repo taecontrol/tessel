@@ -11,24 +11,31 @@ enum Layout: String, CaseIterable, Sendable { case off, stack, rails }
     let workspaces: Workspaces
     let catalog: WindowCatalog
     let config: ConfigManager
-    let rows = PublishedRows()
+    let rows: PublishedRows
     let keys = PressedKeys()
+    private(set) var configurationPublications: [(at: Int, status: ConfigStatus)] = []
     private let input = ConfigurationInput()
     private let mac: SimulatedMac
 
     init(on mac: SimulatedMac, configuration: Layout = .off) {
         self.mac = mac
+        rows = PublishedRows(now: { mac.scheduler.now })
         config = ConfigManager(path: "/scenario/tessel.toml", main: mac.scheduler.main, load: { [input] in
             if input.unreadable { throw CocoaError(.fileReadNoPermission) }
             return input.data
-        }, watch: {})
+        }, watch: { [input] in input.watchRequests += 1 })
         workspaces = Workspaces(store: rows, trusted: true, configuration: config.status.effective,
                                 applications: mac.applications, ax: mac.ax, screens: mac.screens,
                                 windowOrder: mac.windowOrder, scheduler: mac.scheduler, hotkeys: keys,
                                 fixtureOnly: true) { mac.closetPort }
         catalog = WindowCatalog(workspaces: workspaces, applications: mac.applications, ax: mac.ax, scheduler: mac.scheduler)
         workspaces.catalog = catalog
-        config.onChange = { [weak workspaces] in workspaces?.configure($0.effective) }
+        configurationPublications.append((mac.scheduler.now, config.status))
+        config.onChange = { [weak self] status in
+            guard let self else { return }
+            self.configurationPublications.append((mac.scheduler.now, status))
+            self.workspaces.configure(status.effective)
+        }
         if configuration != .off { configure(configuration) }
     }
 
@@ -39,8 +46,11 @@ enum Layout: String, CaseIterable, Sendable { case off, stack, rails }
         config.reload()
     }
     func changeConfig(_ text: String?, unreadable: Bool = false) {
+        changeConfig(contents: text.map { Data($0.utf8) }, unreadable: unreadable)
+    }
+    func changeConfig(contents: Data?, unreadable: Bool = false) {
         mac.action("change configuration")
-        input.data = text.map { Data($0.utf8) }
+        input.data = contents
         input.unreadable = unreadable
         config.scheduleReload()
     }
@@ -51,13 +61,27 @@ enum Layout: String, CaseIterable, Sendable { case off, stack, rails }
     var windows: [WindowRecord] { rows.byPID.keys.sorted().flatMap { rows.byPID[$0] ?? [] }.sorted { $0.id < $1.id } }
     var status: WorkspaceStatus { workspaces.status }
     var configuration: ConfigStatus { config.status }
+    var configurationWatchRequests: Int { input.watchRequests }
+    var windowPublications: [PublishedRows.Publication] { rows.publications }
     func quit() { mac.action("quit tessel"); workspaces.disable(reason: "quit") }
 }
 
-@MainActor private final class ConfigurationInput { var data: Data?; var unreadable = false }
+@MainActor private final class ConfigurationInput { var data: Data?; var unreadable = false; var watchRequests = 0 }
 @MainActor final class PublishedRows: WindowPublishing {
+    struct Publication {
+        let at: Int
+        let pid: Int32
+        let windows: [WindowRecord]?
+    }
+    private let now: () -> Int
     var byPID: [Int32: [WindowRecord]] = [:]
-    func update(pid: Int32, windows: [WindowRecord]?) { byPID[pid] = windows?.sorted { $0.id < $1.id } }
+    private(set) var publications: [Publication] = []
+    init(now: @escaping () -> Int) { self.now = now }
+    func update(pid: Int32, windows: [WindowRecord]?) {
+        let windows = windows?.sorted { $0.id < $1.id }
+        byPID[pid] = windows
+        publications.append(Publication(at: now(), pid: pid, windows: windows))
+    }
 }
 @MainActor final class PressedKeys: HotkeyInstalling {
     private var registration: Registration?
@@ -113,6 +137,9 @@ struct ScenarioResult {
         guard mac.scheduler.failure == nil else { return }
         body()
         if mac.scheduler.writeOrder == .eager { mac.scheduler.runReadyWorkers() }
+    }
+    func after(milliseconds: Int, _ name: String, _ body: @escaping @MainActor @Sendable () -> Void) {
+        mac.scheduler.main.after(milliseconds: milliseconds) { [self] in step(name, body) }
     }
     func expect(_ expectation: String, _ condition: @autoclosure () -> Bool) {
         if !condition() { failures.append(expectation) }

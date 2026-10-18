@@ -26,12 +26,14 @@ package enum NotificationOrder: Sendable { case focusThenMain, mainThenFocus }
 package struct SimulatedApp: Sendable {
     package let pid: Int32
     package let alias: String
-    fileprivate let mac: SimulatedMac
+    let mac: SimulatedMac
     @MainActor package var windows: [UInt32] { mac.appWindows(pid) }
     @MainActor package func select(_ window: UInt32, notifications: NotificationOrder = .focusThenMain) {
         mac.select(window, notifications: notifications)
     }
-    @MainActor @discardableResult package func open(_ spec: WindowSpec = WindowSpec()) -> UInt32 { mac.open(pid, spec: spec) }
+    @MainActor @discardableResult package func open(_ spec: WindowSpec = WindowSpec(), background: Bool = false) -> UInt32 {
+        mac.open(pid, spec: spec, background: background)
+    }
     @MainActor package func close(_ window: UInt32, selecting successor: UInt32? = nil) { mac.close(window, successor: successor) }
     @MainActor package func minimize(_ window: UInt32, selecting successor: UInt32? = nil) { mac.minimize(window, successor: successor) }
     @MainActor package func restore(_ window: UInt32) { mac.restore(window) }
@@ -77,6 +79,7 @@ package final class SimulatedMac: @unchecked Sendable {
     var geometry = ScreenGeometry(frame: CGRect(x: 0, y: 0, width: 1024, height: 768),
                                   visibleFrame: CGRect(x: 0, y: 0, width: 1024, height: 737))
     var usedAssumptions: Set<Assumption> = []
+    var foundation = FoundationState()
 
     struct AppState {
         let pid: Int32, alias: String, bundleID: String
@@ -147,13 +150,14 @@ package final class SimulatedMac: @unchecked Sendable {
     @MainActor func app(_ pid: Int32) -> SimulatedApp { SimulatedApp(pid: pid, alias: apps[pid]!.alias, mac: self) }
     @MainActor func appWindows(_ pid: Int32) -> [UInt32] { windows.values.filter { $0.pid == pid && !$0.closed }.map(\.id).sorted() }
 
-    @MainActor @discardableResult func open(_ pid: Int32, spec: WindowSpec) -> UInt32 {
+    @MainActor @discardableResult func open(_ pid: Int32, spec: WindowSpec, background: Bool = false) -> UInt32 {
         assume(.axApplicationWindows)
         nextWindow += 1
         let id = nextWindow
         windows[id] = Window(id: id, pid: pid, spec: spec, space: active)
         action("\(apps[pid]!.alias) open window \(id)")
-        focus(id)
+        if background { assume(.backgroundWindowCreation); zOrder.append(id) }
+        else { focus(id) }
         notify(spec.parent == nil ? .windowCreated : .sheetCreated, node: .application(pid))
         return id
     }

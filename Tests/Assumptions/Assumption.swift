@@ -21,6 +21,11 @@ package enum Assumption: String, CaseIterable, Sendable {
     case closetMoves = "closet-moves"
     case closetMembership = "closet-membership"
     case finderDesktop = "finder-desktop"
+    // #1 scenarios
+    case backgroundWindowCreation = "background-window-creation"
+    case contentTabChrome = "content-tab-chrome"
+    case nativeTabExtraControls = "native-tab-extra-controls"
+    case delayedNativeTabFocus = "delayed-native-tab-focus"
 
     package var statement: String {
         switch self {
@@ -46,6 +51,11 @@ package enum Assumption: String, CaseIterable, Sendable {
         case .closetMoves: "SkyLight moves windows and their sheets between the active Space and an invisible closet without changing native focus."
         case .closetMembership: "Ordinary Space queries omit invisible closets while all-Space queries retain their opaque membership."
         case .finderDesktop: "Finder exposes its desktop as an AXScrollArea without a window ID or subrole and can activate it without reopening windows."
+        // #1 scenarios
+        case .backgroundWindowCreation: "Opening a window in the background posts a creation notification without changing app focus or main window."
+        case .contentTabChrome: "Content tabs expose tab buttons separately from their selected-page contents, including empty contents, and segmented controls expose ordinary child controls."
+        case .nativeTabExtraControls: "A native tab bar's AXContents may include a New Tab button beyond AXTabs, and native tabs need not have close buttons."
+        case .delayedNativeTabFocus: "AXWindows may retain the former native-tab root after its bar moves while AXFocusedWindow is unavailable until the selected root is published."
         }
     }
 }
