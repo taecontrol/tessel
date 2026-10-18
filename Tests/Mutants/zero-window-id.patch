@@ -3,14 +3,17 @@
 diff --git a/Sources/Policy/WindowCatalog.swift b/Sources/Policy/WindowCatalog.swift
 --- a/Sources/Policy/WindowCatalog.swift
 +++ b/Sources/Policy/WindowCatalog.swift
-@@ -394,13 +394,7 @@
+@@ -394,16 +394,7 @@
          let identifier = ax.windowID(window)
          try check(identifier.status)
          let id = identifier.value ?? 0
 -        if id == 0 {
--            // Losing a known handle's CG ID is an incomplete read, not closure.
--            // Keep its complete snapshot and use the bounded read retries.
--            if elementsByID.values.contains(where: { $0 == window }) { throw AXReadError.changed }
+-            if elementsByID.values.contains(where: { $0 == window }) {
+-                // A closed AppKit handle's ID lookup can report illegalArgument.
+-                // Revalidate it before treating a zero ID as an incomplete read.
+-                _ = try value(window, .role)
+-                throw AXReadError.changed
+-            }
 -            return
 -        }
 -        guard !result.contains(where: { $0.id == id }) else { return }

@@ -64,7 +64,10 @@ extension SimulatedMac {
             guard mac.scheduler.isActive else { return .cannotComplete }
             guard let pid = mac.pid(handle.node), let app = mac.apps[pid], !app.terminated else { return .invalidUIElement }
             if app.hung || app.busyUntil > mac.scheduler.now { return .cannotComplete }
-            if !readingWindowID, case .window(let id) = handle.node, mac.windows[id]?.closed != false { return .invalidUIElement }
+            if case .window(let id) = handle.node {
+                guard let window = mac.windows[id] else { return .invalidUIElement }
+                if window.closed && !readingWindowID { return .invalidUIElement }
+            }
             return nil
         }
         private func finish(_ handle: Handle, operation: String, status: AXStatus, value: String = "", point: PausePoint? = nil) {

@@ -65,6 +65,19 @@ struct FixtureReply: Decodable {
     let menuContains: Bool?
     let ready: Bool?
     let active: Bool?
+    let windowHandle: WindowHandleSample?
+}
+
+struct WindowHandleSample: Decodable {
+    let idStatus: Int32
+    let id: UInt32
+    let roleStatus: Int32
+    let minimizedStatus: Int32
+    let positionStatus: Int32
+    let listStatus: Int32
+    let listed: Bool
+    let listCount: Int
+    let sampledAt: Double
 }
 
 struct Observation: Decodable {
