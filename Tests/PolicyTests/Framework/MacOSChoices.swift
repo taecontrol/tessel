@@ -92,4 +92,23 @@ import Testing
         #expect(mac.frame(id) == CGRect(origin: point, size: before.size))
         #expect(mac.settle() == .settled)
     }
+
+    @Test("CG membership outside the display is independent of frame intersection and excludes hidden or minimized windows", arguments: OffDisplayMembership.allCases)
+    func offDisplayMembership(_ membership: OffDisplayMembership) {
+        let mac = SimulatedMac()
+        defer { mac.shutdown() }
+        let app = mac.launch(windows: 1)
+        let outside = app.open(WindowSpec(frame: CGRect(x: 1124, y: 60, width: 451, height: 400), offDisplayMembership: membership))
+        #expect(mac.windowOrder.onScreenOrder() == (membership == .included ? [outside, 1] : [1]))
+        #expect(!mac.isFullyOnScreen(outside))
+        app.minimize(outside)
+        #expect(mac.windowOrder.onScreenOrder() == [1])
+        app.restore(outside)
+        #expect(mac.windowOrder.onScreenOrder() == (membership == .included ? [outside, 1] : [1]))
+        app.hide()
+        #expect(mac.windowOrder.onScreenOrder().isEmpty)
+        app.unhide()
+        #expect(mac.windowOrder.onScreenOrder() == (membership == .included ? [outside, 1] : [1]))
+        #expect(mac.settle() == .settled)
+    }
 }

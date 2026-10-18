@@ -189,7 +189,7 @@ extension Acceptance.Contracts {
         }
     }
 
-    @Test("cg-on-screen-order: native stacking excludes hidden, minimized and off-screen windows", contract(.cgOnScreenOrder))
+    @Test("cg-on-screen-order: native stacking excludes hidden and minimized windows and may retain off-display windows", contract(.cgOnScreenOrder))
     func cgOnScreenOrder() throws {
         let a = try fixture.open(key: "a"), b = try fixture.open(kind: "unconstrained", key: "b")
         try desktop.activate(key: "b")
@@ -210,9 +210,9 @@ extension Acceptance.Contracts {
             let frame = try fixture.command("ping").frames?["b"] ?? []
             return frame.count == 4 && frame[0] >= screen[0] + screen[2]
         }
-        try requireFinalState("CG excludes a native window with no display intersection") {
+        try requireFinalState("CG keeps native stacking with either modeled off-display membership") {
             let state = try native()
-            return !state.visible.contains(b)
+            return state.visibleIDs == [a, b] || state.visibleIDs == [a]
         }
     }
 

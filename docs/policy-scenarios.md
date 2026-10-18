@@ -96,6 +96,9 @@ example exercises both choices without changing its assertions.
 `WindowSpec.positionAcceptance` chooses exact AX position acceptance or the
 native right-edge clamp that leaves a 40-point strip (the default). App drag
 actions keep their requested position. Size constraints remain independent.
+`WindowSpec.offDisplayMembership` chooses whether a window entirely outside
+the display remains in the active Space's CG list (included by default).
+Frame intersection alone does not prove native visibility or occlusion.
 
 A new OS behavior gets a stable kebab-case ID and a one-sentence statement in
 `Assumption`, and an `assume(.caseName)` call at its simulator definition.
