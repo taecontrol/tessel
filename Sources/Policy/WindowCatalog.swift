@@ -82,11 +82,6 @@ final class WindowCatalog {
     func cancelPresentations(invalidatingFocus: Bool = true) {
         apps.keys.sorted().compactMap { apps[$0] }.forEach { $0.cancelPresentation(invalidatingFocus: invalidatingFocus) }
     }
-
-    func confirmWindow(pid: Int32, id: UInt32, completion: @escaping @MainActor @Sendable (Bool) -> Void) {
-        guard let app = apps[pid] else { completion(false); return }
-        app.confirmWindow(id: id, completion: completion)
-    }
 }
 
 private enum AXReadError: Error { case unresponsive, gone, changed }
@@ -502,13 +497,6 @@ private final class AppWindows: @unchecked Sendable {
 
     func ownsFocusIntent(_ token: UUID?) -> Bool {
         presentationLock.withLock { token == focusIntent }
-    }
-
-    func confirmWindow(id: UInt32, completion: @escaping @MainActor @Sendable (Bool) -> Void) {
-        queue.async { [self] in
-            let valid = !stopped && elementsByID[id].map { ax.windowID($0).value == id } == true
-            scheduler.main.async { completion(valid) }
-        }
     }
 
     func present(id: UInt32, area: CGRect?, focus: Bool, completion: @escaping @MainActor @Sendable () -> Void) {

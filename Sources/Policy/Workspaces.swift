@@ -341,21 +341,11 @@ final class Workspaces {
                 // the closing window. Let that bounded destruction snapshot win.
                 focusDecision?.cancel()
                 let token = transition
-                let source = focused.flatMap { id in entries[id].map { (id: id, pid: $0.pid) } }
-                let follow: @MainActor @Sendable () -> Void = { [weak self] in
+                let item = scheduler.main.after(milliseconds: 50) { [weak self] in
                     guard let self, self.transition == token, self.available(reportedFocus),
                           self.appFocus[pid] == reportedFocus,
                           self.applications.frontmostPID == pid else { return }
                     self.followExternalFocus(reportedFocus)
-                }
-                let item = scheduler.main.after(milliseconds: 50) { [weak self] in
-                    guard let self, self.transition == token else { return }
-                    guard let source else { follow(); return }
-                    // A mixed or busy read can delay destruction past this timer.
-                    // Revalidate the former focus off-main before following the promotion.
-                    self.catalog?.confirmWindow(pid: source.pid, id: source.id) { valid in
-                        if valid { follow() }
-                    }
                 }
                 focusDecision = item
             }
