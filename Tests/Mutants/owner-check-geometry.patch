@@ -1,5 +1,5 @@
 # Bug: A geometry-only redraw discards an external selection while its owner AX check is outstanding.
-# Fixing commit: 790be6034def5504b55f6ad7ec1a748d0da50f70
+# Fixed in: #24
 diff --git a/Sources/Policy/Workspaces.swift b/Sources/Policy/Workspaces.swift
 index 8f9e624..59207cf 100644
 --- a/Sources/Policy/Workspaces.swift

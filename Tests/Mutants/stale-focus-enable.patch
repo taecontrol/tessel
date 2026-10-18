@@ -1,5 +1,5 @@
 # Bug: enabling raises a stale focus over a newer native selection.
-# Fixing commit: 6b8084302d6740098bea9411f1098ddf6f647aae
+# Fixed in: #20 (branch commit 6b80843)
 diff --git a/Sources/Policy/Workspaces.swift b/Sources/Policy/Workspaces.swift
 --- a/Sources/Policy/Workspaces.swift
 +++ b/Sources/Policy/Workspaces.swift

@@ -1,5 +1,5 @@
 # Bug: A dying rail owner loses its adjacent-rail landing to native survivor activation while its PID still exists.
-# Fixing commit: d31cefac0a3fca12fd77e5249c727fc17db75bbe
+# Fixed in: #24
 diff --git a/Sources/Policy/Workspaces.swift b/Sources/Policy/Workspaces.swift
 index 8f9e624..7c6801c 100644
 --- a/Sources/Policy/Workspaces.swift

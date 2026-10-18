@@ -1,5 +1,5 @@
 # Bug: A background application's initial snapshot cancels an outstanding keyboard focus command.
-# Fixing commit: 790be6034def5504b55f6ad7ec1a748d0da50f70
+# Fixed in: #24
 diff --git a/Sources/Policy/Workspaces.swift b/Sources/Policy/Workspaces.swift
 index 8f9e624..d84be26 100644
 --- a/Sources/Policy/Workspaces.swift

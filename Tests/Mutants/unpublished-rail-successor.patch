@@ -1,5 +1,5 @@
 # Bug: An unpublished native tab replacement abandons its current rail presentation.
-# Fixing commit: 28093c6898187f8600e1a7a0fbab4a3243a725ae
+# Fixed in: #20 (branch commit 28093c6)
 diff --git a/Sources/Policy/Workspaces.swift b/Sources/Policy/Workspaces.swift
 --- a/Sources/Policy/Workspaces.swift
 +++ b/Sources/Policy/Workspaces.swift

@@ -1,5 +1,5 @@
 # Bug: A busy app drops a rail geometry write permanently instead of retrying.
-# Fixing commit: c38ae75cd00297a2a03122f7ca28893a7fa3a7f6
+# Fixed in: #20 (branch commit c38ae75)
 diff --git a/Sources/Policy/WindowCatalog.swift b/Sources/Policy/WindowCatalog.swift
 --- a/Sources/Policy/WindowCatalog.swift
 +++ b/Sources/Policy/WindowCatalog.swift

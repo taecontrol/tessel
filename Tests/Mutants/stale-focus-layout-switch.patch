@@ -1,5 +1,5 @@
 # Bug: Switching layouts raises an old focus over an unpublished native selection.
-# Fixing commit: 5549050bcbfabb2aa0d4628904639502d33d8658
+# Fixed in: #20 (branch commit 5549050)
 diff --git a/Sources/Policy/Workspaces.swift b/Sources/Policy/Workspaces.swift
 --- a/Sources/Policy/Workspaces.swift
 +++ b/Sources/Policy/Workspaces.swift

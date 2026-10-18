@@ -1,5 +1,5 @@
 # Bug: A later AXWindows read resurrects a retired native tab root as an ordinary window.
-# Fixing commit: 97f790d382a65054c44cb18c48d17ed632815b5b
+# Fixed in: #13 (branch commit 97f790d)
 # Forget retired roots' bars as well as allowing their later enumeration again.
 diff --git a/Sources/Policy/WindowCatalog.swift b/Sources/Policy/WindowCatalog.swift
 --- a/Sources/Policy/WindowCatalog.swift

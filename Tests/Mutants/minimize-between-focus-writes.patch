@@ -1,5 +1,5 @@
 # Bug: A queued AXRaise restores a window minimized while the preceding focus reply returns.
-# Fixing commit: 5fe9b3d817607e3af68a801fc0e0af22c6381f20
+# Fixed in: #24
 diff --git a/Sources/Policy/WindowCatalog.swift b/Sources/Policy/WindowCatalog.swift
 index aef436a..46ecc55 100644
 --- a/Sources/Policy/WindowCatalog.swift

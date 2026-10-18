@@ -1,5 +1,5 @@
 # Bug: A transient zero CG window ID erases a live catalog row.
-# Fixing commit: 647500d2573a0187580e8bd9493a6fd98393508a
+# Fixed in: #24
 diff --git a/Sources/Policy/WindowCatalog.swift b/Sources/Policy/WindowCatalog.swift
 --- a/Sources/Policy/WindowCatalog.swift
 +++ b/Sources/Policy/WindowCatalog.swift

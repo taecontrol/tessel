@@ -1,5 +1,5 @@
 # Bug: A queued presentation reselects a former native tab over the user's selection.
-# Fixing commit: 9783347e20c11d627204fe894ba58f6eba49f500
+# Fixed in: #13 (branch commit 9783347)
 # The native-front predicate is now shared by initial and repeated focus checks.
 diff --git a/Sources/Policy/WindowCatalog.swift b/Sources/Policy/WindowCatalog.swift
 --- a/Sources/Policy/WindowCatalog.swift
