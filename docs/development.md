@@ -309,7 +309,10 @@ an architecture decision before implementation.
 of the `workspaces` flag. Without it, the workspace experiment keeps its
 one-window layout and shortcuts. With both flags absent, tessel only observes.
 Reloading into rails forms one row per existing workspace in arrival order.
-The active workspace and focused window remain selected. Membership and rail
+The active workspace and focused window remain selected. Enabling either
+layout never raises the front app's last-read focus: that read can predate a
+newer native selection, so the first render only lays windows out and the
+next focus report selects the window that really has focus. Membership and rail
 positions are session state, with no persistence across restarts.
 
 A rail is a horizontal row of windows with individual widths, separated by the

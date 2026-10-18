@@ -92,11 +92,17 @@ final class Workspaces {
             enablingFront = NSWorkspace.shared.frontmostApplication?.processIdentifier
             initialApplications = Set(NSWorkspace.shared.runningApplications.map(\.processIdentifier))
             for id in entries.keys.sorted() { assign(id, to: 1); if railEnabled && railTile(id) { addRailTile(id, initial: true) } }
+            // The front app already shows its focused window. Its last read
+            // can predate a newer native selection; raising it would take
+            // focus back, so render without a focus request. A fresh report
+            // then selects whichever window really has focus.
+            var nativeFocus: UInt32?
             if let front = enablingFront, let current = appFocus[front], available(current) {
                 rememberInitialFocus(current)
+                nativeFocus = current
             }
             installKeys()
-            if !entries.isEmpty { render(focusing: focused ?? preferred(in: 1), relayout: true) }
+            if !entries.isEmpty { render(focusing: focused ?? preferred(in: 1), relayout: true, takeFocus: nativeFocus == nil) }
         } else {
             if old.keys != next.keys { installKeys() }
             if old.gaps != next.gaps {
