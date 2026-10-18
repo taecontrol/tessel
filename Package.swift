@@ -9,6 +9,6 @@ let package = Package(
     products: [.executable(name: "tessel-build", targets: ["Build"])],
     targets: [
         .executableTarget(name: "Build", path: "Tools/Build"),
-        .testTarget(name: "Acceptance", path: "Tests/Acceptance", exclude: ["resource-budget.json", "switch-budget.json"]),
+        .testTarget(name: "Acceptance", path: "Tests/Acceptance", exclude: ["resource-budget.json", "switch-budget.json", "rails-budget.json"]),
     ]
 )

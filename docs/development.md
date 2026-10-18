@@ -355,7 +355,8 @@ size. Run `scripts/verify FunctionalRails`; resource E29 is included in
 `scripts/verify --resources` with the unchanged ADR 0003 limits. Rails E28
 records 20 completed scrolls and elevator trips in `.work/rails-calibration.json`;
 `Tests/Acceptance/rails-budget.json` retains the authorized xcode-27 run and
-uses three times its maximum, capped at 200 ms. Timing starts at the real key
+uses three times its maximum, capped at 200 ms. The delivery calibration
+recorded a 99.779542 ms maximum in run 39084887323, giving the 200 ms cap. Timing starts at the real key
 post and ends after independent AX position, size, focus and CG visibility
 checks. Capture the app's own status button, without desktop content, with:
 

@@ -1052,12 +1052,10 @@ extension Acceptance {
             try FileManager.default.createDirectory(at:calibrationFile.deletingLastPathComponent(),withIntermediateDirectories:true)
             try JSONSerialization.data(withJSONObject:result,options:[.prettyPrinted,.sortedKeys]).write(to:calibrationFile)
             let budgetFile = root.appending(path:"Tests/Acceptance/rails-budget.json")
-            if FileManager.default.fileExists(atPath:budgetFile.path) {
-                struct Budget: Decodable { let measurements:[UInt64]; let nanoseconds:UInt64; let sourceRun:String }
-                let budget = try JSONDecoder().decode(Budget.self,from:Data(contentsOf:budgetFile))
-                #expect(budget.measurements.count == 20 && UInt64(budget.sourceRun) != nil && budget.nanoseconds == min(200_000_000,(budget.measurements.max() ?? 0)*3))
-                #expect(samples.allSatisfy { $0 <= budget.nanoseconds })
-            } else { print("Rails E28: initial calibration pending the authorized xcode-27 run; 200 ms cap verified") }
+            struct Budget: Decodable { let measurements:[UInt64]; let nanoseconds:UInt64; let sourceRun:String }
+            let budget = try JSONDecoder().decode(Budget.self,from:Data(contentsOf:budgetFile))
+            #expect(budget.measurements.count == 20 && budget.measurements.allSatisfy { $0 > 0 && $0 <= 200_000_000 } && UInt64(budget.sourceRun) != nil && budget.nanoseconds == min(200_000_000,(budget.measurements.max() ?? 0)*3))
+            #expect(samples.allSatisfy { $0 <= budget.nanoseconds })
         }
         @Test(.enabled(if:ProcessInfo.processInfo.environment["TESSEL_CAPTURE_WORKSPACES"] == "1","local E26 visual capture"))
         func captureRailsStatusItem() throws {
