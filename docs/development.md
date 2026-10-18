@@ -138,6 +138,21 @@ still fails, and a stall that prevents any sample before the deadline still
 fails. Switch and rail calibrations measure from the key post to the sample
 time that met the check.
 
+`scripts/verify` also makes sure the test process is scheduled like the apps
+it observes. A launchd job whose `ProcessType` is not `Interactive`, as
+`Standard` or an unset one, clamps its whole process tree to utility QoS: `ps -o pri=`
+reports 20 instead of 31, and `Background` or `Adaptive` report 4. No child
+can lift a clamp, not even with `taskpolicy -a` or spawn attributes. Under a
+`Standard` job a thread sleeping 10 ms woke 40 ms or more late about 13 times
+a second, the rate the xcode-27 test process showed in issue #21, while the
+apps it launched with `open` were unaffected. When its priority is below 31,
+`scripts/verify` reruns itself as an `Interactive` job in the user's GUI
+session (`launchctl bootstrap gui/<uid>`), forwarding the environment, output
+and exit status, and prints the priority both times. Interrupting it boots
+the job out. Locally, a functional run under `taskpolicy -c utility` without
+the relaunch missed 10 waits; four relaunched runs missed 1, 5, 0 and 1, and
+two unclamped runs 0 and 2.
+
 For minimize and restore, the 500 ms observation deadline begins at AppKit's
 completion notification, after the Dock animation. macOS sends the AX event
 at that point; the animation itself can take longer than 500 ms. The fixture
