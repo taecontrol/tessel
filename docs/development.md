@@ -114,11 +114,13 @@ command takes about 245 seconds locally; `xcode-27` runners have taken 1.2 to
 1.8 times as long, so the whole job needs about 500 to 710 seconds. The
 workspace switch timing artifact is still uploaded.
 
-The independent observer gives each AX read 100 ms. A timed-out read means the
-app did not answer, so it must not count as an absent or unfocused window. The
-system-wide focused-application read is answered by the frontmost app, and a
-20 ms limit missed busy fixtures even on an idle Mac. Deadlines are unchanged:
-a reading that arrives after its deadline still fails.
+A full observation, used by setup and one-shot reads, gives each AX read
+100 ms. A timed-out read means the app did not answer, so it must not count as
+an absent or unfocused window. The system-wide focused-application read is
+answered by the frontmost app, and a 20 ms limit missed busy fixtures even on
+an idle Mac. Focused-only observations, which timed checks poll, keep 20 ms so
+a busy app is asked again rather than consuming the deadline. Deadlines are
+unchanged: a reading that arrives after its deadline still fails.
 
 For minimize and restore, the 500 ms observation deadline begins at AppKit's
 completion notification, after the Dock animation. macOS sends the AX event

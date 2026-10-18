@@ -448,7 +448,11 @@ final class Fixture: NSObject, NSApplicationDelegate {
 
     /// An independent AX/CG client; all returned window data belongs to fixtures.
     func observe(_ pids: [pid_t], inspectFinder: Bool, focusedOnly: Bool, expectedPID: pid_t? = nil) -> [String: Any] {
-        let front = FixtureProbe.frontmostPID()
+        // Timed checks poll focused-only observations against a deadline, so a
+        // busy app is asked again rather than allowed to consume that deadline.
+        // Setup and one-shot reads wait for a briefly busy app to answer.
+        let timeout: Float = focusedOnly ? 0.02 : FixtureProbe.observationTimeout
+        let front = FixtureProbe.frontmostPID(timeout: timeout)
         let listed = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
         let visible = Set(listed.compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
         let visibleIDs = listed.compactMap { item -> UInt32? in
@@ -464,18 +468,18 @@ final class Fixture: NSObject, NSApplicationDelegate {
             // Never block a destination check on the now-hidden source's AX.
             if focusedOnly && (front != pid || expectedPID != nil && expectedPID != pid) { continue }
             let application = AXUIElementCreateApplication(pid)
-            AXUIElementSetMessagingTimeout(application, FixtureProbe.observationTimeout)
+            AXUIElementSetMessagingTimeout(application, timeout)
             var focusedID: UInt32 = 0
             var focusedElement: AXUIElement?
             if let focused = FixtureProbe.value(application, kAXFocusedWindowAttribute), CFGetTypeID(focused) == AXUIElementGetTypeID() {
                 let element = focused as! AXUIElement
-                AXUIElementSetMessagingTimeout(element, FixtureProbe.observationTimeout)
+                AXUIElementSetMessagingTimeout(element, timeout)
                 focusedElement = element
                 _ = fixtureWindowID(element, &focusedID)
             }
             let focusedSheet = focusedElement.map { FixtureProbe.value($0, kAXRoleAttribute) as? String == kAXSheetRole } ?? false
             func describe(_ window: AXUIElement, parent: UInt32? = nil, knownID: UInt32? = nil) {
-                AXUIElementSetMessagingTimeout(window, FixtureProbe.observationTimeout)
+                AXUIElementSetMessagingTimeout(window, timeout)
                 var id: CGWindowID = knownID ?? 0
                 if knownID == nil { _ = fixtureWindowID(window, &id) }
                 guard id != 0 else { return }
@@ -515,7 +519,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 if focusedSheet, let parent = FixtureProbe.value(focusedElement, kAXParentAttribute),
                    CFGetTypeID(parent) == AXUIElementGetTypeID() {
                     var id: UInt32 = 0
-                    AXUIElementSetMessagingTimeout(parent as! AXUIElement, FixtureProbe.observationTimeout)
+                    AXUIElementSetMessagingTimeout(parent as! AXUIElement, timeout)
                     _ = fixtureWindowID(parent as! AXUIElement, &id)
                     if id != 0 {
                         parentID = id
@@ -531,7 +535,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
         var finderHasNoOrdinaryWindows: Bool?
         if inspectFinder, let finder = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first {
             let application = AXUIElementCreateApplication(finder.processIdentifier)
-            AXUIElementSetMessagingTimeout(application, FixtureProbe.observationTimeout)
+            AXUIElementSetMessagingTimeout(application, timeout)
             if let windows = FixtureProbe.value(application, kAXWindowsAttribute) as? [AXUIElement] {
                 finderHasNoOrdinaryWindows = true
                 for window in windows {
@@ -642,9 +646,9 @@ enum FixtureProbe {
     /// 20 ms; a stopped app still costs one bounded wait per read.
     static let observationTimeout: Float = 0.1
 
-    static func frontmostPID() -> pid_t? {
+    static func frontmostPID(timeout: Float = observationTimeout) -> pid_t? {
         let system = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(system, FixtureProbe.observationTimeout)
+        AXUIElementSetMessagingTimeout(system, timeout)
         guard let application = value(system, kAXFocusedApplicationAttribute), CFGetTypeID(application) == AXUIElementGetTypeID() else { return nil }
         var pid: pid_t = 0
         guard AXUIElementGetPid(application as! AXUIElement, &pid) == .success else { return nil }
