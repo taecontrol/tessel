@@ -294,9 +294,7 @@ final class Harness {
     }
 
     func invoke(_ arguments: [String]) throws -> ProcessResult {
-        let start = monotonicSeconds() // CIDIAG18
-        defer { CIDiag18.log(["cli": arguments.first ?? "", "start": start, "ms": (monotonicSeconds() - start) * 1000]) }
-        return try run([cli.path] + arguments, environment: environment, timeout: 1.2)
+        try run([cli.path] + arguments, environment: environment, timeout: 1.2)
     }
 
     /// The app's only Unix socket: the CLI endpoint.
@@ -320,10 +318,7 @@ final class Harness {
         guard let rows = try? JSONDecoder().decode([Row].self, from: result.outputData) else {
             throw HarnessError("window listing is malformed (content withheld)")
         }
-        let fixtureRows = rows.filter { $0.bundleId == fixtureID }
-        CIDiag18.log(["rows": fixtureRows.map { ["id": $0.id, "state": $0.state, "tabs": $0.tabs, "workspace": $0.workspace ?? 0,
-            "visible": $0.visible ?? false, "rail": $0.rail ?? 0, "slot": $0.slot ?? 0] }]) // CIDIAG18
-        return fixtureRows
+        return rows.filter { $0.bundleId == fixtureID }
     }
 
     func row(_ id: UInt32) throws -> Row? {

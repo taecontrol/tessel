@@ -15,32 +15,6 @@ final class NewTabWindow: NSWindow {
     override func newWindowForTab(_ sender: Any?) {}
 }
 
-// TEMPORARY CI DIAGNOSTIC (CIDIAG18): IDs, AX error codes and timings only.
-enum CIDiag18F {
-    static let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-        .deletingLastPathComponent().appending(path: ".work/ci/diag")
-    static var now: Double { Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1e9 }
-    static func log(_ name: String, _ object: [String: Any]) {
-        var object = object
-        object["t"] = now
-        guard let data = try? JSONSerialization.data(withJSONObject: object) else { return }
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let url = directory.appending(path: "\(name)-\(getpid()).jsonl")
-        let line = data + Data("\n".utf8)
-        if let handle = try? FileHandle(forWritingTo: url) { handle.seekToEndOfFile(); handle.write(line); try? handle.close() }
-        else { try? line.write(to: url) }
-    }
-    /// Categories only: never record another app's identity.
-    static func category(_ pid: pid_t?) -> String {
-        guard let pid else { return "none" }
-        let id = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? ""
-        if id == "com.taecontrol.tessel.fixture" { return "fixture" }
-        if id.hasPrefix("com.taecontrol.tessel") { return "tessel" }
-        if id == "com.apple.finder" { return "finder" }
-        return "other"
-    }
-}
-
 @MainActor
 final class FixtureApplication: NSApplication {
     var windowList: [NSWindow]?
@@ -74,38 +48,6 @@ final class Fixture: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.current = self
-        // CIDIAG18: report main-thread stalls of 40 ms or more in every fixture and the observer.
-        let diagRole = CommandLine.arguments.contains(where: { $0.hasSuffix("f999.sock") }) ? "observer" : "fixture"
-        nonisolated(unsafe) var diagLast = CIDiag18F.now
-        Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { _ in
-            let now = CIDiag18F.now
-            if now - diagLast > 0.04 { CIDiag18F.log("stall", ["process": diagRole, "ms": (now - diagLast) * 1000]) }
-            diagLast = now
-        }
-        if diagRole == "fixture" { // CIDIAG18
-            let height = NSScreen.screens.first?.frame.height ?? 0
-            for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification, NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification] {
-                NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { note in
-                    nonisolated(unsafe) let object = note.object
-                    MainActor.assumeIsolated {
-                        guard let window = object as? NSWindow else { return }
-                        let f = window.frame
-                        CIDiag18F.log("fixture", ["event": name.rawValue, "id": window.windowNumber, "frame": [f.minX, height - f.maxY, f.width, f.height]])
-                    }
-                }
-            }
-            for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification, NSWindow.didBecomeMainNotification] {
-                NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { note in
-                    nonisolated(unsafe) let object = note.object
-                    MainActor.assumeIsolated { CIDiag18F.log("fixture", ["event": name.rawValue, "id": (object as? NSWindow)?.windowNumber ?? 0]) }
-                }
-            }
-            for name in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification, NSApplication.didHideNotification, NSApplication.didUnhideNotification] {
-                NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
-                    MainActor.assumeIsolated { CIDiag18F.log("fixture", ["event": name.rawValue, "key": NSApp.keyWindow?.windowNumber ?? 0]) }
-                }
-            }
-        }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             MainActor.assumeIsolated { self?.keyCount += 1 }
             return event
@@ -510,10 +452,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
         // busy app is asked again rather than allowed to consume that deadline.
         // Setup and one-shot reads wait for a briefly busy app to answer.
         let timeout: Float = focusedOnly ? 0.02 : FixtureProbe.observationTimeout
-        let diagStart = CIDiag18F.now // CIDIAG18
-        var diagErrors: [[String: Any]] = []
         let front = FixtureProbe.frontmostPID(timeout: timeout)
-        let diagFrontError = FixtureProbe.lastFrontError, diagFrontMS = (CIDiag18F.now - diagStart) * 1000
         let listed = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
         let visible = Set(listed.compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
         let visibleIDs = listed.compactMap { item -> UInt32? in
@@ -532,10 +471,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
             AXUIElementSetMessagingTimeout(application, timeout)
             var focusedID: UInt32 = 0
             var focusedElement: AXUIElement?
-            var diagFocused: CFTypeRef? // CIDIAG18: same single read, keeping its error code
-            let diagFocusedError = AXUIElementCopyAttributeValue(application, kAXFocusedWindowAttribute as CFString, &diagFocused)
-            if diagFocusedError != .success { diagErrors.append(["pid": pid, "focusedWindow": Int(diagFocusedError.rawValue)]) }
-            if let focused = diagFocused, CFGetTypeID(focused) == AXUIElementGetTypeID() {
+            if let focused = FixtureProbe.value(application, kAXFocusedWindowAttribute), CFGetTypeID(focused) == AXUIElementGetTypeID() {
                 let element = focused as! AXUIElement
                 AXUIElementSetMessagingTimeout(element, timeout)
                 focusedElement = element
@@ -552,11 +488,8 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 let attributes = [kAXPositionAttribute, kAXSizeAttribute, kAXMainAttribute, "AXFullScreen"]
                     + (includeChildren ? [kAXChildrenAttribute] : [])
                 var values: CFArray?
-                let diagCode = AXUIElementCopyMultipleAttributeValues(window, attributes as CFArray, [], &values) // CIDIAG18
-                guard diagCode == .success,
-                      let fields = values as? [AnyObject], fields.count == attributes.count else {
-                    diagErrors.append(["id": id, "window": Int(diagCode.rawValue)]); return
-                }
+                guard AXUIElementCopyMultipleAttributeValues(window, attributes as CFArray, [], &values) == .success,
+                      let fields = values as? [AnyObject], fields.count == attributes.count else { return }
                 var position = CGPoint.zero, size = CGSize.zero
                 if CFGetTypeID(fields[0]) == AXValueGetTypeID() {
                     _ = AXValueGetValue(fields[0] as! AXValue, .cgPoint, &position)
@@ -577,10 +510,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 }
             }
             if !focusedOnly || focusedSheet {
-                var diagWindows: CFTypeRef? // CIDIAG18: same single read, keeping its error code
-                let diagCode = AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &diagWindows)
-                if diagCode != .success { diagErrors.append(["pid": pid, "windows": Int(diagCode.rawValue)]) }
-                for window in diagWindows as? [AXUIElement] ?? [] { describe(window) }
+                for window in FixtureProbe.value(application, kAXWindowsAttribute) as? [AXUIElement] ?? [] { describe(window) }
             }
             // A Space move can temporarily omit even the focused AX window.
             // Read its live handle directly, including a focused sheet's parent.
@@ -626,15 +556,6 @@ final class Fixture: NSObject, NSApplicationDelegate {
             }
         }
         let frontmostFixture = front.map { pids.contains($0) } ?? false
-        CIDiag18F.log("observer", ["start": diagStart, "focusedOnly": focusedOnly, "finder": inspectFinder,
-            "expectedPID": expectedPID.map { Int($0) } ?? 0, "front": front.map { pids.contains($0) ? Int($0) : 0 } ?? -1,
-            "frontCategory": CIDiag18F.category(front), "frontError": Int(diagFrontError), "frontMS": diagFrontMS,
-            "focused": result.compactMap { $0["focused"] as? Bool == true ? $0["id"] : nil },
-            "main": result.compactMap { $0["main"] as? Bool == true ? $0["id"] : nil },
-            "windows": result.map { ["id": $0["id"] ?? 0, "frame": $0["frame"] ?? [], "visible": $0["visible"] ?? false,
-                                      "main": $0["main"] ?? false, "focused": $0["focused"] ?? false] },
-            "visibleIDs": visibleIDs, "area": [area.minX, screen.frame.height - area.maxY, area.width, area.height],
-            "errors": diagErrors, "desktop": desktop, "ms": (CIDiag18F.now - diagStart) * 1000])
         // Cached activation metadata serves setup, outside the switch deadline.
         let workspaceFront = focusedOnly ? nil : NSWorkspace.shared.frontmostApplication?.processIdentifier
         return ["windows": result, "visibleIDs": visibleIDs, "frontmostFixture": frontmostFixture,
@@ -725,13 +646,10 @@ enum FixtureProbe {
     /// 20 ms; a stopped app still costs one bounded wait per read.
     static let observationTimeout: Float = 0.1
 
-    nonisolated(unsafe) static var lastFrontError: Int32 = 0 // CIDIAG18
     static func frontmostPID(timeout: Float = observationTimeout) -> pid_t? {
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, timeout)
-        var diagValue: CFTypeRef? // CIDIAG18: same single read, keeping its error code
-        lastFrontError = AXUIElementCopyAttributeValue(system, kAXFocusedApplicationAttribute as CFString, &diagValue).rawValue
-        guard let application = diagValue, CFGetTypeID(application) == AXUIElementGetTypeID() else { return nil }
+        guard let application = value(system, kAXFocusedApplicationAttribute), CFGetTypeID(application) == AXUIElementGetTypeID() else { return nil }
         var pid: pid_t = 0
         guard AXUIElementGetPid(application as! AXUIElement, &pid) == .success else { return nil }
         return pid
