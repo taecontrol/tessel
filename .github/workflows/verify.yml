@@ -32,6 +32,9 @@ jobs:
         run: scripts/verify --permission
       - name: Functional acceptance suite
         run: scripts/verify --functional
+      - name: Real macOS assumption contracts
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: scripts/verify --contracts
       - name: End-to-end journeys
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: scripts/verify --journeys

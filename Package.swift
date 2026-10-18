@@ -24,6 +24,6 @@ let package = Package(
         .testTarget(name: "PolicyTests", dependencies: ["Policy", "Ports", "Simulator", "Assumptions"], path: "Tests/PolicyTests"),
     ]
     + (Context.environment["TESSEL_ACCEPTANCE"] == "1" ? [
-        .testTarget(name: "Acceptance", path: "Tests/Acceptance", exclude: ["resource-budget.json", "switch-budget.json", "rails-budget.json"]),
+        .testTarget(name: "Acceptance", dependencies: ["Assumptions"], path: "Tests/Acceptance", exclude: ["resource-budget.json", "switch-budget.json", "rails-budget.json"]),
     ] : [])
 )

@@ -65,6 +65,10 @@ struct FixtureReply: Decodable {
     let menuContains: Bool?
     let ready: Bool?
     let active: Bool?
+    let contract: NativeContractReply?
+    let frames: [String: [Double]]?
+    let axWindowOrder: [UInt32]?
+    let transitionCount: Int?
 }
 
 struct Observation: Decodable {
@@ -113,7 +117,7 @@ final class FixtureSession {
     private let clientPath: String
     private let socket: Int32
 
-    init(directory: URL, number: Int, swiftUI: Bool = false) throws {
+    init(directory: URL, number: Int, swiftUI: Bool = false, prohibited: Bool = false) throws {
         path = directory.appending(path: "f\(number).sock").path
         clientPath = directory.appending(path: "c\(number).sock").path
         socket = Darwin.socket(AF_UNIX, SOCK_DGRAM, 0)
@@ -131,7 +135,7 @@ final class FixtureSession {
         guard bound == 0 else { throw HarnessError("cannot bind the fixture client socket: errno \(errno)") }
         setTimeout(socket, seconds: margin)
         try run(["open", "-n"] + (swiftUI ? [] : ["-g"]) + ["--stdout", "/dev/null", "--stderr", "/dev/null", fixtureBundle.path, "--args", "--socket", path]
-                + (swiftUI ? ["--swiftui"] : []), check: true)
+                + (swiftUI ? ["--swiftui"] : []) + (prohibited ? ["--prohibited"] : []), timeout: margin, check: true)
         let path = path
         guard finalState({ FileManager.default.fileExists(atPath: path) }) else {
             throw HarnessError("fixture did not launch")
@@ -157,6 +161,7 @@ final class FixtureSession {
     private func request(_ action: String, _ arguments: [String: Any]) throws -> FixtureReply {
         var request = arguments
         request["action"] = action
+        request["transitionMargin"] = margin
         let data = try JSONSerialization.data(withJSONObject: request)
         var address = try unixAddress(path)
         let sent = data.withUnsafeBytes { bytes in
@@ -217,7 +222,7 @@ final class Harness {
     private var cleanups: [() -> Void] = []
     private var contracts: URL?
 
-    func start() throws {
+    func start(launchApp: Bool = true) throws {
         let required = [cli, fixtureExecutable, buildTool]
         guard required.allSatisfy({ FileManager.default.fileExists(atPath: $0.path) }) else {
             throw HarnessError("Run scripts/build first; the build tool and the signed app and fixture bundles are required")
@@ -250,7 +255,7 @@ final class Harness {
         cleanups.append { [unowned self] in fixture.stop() }
         cleanups.append { [unowned self] in stopApp() }
         cleanups.append { [unowned self] in otherFixtures.forEach { $0.stop() } }
-        try startApp()
+        if launchApp { try startApp() }
     }
 
     func shutdown() {
@@ -386,6 +391,8 @@ final class Harness {
 
 /// Starts the harness once around a suite and always cleans up its processes and data.
 struct AppSession: SuiteTrait, TestScoping {
+    var launchesApp = true
+
     func provideScope(for test: Test, testCase: Test.Case?, performing function: @Sendable () async throws -> Void) async throws {
         let harness = await MainActor.run {
             let harness = Harness()
@@ -393,7 +400,7 @@ struct AppSession: SuiteTrait, TestScoping {
             return harness
         }
         do {
-            try await MainActor.run { try harness.start() }
+            try await MainActor.run { try harness.start(launchApp: launchesApp) }
             try await function()
         } catch {
             await MainActor.run { harness.shutdown() }
