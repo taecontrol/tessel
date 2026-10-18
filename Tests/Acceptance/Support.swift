@@ -30,8 +30,9 @@ func monotonicSeconds() -> Double {
 
 /// When the inputs of one predicate evaluation were produced (issue #21).
 /// An observation counts at the time the independent observer finished taking
-/// it; a CLI result, fixture reply, or other subprocess counts when it was
-/// received. The xcode-27 runner can deschedule this test process for hundreds
+/// it, and a CLI answer at its `answeredAt`, when tessel produced it. A fixture
+/// reply, a CLI answer without that field, or another subprocess counts when it
+/// was received. The xcode-27 runner can deschedule this test process for hundreds
 /// of milliseconds after a sample was taken; that delay is not tessel's latency.
 enum SampleClock {
     nonisolated(unsafe) private static var evaluations: [Double?] = []
@@ -102,7 +103,8 @@ private final class Collected: @unchecked Sendable {
 
 /// Runs a command, killing it at the timeout. A bare command name is found on PATH.
 @discardableResult
-func run(_ command: [String], environment: [String: String]? = nil, timeout: Double = 10, check: Bool = false) throws -> ProcessResult {
+func run(_ command: [String], environment: [String: String]? = nil, timeout: Double = 10, check: Bool = false,
+         recordsReceipt: Bool = true) throws -> ProcessResult {
     let process = Process()
     if command[0].hasPrefix("/") {
         process.executableURL = URL(fileURLWithPath: command[0])
@@ -131,7 +133,7 @@ func run(_ command: [String], environment: [String: String]? = nil, timeout: Dou
         throw ProcessTimeout(description: "\(URL(fileURLWithPath: command[0]).lastPathComponent) timed out after \(timeout) seconds")
     }
     _ = reading.wait(timeout: .now() + 1)
-    SampleClock.record(monotonicSeconds())
+    if recordsReceipt { SampleClock.record(monotonicSeconds()) }
     let result = ProcessResult(status: process.terminationStatus, outputData: collected[0], errorData: collected[1])
     if check, result.status != 0 {
         throw HarnessError("\(URL(fileURLWithPath: command[0]).lastPathComponent) exited with status \(result.status)")

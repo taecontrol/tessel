@@ -297,7 +297,12 @@ final class Harness {
     }
 
     func invoke(_ arguments: [String]) throws -> ProcessResult {
-        try run([cli.path] + arguments, environment: environment, timeout: 1.2)
+        let result = try run([cli.path] + arguments, environment: environment, timeout: 1.2, recordsReceipt: false)
+        // Judge a JSON answer by when tessel produced it; anything else by receipt.
+        let json = try? JSONSerialization.jsonObject(with: result.outputData)
+        let answer = (json as? [String: Any]) ?? (json as? [[String: Any]])?.first
+        SampleClock.record((answer?["answeredAt"] as? NSNumber)?.doubleValue ?? monotonicSeconds())
+        return result
     }
 
     /// The app's only Unix socket: the CLI endpoint.

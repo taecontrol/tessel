@@ -29,6 +29,10 @@ The read-only CLI accepts `windows [--json]` and `status [--json]`.
 You can symlink this bundled CLI into a directory on your `PATH`.
 With a custom `XDG_CONFIG_HOME`, pass the same value to `open --env` and the CLI.
 The bundle ID and config path select the instance the CLI observes.
+Every JSON answer carries `answeredAt`: raw monotonic seconds
+(`CLOCK_MONOTONIC_RAW`, the clock `clock_gettime_nsec_np` reads) when tessel
+read the state it reports. `status --json` has it at the top level, and each
+`windows --json` record repeats it. Text output is unchanged.
 
 Development uses `com.taecontrol.tessel.dev`; `scripts/build --variant daily`
 uses `com.taecontrol.tessel`. Keep the signing identity stable across rebuilds.
@@ -123,8 +127,9 @@ a busy app is asked again rather than consuming the deadline.
 
 Timed checks are judged by when their inputs were produced, not by when this
 test process received them (issue #21). Each observation carries the raw
-monotonic time at which the observer finished it. A CLI result, fixture reply
-or other subprocess counts at its receipt. An evaluation counts at its latest
+monotonic time at which the observer finished it, and a JSON CLI answer counts
+at its `answeredAt`. A fixture reply, an answer without that field, an empty
+window list, or another subprocess counts at its receipt. An evaluation counts at its latest
 input, and one without recorded inputs counts when it returns. On xcode-27 the
 test process alone was descheduled for up to 709 ms. In run 39090280471, a
 switch the observer saw complete in about 14 ms was received 242 ms late.
@@ -235,7 +240,8 @@ workspace membership is persisted. See [ADR 0002](adr/0002-hide-inactive-windows
 for the private system dependency and its tradeoffs.
 
 Window records contain an ID, app name, bundle ID, state, reason, native tab
-count, `workspace` (1…10 or null), and `visible` (CG on-screen membership).
+count, `workspace` (1…10 or null), `visible` (CG on-screen membership), and
+`answeredAt`.
 `state` includes `fullscreen`. Titles are never queried. `status --json` adds
 `workspaces.enabled`, `reason`, `active`, `gaps`, and the effective `keys`.
 With the experiment disabled, tessel observes without managing ordinary windows.

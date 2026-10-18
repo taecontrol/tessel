@@ -84,13 +84,22 @@ final class SnapshotStore: @unchecked Sendable {
     func reply(to command: String) -> Reply {
         lock.withLock {
             guard ready else { return Reply(error: "tessel is starting") }
+            // The state below is read under this lock at this instant.
+            let answeredAt = Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1e9
             switch command {
-            case "status": return Reply(status: status)
+            case "status":
+                var status = status
+                status.answeredAt = answeredAt
+                return Reply(status: status)
             case "windows":
                 guard status.permission == "granted" else {
                     return Reply(error: "Accessibility permission needed. Open tessel's menu and System Settings to grant access.")
                 }
-                return Reply(windows: windows.values.flatMap { $0 }.sorted { $0.id < $1.id })
+                return Reply(windows: windows.values.flatMap { $0 }.sorted { $0.id < $1.id }.map {
+                    var record = $0
+                    record.answeredAt = answeredAt
+                    return record
+                })
             default: return Reply(error: "Unknown read-only command. Use windows or status.")
             }
         }
