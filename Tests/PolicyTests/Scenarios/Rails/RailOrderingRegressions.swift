@@ -15,10 +15,13 @@ import Testing
                 tessel.press(layout == .rails ? "focus right" : "focus next")
                 let held = mac.pause(after: .call("AccessibilityPort.set AXMain=true window \(id) \(app.alias)"))
                 if case .paused = held {} else { s.expect("the main write is outstanding: \(held)", false) }
-                mac.scheduler.main.after(milliseconds: 1) {
-                    s.expect("the main write selected the window before minimization", mac.focusedWindow == id)
-                    app.minimize(id, selecting: 1)
-                }
+                // Pause after AXMain takes effect, before its reply can return.
+                // A timer could instead run during the later minimize recheck.
+                mac.scheduler.resume()
+                let returning = mac.pause(after: .call("MainLane.async native event"))
+                if case .paused = returning {} else { s.expect("the main write is returning: \(returning)", false) }
+                s.expect("the main write selected the window before minimization", mac.focusedWindow == id)
+                app.minimize(id, selecting: 1)
                 s.settle()
                 s.expect("native minimize remains in force", tessel.windows.first { $0.id == id }?.state == .minimized && !mac.isVisible(id))
                 s.expect("the minimized window keeps its workspace", tessel.windows.first { $0.id == id }?.workspace == 1)

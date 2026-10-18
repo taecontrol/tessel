@@ -28,13 +28,17 @@ simulator just to kill a candidate. Exploratory mutation plans stay local.
 | [dying-rail-owner](dying-rail-owner.patch) | #24 | #17 E11: a dying owner keeps the adjacent-rail landing |
 | [owner-check-geometry](owner-check-geometry.patch) | #24 | #17 E16: a redraw keeps an external selection awaiting its owner check |
 | [background-discovery-focus](background-discovery-focus.patch) | #24 | #2 E2 / #17 E2: background discovery keeps a pending keyboard focus |
-| [minimize-between-focus-writes](minimize-between-focus-writes.patch) | #24 | #2 E25 / #17 E17: a raise never undoes a minimize between focus writes |
+| [minimize-between-focus-writes](minimize-between-focus-writes.patch) | #24 | #2 E25 / #17 E17: a raise preserves a minimize completed during AXMain |
 
 The two #22 paths are separate mutants so one cannot mask the other. The
 zero-ID mutant also removes the closed-handle revalidation: on macOS 27 a
 closed handle's window-ID lookup reports `illegalArgument` while its
 attributes report `invalidUIElement`; #1 E8 separately rejects retaining a
 closed row.
+
+The focus-write mutant removes only the AXMinimized recheck before each
+AXRaise, including the deferred rail activation retry. Native-front checks
+remain before both AXMain and AXRaise.
 
 ## Architecture guards
 
