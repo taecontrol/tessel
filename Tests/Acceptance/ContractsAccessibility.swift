@@ -189,6 +189,36 @@ extension Acceptance.Contracts {
         try #require(try native("events").events?.contains { $0.name == "AXWindowMoved" } == false)
     }
 
+    @Test("ax-notifications: moves, sizes and fullscreen expose their native geometry notifications", contract(.axNotifications))
+    func geometryAndFullscreenNotifications() throws {
+        for kind in ["standard", "web"] {
+            let id = try fixture.open(kind: kind, key: kind)
+            try desktop.activate(key: kind)
+            let state = try window(id)
+            try watch(["AXWindowMoved", "AXWindowResized", "AXLayoutChanged", "AXValueChanged"], id: id)
+            try native("clearEvents")
+            try #require(try write(id, "AXPosition", [state.frame[0] + 20, state.frame[1] + 20]) == 0)
+            try #require(try write(id, "AXSize", [state.frame[2] + 30, state.frame[3] + 30]) == 0)
+            try expectEvent("AXWindowMoved", id: id)
+            try expectEvent("AXWindowResized", id: id)
+            sleep(seconds: 0.1)
+            let geometry = try #require(try native("events").events)
+            try #require(geometry.allSatisfy { ["AXWindowMoved", "AXWindowResized"].contains($0.name) }, "geometry echoes must remain distinct from layout/value state notifications")
+            try native("clearEvents")
+            try fixture.command("fullscreen", ["key": kind])
+            var entered = true
+            defer { if entered { _ = try? fixture.command("fullscreen", ["key": kind]) } }
+            try requireFinalState("the notification fixture enters native fullscreen") {
+                try native().focused?.fullscreen == true
+            }
+            sleep(seconds: 0.1)
+            let fullscreen = try #require(try native("events").events)
+            try #require(fullscreen.contains { $0.name == "AXWindowResized" && $0.id == id }, "fullscreen must reach the resize-state revalidation path")
+            try fixture.command("fullscreen", ["key": kind])
+            entered = false
+        }
+    }
+
     @Test("ax-messaging-timeout: timeout configuration is local and hung reads report cannotComplete", contract(.axMessagingTimeout))
     func axMessagingTimeout() throws {
         let id = try fixture.open()

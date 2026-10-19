@@ -172,7 +172,7 @@ private final class AppWindows: @unchecked Sendable {
     private var observer: (any AXObservation)?
     private var windowSubscriptions = ElementSubscriptions<AXElement, AXNotification>([
         .destroyed, .minimized, .restored,
-        .resized, .layoutChanged, .valueChanged
+        .moved, .resized, .layoutChanged, .valueChanged
     ])
     private var appSubscriptions = ElementSubscriptions<AXElement, AXNotification>([
         .windowCreated, .focusedWindowChanged,
@@ -261,8 +261,20 @@ private final class AppWindows: @unchecked Sendable {
                 publishSnapshot()
                 return
             }
-            if motionActive && [.resized, .layoutChanged, .valueChanged].contains(notification) {
+            if motionActive && [.moved, .resized, .layoutChanged, .valueChanged].contains(notification) {
                 deferredMotionRead = true
+                // Native fullscreen announces a resize, just like an ordinary
+                // AXSize write. Revalidate state on that event, off main and
+                // outside frame writes, before deferring the full enumeration.
+                if notification != .moved,
+                   let index = facts.firstIndex(where: { elementsByID[$0.id] == element }) {
+                    ax.setMessagingTimeout(element, seconds: 0.05)
+                    motionTimeouts.remove(facts[index].id)
+                    if let fullscreen = try? value(element, .fullscreen)?.bool {
+                        facts[index].fullscreen = fullscreen
+                        if fullscreen { publishSnapshot() }
+                    }
+                }
                 return
             }
             handleChange(notification, element: element)

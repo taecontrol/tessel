@@ -153,8 +153,13 @@ import Testing
             let f = CarouselFixture(s), b = f.ids[1]
             f.press("alt-l"); f.mac.clearMotionHistory()
             f.tessel.pressKey("alt-l")
-            s.after(milliseconds: 30, "the selected app enters native fullscreen") { f.app.enterFullscreen(b) }
+            var fullscreenWrites = 0
+            s.after(milliseconds: 30, "the selected app enters native fullscreen") {
+                f.app.enterFullscreen(b)
+                fullscreenWrites = f.mac.geometryWrites.count
+            }
             s.settle()
+            s.expect("fullscreen cancels later geometry writes", !f.mac.geometryWrites.dropFirst(fullscreenWrites).contains { $0.window == b })
             s.expect("the fullscreen window leaves workspace management", f.tessel.windows.first { $0.id == b }?.workspace == nil)
             s.expect("fullscreen never enters the closet", !f.mac.isInCloset(b))
             let delivered = f.mac.displaySamples.count

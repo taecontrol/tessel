@@ -391,6 +391,12 @@ If display callbacks stop or never arrive, a one-shot deadline at the motion's
 end plus 50 ms submits the same exact final AX layout and releases display
 demand. Normal landing, retargeting and cancellation remove that deadline;
 there is no recurring fallback timer or idle display demand.
+Window motion reports `AXWindowMoved`; sizing and native fullscreen entry report
+`AXWindowResized`, including in the WebKit fixture. During motion, resize events
+revalidate the affected root's fullscreen state on its AX lane before deferring
+full enumeration. Confirmed fullscreen state cancels further motion and removes
+workspace membership. An already admitted AX batch can finish before that state
+is observed; notification delivery alone is not an atomic fullscreen guard.
 
 Downward cards focus the incoming selection before raising its other windows.
 Preparation confirms native focus and CG order before moving frames; bounded

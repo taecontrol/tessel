@@ -285,7 +285,7 @@ package final class SimulatedMac: @unchecked Sendable {
         windows[id]?.fullscreen = enabled
         windows[id]?.spaces = [enabled ? 10_000 + UInt64(id) : 1]
         active = enabled ? 10_000 + UInt64(id) : 1
-        notify(.layoutChanged, node: .window(id))
+        notify(.resized, node: .window(id))
     }
     @MainActor func drag(_ id: UInt32, point: CGPoint) {
         assume(.windowGeometryWrites)
@@ -354,6 +354,6 @@ package final class SimulatedMac: @unchecked Sendable {
     }
     func applyPosition(_ id: UInt32, _ point: CGPoint) {
         for member in groupMembers(id) { windows[member]?.spec.frame.origin = point }
-        notify(.layoutChanged, node: .window(id))
+        notify(.moved, node: .window(id))
     }
 }
