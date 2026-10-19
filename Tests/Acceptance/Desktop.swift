@@ -7,7 +7,7 @@ struct Desktop {
     var harness: Harness { Harness.shared }
     var fixture: FixtureSession { harness.fixture }
     let stack = "[experiments]\nworkspaces = true\n"
-    let rails = "[experiments]\ncarousel = true\n"
+    let carousel = "[experiments]\ncarousel = true\n"
 
     func writeConfig(_ text: String) throws {
         try Data(text.utf8).write(to: harness.configFile)
@@ -171,7 +171,7 @@ struct Desktop {
         }
         try activate(firstSession, key: "w0")
         try requireFinalState("every rail setup window listed") { Set(try harness.rows().map(\.id)) == Set(ids) }
-        try configure(rails, layout: "carousel")
+        try configure(carousel, layout: "carousel")
         try expectFocus(ids[0])
         try requireFinalState("initial rail sizing and membership") {
             let observation = try observe(), rows = try harness.rows()

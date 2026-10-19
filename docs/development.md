@@ -53,7 +53,7 @@ Swift's hash seed, which is what can reorder an unsorted iteration; every scenar
 suite runs contributes to that digest, and one small scenario is also replayed
 twice within each process. CI runs 3.
 
-The production catalog, Workspaces, Rails, closet recovery and config reload run
+The production catalog, Workspaces, Carousel, closet recovery and config reload run
 against a simulated macOS behind small platform ports. Its virtual clock proves
 tessel's own delays; enumerated schedules expose races without depending on
 macOS timing. A failed scenario reports the expectation, schedule and port trace
@@ -311,89 +311,80 @@ Before the first public release (#6), revisit the bundle IDs, config schema,
 and read-only CLI contract. A command that changes state or exposes titles needs
 an architecture decision before implementation.
 
-## Rails experiment (#17)
+## Carousel experiment (#26)
 
-`[experiments] rails = true` enables workspaces in rail layout, independently
-of the `workspaces` flag. Without it, the workspace experiment keeps its
-one-window layout and shortcuts. With both flags absent, tessel only observes.
-Reloading into rails forms one row per existing workspace in arrival order.
-The active workspace and focused window remain selected. Enabling either
-layout never raises the front app's last-read focus: that read can predate a
-newer native selection, so the first render only lays windows out and the
-next focus report selects the window that really has focus. Membership and rail
-positions are session state, with no persistence across restarts.
+`[experiments] carousel = true` enables the carousel layout independently of
+`workspaces`. The former `rails` key is unknown and reports its line number.
+Without carousel, the workspace experiment keeps its one-window layout and
+shortcuts. With both experiments absent, tessel only observes.
 
-A rail is a horizontal row of windows with individual widths, separated by the
-outer gap. Windows keep their current width, capped at the rail area's width,
-and take the area's height. Height-constrained windows remain tiled, aligned
-to the top; their CLI reason explains the constraint. A row that fits starts
-at the area's left edge. A longer row forms a ring: the last window's next
-neighbor is the first. Focus moves without scrolling when the destination is
-fully visible. Otherwise the row scrolls to reveal it with a 56-point peek;
-wide windows are centered. The 56-point peek is the scroll target. Each window
-then uses the single ring placement exposing the most of it. In a short ring,
-that can put the next neighbor on the opposite edge, for any window count.
-Completely off-screen windows go into the closet.
-Focus, scrolling and elevator travel never resize windows.
-A rail write that times out against a busy or briefly hung app is retried
-after 100, 200, 400 and 800 ms, like a failed read, unless a newer render
-replaces it. An app that stays hung longer keeps its stale frame until the next
-render.
+Each workspace owns a stack of rails (rows). Existing windows enter one rail in
+arrival order, retaining their observed widths; an exact preset is recognized.
+New windows enter at half width immediately right of the focused tile, receive
+focus, and are revealed with the smallest scroll. Presets are one third, one
+half, two thirds and full width, measured as `p * (area.width + outer) - outer`.
+The area is the primary display's visible frame inset by the outer gap.
 
-Option+H/L (`focus left|right`) wraps within the current rail. Option+K/J
-(`focus up|down`) visits adjacent rails, stopping at either end. Each rail
-remembers its focused window and scroll position. Option+Shift+H/L
-(`move left|right`) swaps neighbors, including across the ring's end.
-Option+Shift+K/J (`move up|down`) inserts the window after the destination
-rail's remembered window and follows it. Moving beyond an end creates a rail,
-except when already alone at that end. Empty rails disappear.
+Option+R (`cycle width`) chooses the next preset, keeping the tile's left edge
+still unless a minimal scroll is needed to show it completely. AX readback
+learns rejected minimum and maximum widths; later cycles skip them. Mouse
+widths remain exact until cycling. A rail shorter than the area stretches its
+windows proportionally; that stretch and end expansion preserve nominal widths.
+Height-constrained windows stay tiled at the top, with an explanatory reason.
 
-New windows enter to the right of the current window. Closing selects the
-left neighbor and closes the gap. Sending still follows the window to the
-selected workspace, inserting after its current rail's remembered window.
-When a rail empties on close, move or send, its current position selects the
-rail below, or the one above if it was last. Minimize/hide instead selects the
-most recently focused available window anywhere in the workspace, even when
-that empties a rail. This preserves the workspace experiment's focus policy.
-Minimized or hidden windows leave their rail temporarily; restoring inserts
-after their former left neighbor when that rail survives, or after the current
-window otherwise. External activation selects the window's workspace and rail
-and reveals it. Dialogs float as before, sheets follow their parents, and
-native fullscreen windows have no rail or workspace.
+Option+H/L (`focus left|right`) first selects the nearest complete window in
+that direction. Otherwise it advances one stop: a window edge meeting the
+same side of the area, clamped to the strip's ends. Focus waits for a complete
+window. At an end, another press expands its edge tile to fill the area; a
+press away leaves expansion. The initial rail starts with its first tile
+expanded when possible. Navigation and swaps never wrap.
 
-A manually moved window stays where released until the next rail render.
-Successful window moves redraw the rail even when a ring's final target frames
-coincide. A manual resize updates that window's width and repositions its right
-neighbors.
-Disabling rails or quitting returns all managed windows fully inside the
-visible desktop. After a crash, closet recovery still works with the flag off,
-but a partially visible window stays where it was: no persisted membership
-identifies it as a former rail window.
+Option+K/J (`focus up|down`) selects the adjacent rail. Each rail remembers its
+stop, focus and expansion. Option+Shift+H/L (`move left|right`) swaps neighboring
+tiles and keeps focus. Option+Shift+K/J (`move up|down`) inserts after the
+remembered tile of the adjacent rail, creating a rail beyond an end unless the
+moving tile is already alone there. Empty rails disappear.
 
-Numeric workspace/send shortcuts keep their meanings. `focus next|previous`
-remain bindable aliases for rail traversal, with no default binding in rails.
-`[keys]` overrides merge with the layout's defaults. Directional rail commands
-are validated with the flag off, but their shortcuts are registered only while
-rails is enabled. `windows --json` adds
-nullable one-based `rail` and `slot` fields, and `status --json` reports
-`workspaces.layout`, the nullable current `rail`, and `railCount`. The status
-item shows the workspace number and one bar per rail, highlighting the current
-one; its AX label includes the current rail and total. The map overlay belongs
-to #18, and the floating layer to #19.
+Closing focus selects the left neighbor, or the right if it was first. An empty
+rail selects the rail below, or the one above if it was last. Minimize/hide
+retains the workspace experiment's most-recent-focus policy. Restoring a tile
+uses its former rail and left neighbor when available. Native-tab replacement
+retains tile identity, nominal width, learned limits and focus. Dialogs keep
+their frames, sheets follow their parents, and native fullscreen stays outside
+workspace management. Workspace switching and sends remain instant.
 
-Rail scenarios prove geometry, membership, native-tab replacement, retries and
-focus ordering in virtual time. Journeys check real scroll/elevator hotkeys,
-CLI fields, the status-item AX label and recovery. Fixtures accept width
-fractions of the usable area, keeping fitting and overflowing setups independent
-of screen size. Resource E29 runs with `scripts/verify --resources` and the
-unchanged ADR 0003 limits. Capture the app's own status button with:
+Numeric workspace/send shortcuts retain their meanings. `focus next|previous`
+are bindable aliases for horizontal traversal. `[keys]` overrides merge with
+defaults; an empty string disables a binding. Directional and width commands
+are validated with the experiment off, but registered only when it is active.
 
-```sh
-TESSEL_CAPTURE_WORKSPACES=1 scripts/verify captureRailsStatusItem
+```toml
+[experiments]
+carousel = true
+
+[animation]
+duration = 80
+
+[keys]
+alt-r = "cycle width"
 ```
 
-The PNGs are `.work/captures/E26-workspace-1-rail-{1,2}.png`. Both owner captures
-live in `Tests/Acceptance/Captures.swift` and require the capture environment flag.
+`duration` accepts TOML integers from 0 through 1000 and defaults to 80 ms.
+`status --json` reports `workspaces.layout: "carousel"`, `animationDuration`
+(the effective duration, zero with Reduce Motion), the nullable one-based `rail`
+and `railCount`. `windows --json` includes nullable one-based `rail` and `slot`.
+The status item shows the workspace number and one bar per rail.
+
+The policy currently writes final frames instantly. Display-frame animation,
+card stacking and wall bounces are the next delivery phase; their examples
+remain executable expected issues. The NSWorkspace Reduce Motion observation is
+already connected for effective-duration status.
+
+A manually moved tile stays where released until the next layout change. A
+busy AX presentation retries after 100, 200, 400 and 800 ms unless superseded.
+Completely off-screen tiles live in the closet; they are shown before sizing.
+Disabling the experiment or quitting returns managed windows inside the desktop.
+Crash recovery uses the same closet boundary without persisted membership.
 
 ## Journeys and latency (#24)
 
@@ -560,11 +551,12 @@ P, J, L and R rows always require executable coverage. E15 owns J: the native
 cross-app stacking assertion takes precedence over the overlapping P range in
 the accepted spec. E14 and E16 own P; their untagged journey steps check wiring.
 
-During acceptance-first delivery, carousel policy assertions use `withKnownIssue`.
-Run `TESSEL_CAROUSEL_RED=1 swift test --filter Carousel` to expose every red
-assertion. The predecessor rails configuration bootstraps scenarios only until
-the carousel parser lands; it supplies no carousel decisions. E22 tests the new
-configuration directly. Remove expected-issue scopes as each example turns green.
+Carousel policy examples E1–E13, E22–E23 and E25 run without expected issues.
+E18's zero-duration and startup Reduce Motion cases also pass directly. Only
+motion-dependent examples use `withKnownIssue`; run
+`TESSEL_CAROUSEL_RED=1 swift test --filter CarouselMotion` to expose those red
+assertions during the next delivery phase. The fixture uses the real carousel
+configuration with no predecessor bridge.
 
 
 ## Deterministic checks (#24)
