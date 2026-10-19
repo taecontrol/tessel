@@ -1055,7 +1055,14 @@ final class Workspaces {
 
     private func retryCardFocus(token: UInt64, remaining: Int) {
         guard let pending = cardFocusReady, pending.token == token, token == transition,
-              remaining > 0, let entry = entries[pending.id], let catalog else { return }
+              let entry = entries[pending.id], let catalog else { return }
+        guard remaining > 0 else {
+            // A lost activation acknowledgement must not leave preparation
+            // suppressing catalog reads forever. Supersede its writes and land
+            // through the ordinary final presenter with bounded AX retries.
+            renderCarouselInstant(focusing: pending.id, activateDesktop: false, takeFocus: true)
+            return
+        }
         // A busy app can lose the acknowledgement without changing focus again.
         // Re-read with bounded backoff; never repeat activation or AXRaise.
         cardFocusCheck = scheduler.main.after(milliseconds: 50 << (4 - remaining)) { [weak self] in

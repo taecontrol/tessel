@@ -6,6 +6,21 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct CarouselMotion {
+    @Test("a downward card lands after its app outlasts the bounded preparation focus retries")
+    func delayedDownwardFocusEventuallyLands() {
+        requireCarousel(Scenario.run("late card focus after a busy app recovers") { s in
+            let f = CarouselFixture(s), c = f.ids[2]
+            f.select(c); f.press("alt-shift-j"); f.press("alt-k")
+            f.app.busy(forMilliseconds: 2_000)
+            f.tessel.pressKey("alt-j")
+            s.after(milliseconds: 3_000, "the app has recovered") {
+                f.expanded(c)
+                s.expect("the source rail is hidden after recovered landing", !f.mac.isVisible(f.ids[0]))
+            }
+            s.settle()
+        })
+    }
+
     @Test("a missing display link still lands exactly and releases motion demand", arguments: [false, true])
     func missingDisplayFramesHaveABoundedLanding(stopsDuringMotion: Bool) {
         requireCarousel(Scenario.run("missing display frames during motion=\(stopsDuringMotion)") { s in
