@@ -460,10 +460,12 @@ display-frame demand, Reduce Motion notifications and pointer-down delivery.
 The Reduce Motion contract changes the preference through HIServices' private
 setter, which affects only the observer's own process: it pins how NSWorkspace
 reads and announces the interface preference, not a desktop-wide change.
-`ax-notifications` attributes each notification by AX equality with the handle
-it registered, as the catalog does during motion; a window ID lookup on the
-notified element can fail mid-fullscreen with cannotComplete, so the observer
-records that error rather than an ID.
+A window ID lookup on a notified element can fail mid-fullscreen with
+cannotComplete. The observer records that error and attributes the element by
+AX equality instead, as the catalog does during motion: `ax-notifications`
+requires the handle it registered, and other contracts accept a retained window
+handle equal to the notified element (such as the auxiliary fullscreen root
+that `transient-window-lists` watches at application level).
 The timeout contract also proves that configuring AX messaging timeouts is local
 client state, even while the target app is stopped; it consumes no simulated
 remote-delivery time. The simulator declares the corresponding assumption IDs;

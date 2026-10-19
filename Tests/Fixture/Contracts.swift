@@ -20,6 +20,8 @@ final class FixtureContracts: NSObject {
     /// The window handle a `watch` registered, compared with each notified element.
     private var watched: AXUIElement?
     private var events: [[String: Any]] = []
+    /// Each event's notified element, matched against retained handles when read.
+    private var eventElements: [AXUIElement] = []
     private var lifecycle: [[String: Any]] = []
     private var knownProcesses = Set<pid_t>()
     private var knownApplications: [pid_t: NSRunningApplication] = [:]
@@ -38,7 +40,7 @@ final class FixtureContracts: NSObject {
             spaces = nil
             moved.removeAll()
             handles.removeAll(); bars.removeAll(); captured.removeAll()
-            events.removeAll(); lifecycle.removeAll(); knownProcesses.removeAll()
+            events.removeAll(); eventElements.removeAll(); lifecycle.removeAll(); knownProcesses.removeAll()
             knownApplications.removeAll(); lifecycleCounts.removeAll()
             return [:]
         case "lifecycleStart":
@@ -50,8 +52,16 @@ final class FixtureContracts: NSObject {
             }
             return [:]
         case "lifecycle": return ["lifecycle": lifecycle, "lifecycleCounts": lifecycleCounts]
-        case "events": return ["events": events]
-        case "clearEvents": events.removeAll(); return [:]
+        case "events":
+            // A window ID lookup can fail on a notified element mid-transition.
+            // Identity with a retained window handle still names the window.
+            let retained = handles.sorted { $0.key < $1.key }
+            return ["events": zip(events, eventElements).map { event, element in
+                var event = event
+                event["handleID"] = retained.first { CFEqual($0.value, element) }?.key as Any? ?? NSNull()
+                return event
+            }]
+        case "clearEvents": events.removeAll(); eventElements.removeAll(); return [:]
         case "finder", "activateFinder": return try finder(activate: operation == "activateFinder")
         case "screen":
             guard let screen = NSScreen.screens.first else { throw FixtureContractError("primary screen unavailable") }
@@ -226,6 +236,7 @@ final class FixtureContracts: NSObject {
                        "registered": watched.map { CFEqual($0, element) } as Any? ?? NSNull(), "mainThread": Thread.isMainThread,
                        "focusedID": focus.map(id) as Any? ?? NSNull(), "focusedError": focused.error.rawValue,
                        "minimized": read(element, kAXMinimizedAttribute).value as? Bool as Any? ?? NSNull()])
+        eventElements.append(element)
     }
 
     private func registrations(_ command: [String: Any], application: AXUIElement, pid: pid_t, removing: Bool) throws -> [String: Any] {
