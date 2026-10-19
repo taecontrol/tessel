@@ -28,6 +28,7 @@ extension SimulatedMac {
         var visibility: [VisibilityChange] = []
         var samples: [DisplaySample] = []
         var requests = 0
+        var framesAvailable = true
         var reduced = false
         var preferences: [WeakPreference] = []
         var pointers: [WeakPointer] = []
@@ -55,6 +56,12 @@ extension SimulatedMac {
     @MainActor package var visibilityChanges: [VisibilityChange] { motion.visibility }
     @MainActor package var displaySamples: [DisplaySample] { motion.samples }
     @MainActor package var displayFrameRequests: Int { motion.requests }
+    /// Failure injection: a requested native callback need not arrive when its
+    /// display becomes unavailable. This adds no delivery guarantee to the port.
+    @MainActor package func setDisplayFramesAvailable(_ available: Bool) {
+        action("display frames available=\(available)")
+        motion.framesAvailable = available
+    }
     @MainActor package func setScreen(_ geometry: ScreenGeometry) { self.geometry = geometry }
     @MainActor package func setReduceMotion(_ enabled: Bool) {
         assume(.reduceMotionNotifications)
@@ -98,6 +105,7 @@ extension SimulatedMac {
             let timestamp = tick / 120
             let due = Int(ceil(timestamp * 1_000))
             return mac.scheduler.main.after(milliseconds: due - mac.scheduler.now) {
+                guard mac.motion.framesAvailable else { return }
                 mac.scheduler.note("display frame \(Int(tick))")
                 mac.motion.samples.append(DisplaySample(time: timestamp,
                     frames: mac.windows.mapValues(\.spec.frame), visible: mac.visibleIDs(), frontmost: mac.front))

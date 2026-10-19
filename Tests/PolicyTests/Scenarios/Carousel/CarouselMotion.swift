@@ -6,6 +6,33 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct CarouselMotion {
+    @Test("a missing display link still lands exactly and releases motion demand", arguments: [false, true])
+    func missingDisplayFramesHaveABoundedLanding(stopsDuringMotion: Bool) {
+        requireCarousel(Scenario.run("missing display frames during motion=\(stopsDuringMotion)") { s in
+            let f = CarouselFixture(s), a = f.ids[0], b = f.ids[1], c = f.ids[2]
+            f.press("alt-l"); f.mac.clearMotionHistory()
+            let before = f.snapshot()
+            if !stopsDuringMotion { f.mac.setDisplayFramesAvailable(false) }
+            f.tessel.pressKey("alt-l")
+            if stopsDuringMotion {
+                s.after(milliseconds: 30, "the display stops delivering frames") {
+                    s.expect("motion began before losing the display", f.frame(b) != before[b])
+                    f.mac.setDisplayFramesAvailable(false)
+                }
+            }
+            s.after(milliseconds: 180, "the bounded landing is complete without another display callback") {
+                f.pair(b,c,focused:c)
+                s.expect("the leaving tile is hidden after landing", !f.mac.isVisible(a) && f.mac.isInCloset(a))
+            }
+            s.settle()
+            s.expect("the absent display never delivered a callback", stopsDuringMotion || f.mac.displaySamples.isEmpty)
+            let requests = f.mac.displayFrameRequests, writes = f.mac.geometryWrites.count
+            f.mac.setDisplayFramesAvailable(true)
+            f.mac.scheduler.main.after(milliseconds: 1_000) {}; s.settle()
+            s.expect("landing releases demand and does no recurring idle work", f.mac.displayFrameRequests == requests && f.mac.geometryWrites.count == writes)
+        })
+    }
+
     @Test("retargeting while an AX size reply is in flight restores the requested pair")
     func retargetDuringAnUnconfirmedSizeWrite() {
         requireCarousel(Scenario.run("retarget an in-flight AX width") { s in

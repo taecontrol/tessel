@@ -82,7 +82,7 @@ final class Workspaces {
         self.hotkeyInstaller = hotkeys
         self.fixtureOnly = fixtureOnly
         self.motionPreferences = motionPreferences
-        self.animator = displayFrames.map { CarouselAnimator(display: $0) }
+        self.animator = displayFrames.map { CarouselAnimator(display: $0, main: scheduler.main) }
         motionObservation = motionPreferences?.observe { [weak self] _ in self?.publish() }
         pointerObservation = pointerActivity?.observePress { [weak self] in self?.interruptCarousel() }
         if trusted {

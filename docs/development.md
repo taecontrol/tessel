@@ -387,6 +387,10 @@ intrinsic app width limit. Returning tiles are sized on screen before motion.
 Workspace switches and sends stay instant.
 Mouse presses cancel motion before dragging, and Reduce Motion notifications
 make subsequent commands instant. No display callbacks run at rest.
+If display callbacks stop or never arrive, a one-shot deadline at the motion's
+end plus 50 ms submits the same exact final AX layout and releases display
+demand. Normal landing, retargeting and cancellation remove that deadline;
+there is no recurring fallback timer or idle display demand.
 
 Downward cards focus the incoming selection before raising its other windows.
 Preparation confirms native focus and CG order before moving frames; bounded
