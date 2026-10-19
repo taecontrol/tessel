@@ -6,6 +6,26 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct CarouselMotion {
+    @Test("a busy app drops intermediate frames while a healthy neighbor lands and receives focus")
+    func busyAppDoesNotQueueHealthyMotion() {
+        requireCarousel(Scenario.run("independent animated AX lanes") { s in
+            let f = CarouselFixture(s), b = f.ids[1], c = f.ids[2]
+            f.press("alt-l")
+            let other = f.mac.launch()
+            _ = other.open(WindowSpec(frame: CGRect(x: 40, y: 60, width: 849, height: 1064), positionAcceptance: .screenEdges))
+            s.settle(); f.select(b)
+            other.busy(forMilliseconds: 300)
+            f.mac.clearMotionHistory()
+            f.tessel.pressKey("alt-l"); f.tessel.pressKey("alt-l")
+            s.after(milliseconds: 120, "healthy lane has landed while its neighbor is busy") {
+                f.focus(c)
+                s.expect("healthy windows move on intermediate display frames", f.mac.geometryWrites.contains { $0.window == b && $0.frame > 0 })
+            }
+            s.settle()
+            f.focus(c)
+        })
+    }
+
     @Test("#26 E14: cards enter from 32 points, leave at the bottom, remember state and bounce at rail ends")
     func verticalCardsRememberEveryRailState() {
         requireCarousel(Scenario.run("vertical card stack") { s in
@@ -136,7 +156,7 @@ import Testing
             s.settle(); f.pair(ids[4],ids[5],focused:ids[5])
             let lastPress = start + 90
             s.expect("repeat motion uses intermediate frames", f.mac.displaySamples.count >= 2)
-            s.expect("no animation is queued behind the final key", f.mac.geometryWrites.allSatisfy { $0.at <= lastPress + 80 + 9 })
+            s.expect("no animation is queued behind the final key (last write \(f.mac.geometryWrites.map(\.at).max() ?? 0), limit \(lastPress + 89), late \(f.mac.geometryWrites.filter { $0.at > lastPress + 89 }.map { "\($0.window) \($0.attribute) @\($0.at)" }))", f.mac.geometryWrites.allSatisfy { $0.at <= lastPress + 80 + 9 })
             s.expect("the final display frame is within duration plus one refresh", (f.mac.displaySamples.last?.time ?? .infinity) <= Double(lastPress + 80)/1_000 + 1.0/120)
         })
         requireCarousel(Scenario.run("reverse from current display frame") { s in
@@ -151,7 +171,7 @@ import Testing
             let after = f.mac.geometryWrites.filter { $0.window == b && $0.attribute == .position && $0.at >= start + 30 }
             s.expect("retarget has a new frame", !after.isEmpty)
             if let first = after.first, let x = first.requested.point?.x {
-                s.expect("reversing starts from the current displayed position", x >= interruptedX - 1 && x < target - 1)
+                s.expect("reversing starts from the current displayed position (first \(x), interrupted \(interruptedX), target \(target))", x >= interruptedX - 1 && x < target - 1)
             }
             f.near(f.frame(b).minX, target, "reverse reaches the new target")
         })
@@ -194,6 +214,13 @@ import Testing
             for id in f.ids {
                 for attribute in [Ports.AXAttribute.position, .size] {
                     s.expect("instant command writes each final attribute at most once", writes.filter { $0.window == id && $0.attribute == attribute }.count <= 1)
+                }
+            }
+            f.mac.clearMotionHistory(); f.press("alt-r")
+            s.expect("instant width changes request no screen frames", f.mac.displayFrameRequests == 0)
+            for id in f.ids {
+                for attribute in [Ports.AXAttribute.position, .size] {
+                    s.expect("instant width changes write each attribute at most once", f.mac.geometryWrites.filter { $0.window == id && $0.attribute == attribute }.count <= 1)
                 }
             }
         })

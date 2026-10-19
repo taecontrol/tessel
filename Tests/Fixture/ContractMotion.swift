@@ -15,8 +15,25 @@ final class FixtureMotionProbe: NSObject {
     private var observing = false
     private var originalPreference: Bool?
     private var originalPreferenceWasPresent = false
+    private var pointerMonitor: Any?
+    private var pointerPresses = 0
+    private var pointerEvents: [String] = []
+
+    func startPointer() {
+        if let pointerMonitor { NSEvent.removeMonitor(pointerMonitor) }
+        pointerPresses = 0
+        pointerEvents.removeAll()
+        pointerMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .leftMouseDragged]) { [weak self] event in
+            MainActor.assumeIsolated {
+                self?.pointerEvents.append(event.type == .leftMouseDragged ? "drag" : "press")
+                if event.type != .leftMouseDragged { self?.pointerPresses += 1 }
+            }
+        }
+    }
 
     func reset() {
+        if let pointerMonitor { NSEvent.removeMonitor(pointerMonitor) }
+        pointerMonitor = nil
         if let originalPreference {
             try? setReduceMotion(originalPreference)
             if !originalPreferenceWasPresent {
@@ -37,6 +54,7 @@ final class FixtureMotionProbe: NSObject {
                 throw FixtureContractError("motion sampling accepts signed fixture targets only")
             }
             let application = AXUIElementCreateApplication(pid)
+            AXUIElementSetMessagingTimeout(application, 0.05)
             var value: CFTypeRef?
             guard AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &value) == .success,
                   let windows = value as? [AXUIElement] else { throw FixtureContractError("motion targets have no AX window list") }
@@ -81,6 +99,8 @@ final class FixtureMotionProbe: NSObject {
     }
     func facts() -> [String: Any] {
         ["motionSamples": samples, "motionFrameCount": frameCount,
+         "pointerPresses": pointerPresses,
+         "pointerEvents": pointerEvents,
          "reduceMotion": NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, "motionChanges": preferenceChanges,
          "sampledAt": Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1e9]
     }

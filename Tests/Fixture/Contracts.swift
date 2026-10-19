@@ -82,6 +82,27 @@ final class FixtureContracts: NSObject {
             guard let value = command["enabled"] as? Bool else { throw FixtureContractError("Reduce Motion needs a boolean") }
             try motionProbe.setReduceMotion(value); return motionProbe.preferences()
         case "motionPreferences": return motionProbe.preferences()
+        case "pointerStart": motionProbe.startPointer(); return motionProbe.facts()
+        case "pointerSamples": return motionProbe.facts()
+        case "pointerPress":
+            guard FixtureProbe.frontmostPID() == pid, let id = command["id"] as? UInt32, let window = handles[id],
+                  let position = FixtureProbe.value(window, kAXPositionAttribute), CFGetTypeID(position) == AXValueGetTypeID(),
+                  let size = FixtureProbe.value(window, kAXSizeAttribute), CFGetTypeID(size) == AXValueGetTypeID(),
+                  (CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []).contains(where: {
+                      ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == id
+                          && ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid
+                  }) else {
+                throw FixtureContractError("pointer presses require a retained frontmost fixture window")
+            }
+            var point = CGPoint.zero, dimensions = CGSize.zero
+            AXValueGetValue(position as! AXValue, .cgPoint, &point); AXValueGetValue(size as! AXValue, .cgSize, &dimensions)
+            let oldPointer = CGEvent(source: nil)?.location
+            let target = CGPoint(x: point.x + dimensions.width / 2, y: point.y + 12)
+            CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: target, mouseButton: .left)?.post(tap: .cghidEventTap)
+            CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: target, mouseButton: .left)?.post(tap: .cghidEventTap)
+            CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: target, mouseButton: .left)?.post(tap: .cghidEventTap)
+            if let oldPointer { CGWarpMouseCursorPosition(oldPointer) }
+            return [:]
         case "snapshot": return snapshot(application, pid: pid)
         case "barOwner":
             guard let index = command["bar"] as? Int, bars.indices.contains(index) else { throw FixtureContractError("retain a native bar before reading its owner") }

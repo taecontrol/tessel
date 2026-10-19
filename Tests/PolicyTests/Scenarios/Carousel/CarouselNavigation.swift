@@ -66,7 +66,9 @@ import Testing
         for (index, presets) in scenarios.enumerated() {
             for seed in 0..<63 {
                 requireCarousel(Scenario.run("coverage scenario=\(index) sequence=\(seed)") { s in
-                    let f = CarouselFixture(s, presets: presets, minimumFractions: index == 6 ? [1:0.62] : [:])
+                    // E4 judges settled coverage after every prefix; E16 owns
+                    // intermediate frames and the spring at both durations.
+                    let f = CarouselFixture(s, presets: presets, duration: 0, minimumFractions: index == 6 ? [1:0.62] : [:])
                     if index == 7 { f.select(f.ids[3]); f.press("alt-shift-j"); f.select(f.ids[4]); f.press("alt-shift-j"); f.press("alt-k") }
                     f.invariants("initial")
                     for depth in 0..<12 {

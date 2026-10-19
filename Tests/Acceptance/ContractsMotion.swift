@@ -2,6 +2,17 @@ import Foundation
 import Testing
 
 extension Acceptance.Contracts {
+    @Test("pointer-press-notifications: a global monitor receives a press in another fixture app", contract(.pointerPressNotifications))
+    func pointerPressInterruptsBeforeDragging() throws {
+        let id = try fixture.open(); _ = try window(id)
+        try desktop.activate()
+        try native("pointerStart")
+        try native("pointerPress", ["id": id])
+        try requireFinalState("the independent mouse-down monitor receives the fixture press") {
+            let facts = try native("pointerSamples")
+            return facts.pointerPresses == 1 && facts.pointerEvents == ["press", "drag"]
+        }
+    }
     @Test("ax-vertical-clamping: AX keeps the top below the menu bar and 32 points visible at the bottom", contract(.axVerticalClamping))
     func axVerticalClamping() throws {
         let id = try fixture.open(); let original = try window(id)

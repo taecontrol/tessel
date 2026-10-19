@@ -70,7 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let workspaces = Workspaces(store: store, trusted: trusted, configuration: config.status.effective,
                                     applications: applications, ax: ax, screens: SystemScreen(), windowOrder: SystemWindowOrder(),
                                     scheduler: scheduler, hotkeys: SystemHotkeys(), fixtureOnly: LaunchOptions.fixtureOnly,
-                                    motionPreferences: SystemMotionPreferences(), displayFrames: displayFrames) {
+                                    motionPreferences: SystemMotionPreferences(), displayFrames: displayFrames, pointerActivity: SystemPointerActivity()) {
             try SkyLightCloset(simulateMissing: LaunchOptions.missingSkyLight, simulateFailedHide: LaunchOptions.failedHide)
         }
         self.workspaces = workspaces

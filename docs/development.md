@@ -375,10 +375,23 @@ alt-r = "cycle width"
 and `railCount`. `windows --json` includes nullable one-based `rail` and `slot`.
 The status item shows the workspace number and one bar per rail.
 
-The policy currently writes final frames instantly. Display-frame animation,
-card stacking and wall bounces are the next delivery phase; their examples
-remain executable expected issues. The NSWorkspace Reduce Motion observation is
-already connected for effective-duration status.
+Local layout changes use a demand-driven NSScreen display link and the
+prototype's critically damped spring. Retargeting starts from geometry confirmed
+by each AX worker. Slow apps retain at most one intermediate frame; the final
+frame is read back and retried. Workspace switches and sends stay instant.
+Mouse presses cancel motion before dragging, and Reduce Motion notifications
+make subsequent commands instant. No display callbacks run at rest.
+
+Downward cards focus the incoming selection before raising its other windows.
+Upward cards retain the leaving selection until it has moved down and hidden.
+A sibling raise restores AXMain without another raise or app activation.
+Horizontally entering and leaving tiles keep at least one point on screen;
+leaving tiles hide after motion. Size writes happen after showing a tile.
+
+Fixture-only development status adds `testMotion.displayFrames`. The app's real
+display adapter increments it, and the signed development CLI preserves it.
+The resource suite samples only outside its measured idle window. Daily builds
+contain neither the counter nor this status field.
 
 A manually moved tile stays where released until the next layout change. A
 busy AX presentation retries after 100, 200, 400 and 800 ms unless superseded.
@@ -551,12 +564,12 @@ P, J, L and R rows always require executable coverage. E15 owns J: the native
 cross-app stacking assertion takes precedence over the overlapping P range in
 the accepted spec. E14 and E16 own P; their untagged journey steps check wiring.
 
-Carousel policy examples E1–E13, E22–E23 and E25 run without expected issues.
-E18's zero-duration and startup Reduce Motion cases also pass directly. Only
-motion-dependent examples use `withKnownIssue`; run
-`TESSEL_CAROUSEL_RED=1 swift test --filter CarouselMotion` to expose those red
-assertions during the next delivery phase. The fixture uses the real carousel
-configuration with no predecessor bridge.
+All deterministic carousel examples run directly, including cards, spring
+frames, interrupts, Reduce Motion, edge safety and bounce. E21 remains the
+explicit pending owner-reviewed capture. Retained membership and AX-retry
+scenarios use duration zero; CarouselMotion proves the animated path. E4's
+command matrix checks settled invariants at duration zero, while E16 checks
+intermediate frames at 80 and 400 ms.
 
 
 ## Deterministic checks (#24)

@@ -78,8 +78,8 @@ final class WindowCatalog {
     }
 
     func writeMotion(pid: Int32, writes: [UInt32: CarouselAnimator.Write], final: Bool,
-                     completion: @escaping @MainActor @Sendable ([UInt32: CGRect], Bool) -> Void) {
-        guard let app = apps[pid] else { completion([:], false); return }
+                     completion: @escaping @MainActor @Sendable ([UInt32: CGRect]) -> Void) {
+        guard let app = apps[pid] else { completion([:]); return }
         app.writeMotion(writes, final: final, completion: completion)
     }
 
@@ -88,8 +88,18 @@ final class WindowCatalog {
         app.raise(id: id, completion: completion)
     }
 
+    func keepMain(pid: Int32, id: UInt32, completion: @escaping @MainActor @Sendable () -> Void) {
+        guard let app = apps[pid] else { completion(); return }
+        app.keepMain(id: id, completion: completion)
+    }
+
     func beginMotion() { for pid in apps.keys.sorted() { apps[pid]?.setMotionActive(true) } }
     func endMotion() { for pid in apps.keys.sorted() { apps[pid]?.setMotionActive(false) } }
+    var motionFrames: [UInt32: CGRect] {
+        var frames: [UInt32: CGRect] = [:]
+        for pid in apps.keys.sorted() { frames.merge(apps[pid]!.motionFrames) { _, new in new } }
+        return frames
+    }
 
     func windowIsGone(pid: Int32, id: UInt32, completion: @escaping @MainActor @Sendable (Bool) -> Void) {
         guard let app = apps[pid] else { completion(false); return }
@@ -182,12 +192,15 @@ private final class AppWindows: @unchecked Sendable {
         let completion: @MainActor @Sendable () -> Void
     }
     private var validations: [UInt32: Validation] = [:]
-    private var motionPositions: [UInt32: CGPoint] = [:]
+    private var motionTimeouts = Set<UInt32>()
     private var motionActive = false
     private var deferredMotionRead = false
+    private var structuralMotionRead = false
     // The main lane reserves a slot before dispatching. A slow app can retain
     // one intermediate batch, while other apps keep accepting fresh frames.
     private var motionBusy = false
+    private var displayedMotion: [UInt32: CGRect] = [:]
+    var motionFrames: [UInt32: CGRect] { presentationLock.withLock { displayedMotion } }
 
     init(pid: Int32, name: String, bundleId: String, hidden: Bool, generation: UUID,
          ax: any AccessibilityPort, scheduler: any SchedulingPort,
@@ -237,6 +250,7 @@ private final class AppWindows: @unchecked Sendable {
     }
 
     private func handleChange(_ notification: AXNotification, element: AXElement) {
+        if [.windowCreated, .destroyed, .sheetCreated, .restored].contains(notification) { structuralMotionRead = true }
         // A closing window can still be listed by the read that follows its event.
         let needsSettling = [.windowCreated, .sheetCreated, .mainWindowChanged,
                              .destroyed].contains(notification)
@@ -307,7 +321,8 @@ private final class AppWindows: @unchecked Sendable {
 
     private func readSnapshot() {
         guard !stopped else { return }
-        if motionActive { deferredMotionRead = true; return }
+        if motionActive && !structuralMotionRead { deferredMotionRead = true; return }
+        motionTimeouts.removeAll() // Inspection obtains fresh AX handles with normal timeouts.
         updateSubscriptions([application], using: &appSubscriptions)
         do {
             guard let windows = try value(application, .windows)?.elements else { return }
@@ -396,6 +411,7 @@ private final class AppWindows: @unchecked Sendable {
                 bars[id] = groups
             }
             nativeBars = bars
+            presentationLock.withLock { displayedMotion = displayedMotion.filter { newIDs.contains($0.key) } }
             facts = next
             elementsByID = handles.filter { newIDs.contains($0.key) }
             // The last fill result belongs to the continuing native group.
@@ -406,6 +422,7 @@ private final class AppWindows: @unchecked Sendable {
             constrained.formIntersection(newIDs)
             validations = validations.filter { newIDs.contains($0.key) }
             failedReads = 0
+            structuralMotionRead = false
             publishSnapshot(replacing: replacements)
             if !newIDs.subtracting(oldIDs).isEmpty {
                 beginSettling()
@@ -532,7 +549,7 @@ private final class AppWindows: @unchecked Sendable {
             presentation = UUID()
             if invalidatingFocus { focusIntent = UUID() }
         }
-        queue.async { [self] in motionPositions.removeAll() }
+        queue.async { [self] in motionTimeouts.removeAll() }
     }
 
     func setMotionActive(_ active: Bool) {
@@ -543,11 +560,11 @@ private final class AppWindows: @unchecked Sendable {
         }
     }
 
-    /// Geometry-only frames have a short timeout and no retry queue. Validate
-    /// positions before the batch so an intervening mouse drag wins. The final
-    /// batch uses the ordinary validation/readback and bounded busy-app retry.
+    /// Geometry-only frames have a short timeout and no retry queue. Mouse
+    /// presses invalidate their token; OS geometry adjustments never look like
+    /// input. The final batch reads back and uses bounded busy-app retries.
     func writeMotion(_ writes: [UInt32: CarouselAnimator.Write], final: Bool,
-                     completion: @escaping @MainActor @Sendable ([UInt32: CGRect], Bool) -> Void) {
+                     completion: @escaping @MainActor @Sendable ([UInt32: CGRect]) -> Void) {
         let token = presentationLock.withLock { presentation }
         if !final {
             let reserved = presentationLock.withLock {
@@ -555,23 +572,23 @@ private final class AppWindows: @unchecked Sendable {
                 motionBusy = true
                 return true
             }
-            guard reserved else { scheduler.main.async { completion([:], false) }; return }
+            guard reserved else { scheduler.main.async { completion([:]) }; return }
         }
         queue.async { [self] in
-            writeMotion(writes, final: final, token: token, failures: 0) { [self] frames, interrupted in
+            writeMotion(writes, final: final, token: token, failures: 0) { [self] frames in
                 if !final { presentationLock.withLock { motionBusy = false } }
-                completion(frames, interrupted)
+                completion(frames)
             }
         }
     }
 
     private func writeMotion(_ writes: [UInt32: CarouselAnimator.Write], final: Bool, token: UUID, failures: Int,
-                             completion: @escaping @MainActor @Sendable ([UInt32: CGRect], Bool) -> Void) {
-        var accepted: [UInt32: CGRect] = [:], interrupted = false, retrying = false
+                             completion: @escaping @MainActor @Sendable ([UInt32: CGRect]) -> Void) {
+        var accepted: [UInt32: CGRect] = [:], retrying = false
         defer {
             if !retrying {
-                let result = accepted, cancelled = interrupted
-                scheduler.main.async { completion(result, cancelled) }
+                let result = accepted
+                scheduler.main.async { completion(result) }
             }
         }
         guard !stopped, presentationLock.withLock({ presentation == token }) else { return }
@@ -581,29 +598,29 @@ private final class AppWindows: @unchecked Sendable {
             for id in ids {
                 guard let window = elementsByID[id], let fact = facts.first(where: { $0.id == id }),
                       !hidden, !fact.minimized, !fact.fullscreen else { continue }
-                if motionPositions[id] == nil || failures > 0 { ax.setMessagingTimeout(window, seconds: failures > 0 ? 0.05 : 0.002) }
-                guard isNativeFront(window, id: id) else { continue }
+                if !motionTimeouts.contains(id) || failures > 0 {
+                    ax.setMessagingTimeout(window, seconds: failures > 0 ? 0.05 : 0.002)
+                    motionTimeouts.insert(id)
+                }
+                guard isNativeFront(window, id: id, timeout: failures > 0 ? 0.05 : 0.002) else { continue }
                 eligible.append(id)
             }
             for id in eligible {
                 guard presentationLock.withLock({ presentation == token }), let window = elementsByID[id], let write = writes[id] else { return }
-                if let previous = motionPositions[id], let point = try value(window, .position)?.point,
-                   abs(point.x - previous.x) > 1 || abs(point.y - previous.y) > 1 {
-                    interrupted = true
-                    return
-                }
+                guard presentationLock.withLock({ presentation == token }) else { return }
                 if write.resize { try check(ax.set(.size, of: window, to: .size(write.frame.size))) }
+                guard presentationLock.withLock({ presentation == token }) else { return }
                 if write.position {
                     try check(ax.set(.position, of: window, to: .point(write.frame.origin)))
-                    motionPositions[id] = write.frame.origin
                 }
+                presentationLock.withLock { displayedMotion[id] = write.frame }
             }
             if final {
                 for id in eligible {
                     guard let window = elementsByID[id] else { continue }
                     let result = try frame(window)
                     accepted[id] = result
-                    motionPositions[id] = result.origin
+                    presentationLock.withLock { displayedMotion[id] = result }
                     if let index = facts.firstIndex(where: { $0.id == id }) { facts[index].frame = result }
                 }
                 publishSnapshot()
@@ -623,6 +640,17 @@ private final class AppWindows: @unchecked Sendable {
             guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id],
                   (try? canPresent(window, id: id)) == true else { return }
             _ = ax.perform(.raise, on: window)
+        }
+    }
+
+    func keepMain(id: UInt32, completion: @escaping @MainActor @Sendable () -> Void) {
+        let token = presentationLock.withLock { presentation }
+        queue.async { [self] in
+            defer { scheduler.main.async { completion() } }
+            guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id],
+                  (try? value(application, .frontmost)?.bool) == true,
+                  (try? canPresent(window, id: id)) == true else { return }
+            _ = ax.set(.main, of: window, to: .bool(true))
         }
     }
 
@@ -696,21 +724,22 @@ private final class AppWindows: @unchecked Sendable {
         do {
             guard try canPresent(window,id:id) else { return }
             if let target {
+                // Establish a changed top before sizing so macOS does not
+                // constrain the height against the old top. Otherwise size
+                // first, which preserves partial windows at the left edge.
+                // Both orders use exactly one position write.
+                let positionFirst = resize && position && abs((facts.first { $0.id == id }?.frame.minY ?? target.minY) - target.minY) > 1
+                if positionFirst { try check(ax.set(.position, of: window, to: .point(target.origin))) }
                 // Resize before positioning: macOS otherwise widens windows
                 // at the left edge to retain its minimum visible strip.
                 if resize {
-                    // Size changes are constrained by the window's current
-                    // top edge. Stage inside the display at the target top
-                    // before sizing, then place its possibly partial frame.
-                    let safe = CGPoint(x:0,y:target.minY)
-                    try check(ax.set(.position, of: window, to: .point(safe)))
                     let size = target.size
                     try check(ax.set(.size, of: window, to: .size(size)))
                     constrained.remove(id)
                     validations[id] = nil
                 }
                 guard presentationLock.withLock({ presentation == token }) else { return }
-                if position {
+                if position && !positionFirst {
                     let origin = target.origin
                     try check(ax.set(.position, of: window, to: .point(origin)))
                 }
@@ -810,12 +839,12 @@ private final class AppWindows: @unchecked Sendable {
     /// user's choice. Focus writes repeat this check: each can take long enough
     /// on a busy system for the user to select another tab in between.
     /// Windows without a native tab bar need no AX read.
-    private func isNativeFront(_ window: AXElement, id: UInt32) -> Bool {
+    private func isNativeFront(_ window: AXElement, id: UInt32, timeout: Float = 0.05) -> Bool {
         let groups = facts.first(where: { $0.id == id })?.nativeTabGroups ?? []
         // Its bar can leave the former root before the successor is published.
         // The retained group still identifies the real selected native window.
         for bar in groups.isEmpty ? (nativeBars[id] ?? []) : groups {
-            ax.setMessagingTimeout(bar, seconds: 0.05)
+            ax.setMessagingTimeout(bar, seconds: timeout)
             if let front = try? value(bar, .window)?.element,
                front != window { return false }
         }

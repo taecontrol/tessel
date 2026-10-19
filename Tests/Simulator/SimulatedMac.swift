@@ -290,6 +290,7 @@ package final class SimulatedMac: @unchecked Sendable {
     @MainActor func drag(_ id: UInt32, point: CGPoint) {
         assume(.windowGeometryWrites)
         action("drag window \(id) to \(point.x),\(point.y)")
+        pressPointer()
         applyPosition(id, point)
     }
     @MainActor func resize(_ id: UInt32, size: CGSize) {

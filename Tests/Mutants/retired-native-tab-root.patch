@@ -4,7 +4,7 @@
 diff --git a/Sources/Policy/WindowCatalog.swift b/Sources/Policy/WindowCatalog.swift
 --- a/Sources/Policy/WindowCatalog.swift
 +++ b/Sources/Policy/WindowCatalog.swift
-@@ -335,11 +335,7 @@
+@@ -386,11 +386,7 @@
              }.map(\.id))
              // AXWindows can keep listing a retired root after its successor's
              // read. It stays retired while another window holds its last bar.
@@ -17,13 +17,13 @@ diff --git a/Sources/Policy/WindowCatalog.swift b/Sources/Policy/WindowCatalog.s
              let replacements = Dictionary(uniqueKeysWithValues: next.compactMap { window -> (UInt32, UInt32)? in
                  guard let previous = facts.first(where: {
                      retired.contains($0.id) && window.shares($0.nativeTabGroups.isEmpty ? lastBar($0.id) : $0.nativeTabGroups)
-@@ -356,9 +352,6 @@
+@@ -406,9 +402,6 @@
+             for fact in next where !fact.minimized {
                  let bar = fact.nativeTabGroups.isEmpty ? lastBar(fact.id) : fact.nativeTabGroups
                  if !bar.isEmpty { bars[fact.id] = bar }
-             }
+-            }
 -            for (id, groups) in nativeBars where !newIDs.contains(id) && next.contains(where: { !$0.minimized && $0.shares(groups) }) {
 -                bars[id] = groups
--            }
+             }
              nativeBars = bars
-             facts = next
-             elementsByID = handles.filter { newIDs.contains($0.key) }
+             presentationLock.withLock { displayedMotion = displayedMotion.filter { newIDs.contains($0.key) } }

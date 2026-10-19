@@ -18,6 +18,8 @@ struct NativeContractReply: Codable {
     }
     let motionSamples: [MotionSample]?
     let motionFrameCount: Int?
+    let pointerPresses: Int?
+    let pointerEvents: [String]?
     let reduceMotion: Bool?
     let motionChanges: [Bool]?
     let sampledAt: Double?

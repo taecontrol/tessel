@@ -27,7 +27,8 @@ enum Layout: String, CaseIterable, Sendable { case off, stack, carousel }
         workspaces = Workspaces(store: rows, trusted: true, configuration: config.status.effective,
                                 applications: mac.applications, ax: mac.ax, screens: mac.screens,
                                 windowOrder: mac.windowOrder, scheduler: mac.scheduler, hotkeys: keys,
-                                fixtureOnly: true, motionPreferences: mac.motionPreferences, displayFrames: mac.displayFrames) { mac.closetPort }
+                                fixtureOnly: true, motionPreferences: mac.motionPreferences, displayFrames: mac.displayFrames,
+                                pointerActivity: mac.pointerActivity) { mac.closetPort }
         catalog = WindowCatalog(workspaces: workspaces, applications: mac.applications, ax: mac.ax, scheduler: mac.scheduler)
         workspaces.catalog = catalog
         configurationPublications.append((mac.scheduler.now, config.status))

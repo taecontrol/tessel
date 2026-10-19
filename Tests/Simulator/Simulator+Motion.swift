@@ -30,9 +30,15 @@ extension SimulatedMac {
         var requests = 0
         var reduced = false
         var preferences: [WeakPreference] = []
+        var pointers: [WeakPointer] = []
         var shortSizes = Set<UInt32>()
     }
     struct WeakPreference { weak var value: PreferenceToken? }
+    struct WeakPointer { weak var value: PointerToken? }
+    @MainActor final class PointerToken: MotionPreferenceObservation {
+        let receive: @MainActor @Sendable () -> Void
+        init(_ receive: @escaping @MainActor @Sendable () -> Void) { self.receive = receive }
+    }
     @MainActor final class PreferenceToken: MotionPreferenceObservation {
         let receive: @MainActor @Sendable (Bool) -> Void
         init(_ receive: @escaping @MainActor @Sendable (Bool) -> Void) { self.receive = receive }
@@ -40,6 +46,11 @@ extension SimulatedMac {
 
     @MainActor package var displayFrames: any DisplayFramePort { DisplayFrames(mac: self) }
     @MainActor package var motionPreferences: any MotionPreferencePort { Preferences(mac: self) }
+    @MainActor package var pointerActivity: any PointerActivityPort { PointerActivity(mac: self) }
+    @MainActor func pressPointer() {
+        assume(.pointerPressNotifications)
+        for box in motion.pointers { box.value?.receive() }
+    }
     @MainActor package var geometryWrites: [GeometryWrite] { motion.writes }
     @MainActor package var visibilityChanges: [VisibilityChange] { motion.visibility }
     @MainActor package var displaySamples: [DisplaySample] { motion.samples }
@@ -106,6 +117,16 @@ extension SimulatedMac {
             mac.scheduler.call("MotionPreferencePort.observe")
             let token = PreferenceToken(receive)
             mac.motion.preferences.append(WeakPreference(value: token))
+            return token
+        }
+    }
+    @MainActor private struct PointerActivity: PointerActivityPort {
+        let mac: SimulatedMac
+        func observePress(_ receive: @escaping @MainActor @Sendable () -> Void) -> any MotionPreferenceObservation {
+            mac.assume(.pointerPressNotifications)
+            mac.scheduler.call("PointerActivityPort.observePress")
+            let token = PointerToken(receive)
+            mac.motion.pointers.append(WeakPointer(value: token))
             return token
         }
     }

@@ -16,21 +16,58 @@ extension Acceptance.Journeys {
         try step("card wiring: transfer one window from each app into the second rail") {
             try desktop.activate(key:"bottomA"); try desktop.post(kVK_ANSI_J,shift:true)
             try requireFinalState("the first bottom fixture is in rail two") { try harness.row(c)?.rail == 2 }
-            try desktop.activate(other,key:"bottomB"); try desktop.post(kVK_ANSI_J,shift:true)
-            try requireFinalState("both mixed-app rails are established") {
+            if try !finalState({ try desktop.shown(c, in: desktop.observe()) }) {
+                let state = try desktop.observe()
+                throw HarnessError("first card: focus \(state.windows.filter(\.focused).map(\.id)), frames \(state.windows.map { "\($0.id):\($0.frame) visible=\($0.visible)" }), area \(state.area)")
+            }
+            try requireFinalState("the first transfer has hidden the source rail") {
+                let visible = try desktop.observe().visibleIDs
+                return [a,b,d].allSatisfy { !visible.contains($0) }
+            }
+            try desktop.activate(other,key:"bottomB")
+            try requireFinalState("external selection has revealed the source rail before the next transfer") {
+                let observation = try desktop.observe()
+                return try harness.status().workspaces?.rail == 1 && !observation.visibleIDs.contains(c)
+                    && observation.windows.contains { $0.id == d && $0.visible && abs($0.frame[1] - observation.area[1] - 10) <= 1 }
+            }
+            try desktop.post(kVK_ANSI_J,shift:true)
+            let established = try finalState {
                 let rows = try harness.rows()
                 return top.allSatisfy { id in rows.contains { $0.id == id && $0.rail == 1 } }
                     && bottom.allSatisfy { id in rows.contains { $0.id == id && $0.rail == 2 } }
             }
+            if !established {
+                let actual = try harness.rows().map { "id=\($0.id) rail=\($0.rail ?? 0)" }
+                throw HarnessError("mixed rails: top \(top), bottom \(bottom), actual \(actual)")
+            }
+            try requireFinalState("the second transfer has finished before returning up") {
+                let observation = try desktop.observe()
+                return bottom.allSatisfy { id in observation.windows.contains { $0.id == id && $0.visible && abs($0.frame[1] - observation.area[1] - 10) <= 1 } }
+                    && top.allSatisfy { !observation.visibleIDs.contains($0) }
+            }
             try desktop.post(kVK_ANSI_K)
-            try desktop.activate(key:"topA"); try desktop.post(kVK_ANSI_L)
+            try requireFinalState("the return card has finished before arranging its focus") {
+                let observation = try desktop.observe()
+                return top.allSatisfy { observation.visibleIDs.contains($0) } && bottom.allSatisfy { !observation.visibleIDs.contains($0) }
+            }
+            try desktop.activate(key:"topA"); try desktop.post(kVK_ANSI_H)
+            try desktop.expectFocus(a)
+            try desktop.post(kVK_ANSI_L)
             try desktop.expectFocus(b)
+            try requireFinalState("the mixed-app top pair is settled before sampling cards") {
+                let observation = try desktop.observe(), area = observation.area
+                return top.allSatisfy { id in observation.windows.contains { $0.id == id && $0.visible && abs($0.frame[1] - area[1] - 10) <= 1 } }
+                    && observation.windows.contains { $0.id == a && abs($0.frame[0] - area[0] - 10) <= 1 }
+                    && observation.windows.contains { $0.id == b && abs($0.frame[0] + $0.frame[2] - area[0] - area[2] + 10) <= 1 }
+            }
         }
         for (key,moving,destination) in [(kVK_ANSI_J,bottom,d),(kVK_ANSI_K,bottom,b)] {
             try step("display-frame and card wiring: sample intermediate positions and native order") {
                 let sourcePID = try desktop.observe().frontmostFixturePID
-                guard let started = try harness.observer.command("contract",["operation":"motionStart","pid":fixture.pid,
-                    "targets":[["pid":fixture.pid,"ids":[a,c]],["pid":other.pid,"ids":[b,d]]]]).contract else {
+                guard let started = try finalValue({
+                    try? harness.observer.command("contract",["operation":"motionStart","pid":fixture.pid,
+                        "targets":[["pid":fixture.pid,"ids":[a,c]],["pid":other.pid,"ids":[b,d]]]]).contract
+                }) else {
                     throw HarnessError("motion observer did not start")
                 }
                 _ = started
