@@ -6,6 +6,26 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct CarouselMotion {
+    @Test("retargeting while an AX size reply is in flight restores the requested pair")
+    func retargetDuringAnUnconfirmedSizeWrite() {
+        requireCarousel(Scenario.run("retarget an in-flight AX width") { s in
+            let f = CarouselFixture(s, presets: [0.5,0.5], duration: 400), a = f.ids[0], b = f.ids[1]
+            f.press("alt-l"); f.press("alt-h")
+            f.tessel.pressKey("alt-h")
+            let reading = f.mac.pause(after: .call("AccessibilityPort.copy AXPosition window \(a) \(f.app.alias)"))
+            if case .paused = reading {} else { s.expect("the width frame is outstanding", false) }
+            f.mac.scheduler.resume()
+            let writing = f.mac.pause(after: .call("MainLane.async native event"))
+            if case .paused = writing {} else { s.expect("the size write is returning", false) }
+            s.expect("the native width changed before its reply", f.frame(a).width > 849)
+            let interrupted = f.frame(a).width, mark = f.mac.geometryWrites.count
+            f.tessel.pressKey("alt-l"); s.settle()
+            let first = f.mac.geometryWrites.dropFirst(mark).first { $0.window == a && $0.attribute == .size }?.requested.size?.width ?? 0
+            s.expect("the new spring starts from the native intermediate width", first > 849 && first < interrupted)
+            f.pair(a,b,focused:b)
+        })
+    }
+
     @Test("cross-app card preparation preserves equal nominal widths through repeated reveals")
     func crossAppCardsPreserveNominalWidths() {
         for writes in WriteOrder.allCases {

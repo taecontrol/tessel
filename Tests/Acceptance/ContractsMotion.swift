@@ -109,6 +109,9 @@ extension Acceptance.Contracts {
                 order.firstIndex(of: id).map { $0 < firstStatic } == true
             }
         }
+        try desktop.activate(key: "a")
+        try #require(try write(sibling, "AXMain") == 0)
+        try expectFocus(sibling)
     }
 
     @Test("closet-ax-identity: retained AX handles and hidden position writes survive a round trip", contract(.closetAXIdentity))

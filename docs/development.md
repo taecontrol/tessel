@@ -377,7 +377,8 @@ The status item shows the workspace number and one bar per rail.
 
 Local layout changes use a demand-driven NSScreen display link and the
 prototype's critically damped spring. Retargeting starts from geometry confirmed
-by each AX worker. Slow apps retain at most one intermediate frame; the final
+by each AX worker, reading back interrupted writes once their lane drains.
+An unanswered read skips that tile's intermediate guesses. Slow apps retain at most one intermediate frame; the final
 frame is always written, read back and retried. Resize ordering accounts for
 the window's current screen position; clipped geometry never becomes an
 intrinsic app width limit. Returning tiles are sized on screen before motion.
@@ -386,6 +387,8 @@ Mouse presses cancel motion before dragging, and Reduce Motion notifications
 make subsequent commands instant. No display callbacks run at rest.
 
 Downward cards focus the incoming selection before raising its other windows.
+Preparation confirms native focus and CG order before moving frames; bounded
+focus readback retries never repeat activation or AXRaise.
 Upward cards retain the leaving selection until it has moved down and hidden.
 A sibling raise restores AXMain without another raise or app activation.
 Horizontally entering and leaving tiles keep at least one point on screen;
