@@ -1,9 +1,19 @@
+import Compression
 import Foundation
+
+private enum CaptureRenderingError: Error { case compression }
 
 /// Replay only measured frames. Keep the evidence portable: no external assets,
 /// screen images, native titles, or synthetic spring/interpolated geometry.
-func carouselCaptureHTML(_ data: Data) -> String {
-    let json = String(decoding: data, as: UTF8.self).replacingOccurrences(of: "<", with: "\\u003c")
+func carouselCaptureHTML(_ data: Data) throws -> String {
+    var bytes = [UInt8](repeating: 0, count: data.count + 1024)
+    let count = data.withUnsafeBytes { source in
+        compression_encode_buffer(&bytes, bytes.count, source.bindMemory(to: UInt8.self).baseAddress!, data.count, nil, COMPRESSION_ZLIB)
+    }
+    guard count > 0 else { throw CaptureRenderingError.compression }
+    // Apple's ZLIB codec emits raw DEFLATE. Native browser decompression keeps
+    // every measured sample in a portable page small enough for inline review.
+    let payload = Data(bytes.prefix(count)).base64EncodedString()
     return #"""
     <!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Carousel · measured fixture motion</title><style>
@@ -22,8 +32,9 @@ func carouselCaptureHTML(_ data: Data) -> String {
     <table><thead><tr><th>Window</th><th>X</th><th>Y</th><th>W</th><th>H</th><th>CG / focus</th><th>Bounds</th></tr></thead><tbody id="frames"></tbody></table>
     <details><summary>How to read this capture</summary><p>Playback holds each actual sample until the next one; no frames are interpolated. The filmstrip selects observed samples, including the baseline and settled tail. The timeline includes measured geometry even while a window is hidden; only CG-visible rectangles are drawn in the screen. The highest rectangle in CG order is drawn last. A blue outline marks the answered AX focus.</p><p>WindowServer supplies window bounds without waiting for the app. Missing descriptions fall back to short AX reads; the table identifies the source. Each sample has a raw-clock start and end; CG order is read after geometry. Display callback intervals and read spans are reported below, exposing skipped callbacks and slow reads. An unanswered AX read is shown as unavailable, never inferred to be hidden. The open command starts at the request timestamp; key commands start at the fixture's real key post.</p><p>The signed observer validates fixture identities, never queries titles, and discovers the newly opened fixture through fixture-owned CG window IDs. All data are embedded in this file. The capture is visual evidence for the owner, not a latency gate. Timing percentiles belong to the separate native latency suite.</p></details>
     <p id="provenance"></p><button id="download">Download observations JSON</button>
-    </main><script>
-    const data=__CAPTURE_DATA__;
+    </main><script type="module">
+    const packed=Uint8Array.from(atob('__CAPTURE_DATA__'),c=>c.charCodeAt(0));
+    const data=JSON.parse(await new Response(new Blob([packed]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text());
     const $=id=>document.getElementById(id),ns='http://www.w3.org/2000/svg';
     const colors=['#8ab4f8','#99cf9c','#cba6f7','#f3bc79','#f08c99'],titles=['Editor','Terminal','Browser','Notes','Mail'];
     let ji=0,si=0,fi=0,playing=false,epoch=0,first=0,raf=0;
@@ -67,7 +78,7 @@ func carouselCaptureHTML(_ data: Data) -> String {
     $('plot').onclick=e=>{const r=$('plot').getBoundingClientRect(),f=Math.max(0,Math.min(1,((e.clientX-r.left)/r.width*720-40)/665)),ss=step().samples,t=ms(ss[0])+f*(ms(ss.at(-1))-ms(ss[0]));stop();frame(ss.reduce((best,s,i)=>Math.abs(ms(s)-t)<Math.abs(ms(ss[best])-t)?i:best,0))};
     $('download').onclick=()=>{const a=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify(data)],{type:'application/json'}));a.href=url;a.download='carousel-motion.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
     $('provenance').textContent=`Captured ${data.measuredAt}. Commit ${data.commit.slice(0,12)}${data.workingTreeDirty?' + working changes':''}; app ${data.appVersion}. ${data.source}. Review remains pending.`;
-    if(data.journeys.length)selectJourney();console.log(JSON.stringify({journeys:data.journeys.length,steps:data.journeys.reduce((n,j)=>n+j.steps.length,0),review:data.reviewStatus}));
+    if(data.journeys.length)selectJourney();console.log(JSON.stringify({journeys:data.journeys.length,steps:data.journeys.reduce((n,j)=>n+j.steps.length,0),review:data.reviewStatus}));document.dispatchEvent(new Event("capture-ready"));
     </script></html>
-    """#.replacingOccurrences(of: "__CAPTURE_DATA__", with: json)
+    """#.replacingOccurrences(of: "__CAPTURE_DATA__", with: payload)
 }

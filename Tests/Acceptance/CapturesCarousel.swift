@@ -163,7 +163,8 @@ extension Acceptance {
                 let data = try encoder.encode(Artifact(commit: commit, appVersion: version, workingTreeDirty: dirty,
                     operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString, journeys: journeys))
                 try data.write(to: directory.appending(path: "carousel-motion.json"), options: .atomic)
-                try Data(carouselCaptureHTML(data).utf8).write(to: directory.appending(path: "index.html"), options: .atomic)
+                let html = try carouselCaptureHTML(data)
+                try Data(html.utf8).write(to: directory.appending(path: "index.html"), options: .atomic)
             }
             defer { try? save() }
             for ms in [80, 400] {
