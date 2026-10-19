@@ -26,4 +26,4 @@ diff --git a/Sources/Policy/WindowCatalog.swift b/Sources/Policy/WindowCatalog.s
 -                bars[id] = groups
              }
              nativeBars = bars
-             presentationLock.withLock { displayedMotion = displayedMotion.filter { newIDs.contains($0.key) } }
+             presentationLock.withLock { displayedMotion = Dictionary(uniqueKeysWithValues: next.map { ($0.id, $0.frame) }) }

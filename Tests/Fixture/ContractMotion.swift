@@ -108,9 +108,6 @@ final class FixtureMotionProbe: NSObject {
     @objc private func frame(_ display: CADisplayLink) {
         frameCount += 1
         guard samples.count < 64 else { return }
-        let order = (CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []).compactMap {
-            ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value
-        }
         var appValue: CFTypeRef?, frontmost: pid_t = 0
         if AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute as CFString, &appValue) == .success,
            let value = appValue, CFGetTypeID(value) == AXUIElementGetTypeID() {
@@ -126,10 +123,20 @@ final class FixtureMotionProbe: NSObject {
                 AXValueGetValue(unsafeBitCast(position!, to: AXValue.self), .cgPoint, &point)
                 AXValueGetValue(unsafeBitCast(size!, to: AXValue.self), .cgSize, &dimensions)
             }
-            return ["id": target.id, "valid": valid, "frame": [point.x,point.y,dimensions.width,dimensions.height], "visible": order.contains(target.id)]
+            return ["id": target.id, "valid": valid, "frame": [point.x,point.y,dimensions.width,dimensions.height]]
         }
-        // CG order is restricted to targets before it crosses the observer socket.
+        // Read order after geometry. Otherwise the first moving positions can
+        // be paired with preparation's earlier, unfinished AXRaise sequence.
+        // CG order is restricted to targets before crossing the socket.
         let ids = Set(targets.map(\.id))
-        samples.append(["at": display.timestamp, "windows": windows, "order": order.filter { ids.contains($0) }, "frontmost": frontmost])
+        let order = (CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []).compactMap {
+            ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value
+        }
+        let observed = windows.map { window in
+            var window = window
+            window["visible"] = (window["id"] as? UInt32).map { order.contains($0) } ?? false
+            return window
+        }
+        samples.append(["at": display.timestamp, "windows": observed, "order": order.filter { ids.contains($0) }, "frontmost": frontmost])
     }
 }

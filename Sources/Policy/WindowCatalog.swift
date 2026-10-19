@@ -71,10 +71,10 @@ final class WindowCatalog {
         app.present(id: id, area: area, focus: focus, completion: completion)
     }
 
-    func presentRail(pid: Int32, id: UInt32, frame: CGRect?, position: Bool, resize: Bool, focus: Bool,
+    func presentRail(pid: Int32, id: UInt32, frame: CGRect?, position: Bool, resize: Bool, focus: Bool, screenRight: CGFloat,
                      completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
         guard let app = apps[pid] else { completion(nil); return }
-        app.presentRail(id:id,target:frame,position:position,resize:resize,focus:focus,completion:completion)
+        app.presentRail(id:id,target:frame,position:position,resize:resize,focus:focus,screenRight:screenRight,completion:completion)
     }
 
     func writeMotion(pid: Int32, writes: [UInt32: CarouselAnimator.Write], final: Bool,
@@ -118,7 +118,7 @@ private enum AXReadError: Error { case unresponsive, gone, changed }
 private struct WindowFacts {
     let id: UInt32
     let minimized: Bool
-    let fullscreen: Bool
+    var fullscreen: Bool
     let subrole: String
     let resizable: Bool
     let tabs: Int
@@ -250,7 +250,7 @@ private final class AppWindows: @unchecked Sendable {
     }
 
     private func handleChange(_ notification: AXNotification, element: AXElement) {
-        if [.windowCreated, .destroyed, .sheetCreated, .restored].contains(notification) { structuralMotionRead = true }
+        if [.windowCreated, .destroyed, .sheetCreated, .restored, .minimized].contains(notification) { structuralMotionRead = true }
         // A closing window can still be listed by the read that follows its event.
         let needsSettling = [.windowCreated, .sheetCreated, .mainWindowChanged,
                              .destroyed].contains(notification)
@@ -411,7 +411,7 @@ private final class AppWindows: @unchecked Sendable {
                 bars[id] = groups
             }
             nativeBars = bars
-            presentationLock.withLock { displayedMotion = displayedMotion.filter { newIDs.contains($0.key) } }
+            presentationLock.withLock { displayedMotion = Dictionary(uniqueKeysWithValues: next.map { ($0.id, $0.frame) }) }
             facts = next
             elementsByID = handles.filter { newIDs.contains($0.key) }
             // The last fill result belongs to the continuing native group.
@@ -519,6 +519,10 @@ private final class AppWindows: @unchecked Sendable {
             // Equal AX handles do not inherit each other's messaging timeout.
             ax.setMessagingTimeout(window, seconds: 0.05)
             focused = ax.windowID(window).value ?? 0
+            if motionActive, let fullscreen = try? value(window, .fullscreen)?.bool,
+               let index = facts.firstIndex(where: { $0.id == focused }) {
+                facts[index].fullscreen = fullscreen
+            }
         }
         let frontmost = (try? value(application, .frontmost)?.bool) == true
         if frontmost {
@@ -549,7 +553,6 @@ private final class AppWindows: @unchecked Sendable {
             presentation = UUID()
             if invalidatingFocus { focusIntent = UUID() }
         }
-        queue.async { [self] in motionTimeouts.removeAll() }
     }
 
     func setMotionActive(_ active: Bool) {
@@ -600,17 +603,25 @@ private final class AppWindows: @unchecked Sendable {
                       !hidden, !fact.minimized, !fact.fullscreen else { continue }
                 if !motionTimeouts.contains(id) || failures > 0 {
                     ax.setMessagingTimeout(window, seconds: failures > 0 ? 0.05 : 0.002)
-                    motionTimeouts.insert(id)
+                    if failures > 0 { motionTimeouts.remove(id) }
+                    else { motionTimeouts.insert(id) }
                 }
                 guard isNativeFront(window, id: id, timeout: failures > 0 ? 0.05 : 0.002) else { continue }
                 eligible.append(id)
             }
             for id in eligible {
                 guard presentationLock.withLock({ presentation == token }), let window = elementsByID[id], let write = writes[id] else { return }
+                var current = presentationLock.withLock { displayedMotion[id] } ?? facts.first { $0.id == id }?.frame ?? write.frame
+                if write.resize, let point = try value(window, .position)?.point { current.origin = point }
+                guard presentationLock.withLock({ presentation == token }) else { return }
+                // Choose the write order from the old and requested frames;
+                // screen-edge constraints are separate from app width limits.
+                let positionFirst = !write.resize || positionBeforeSize(current: current, target: write.frame, screenRight: write.screenRight)
+                if write.position && positionFirst { try check(ax.set(.position, of: window, to: .point(write.frame.origin))) }
                 guard presentationLock.withLock({ presentation == token }) else { return }
                 if write.resize { try check(ax.set(.size, of: window, to: .size(write.frame.size))) }
                 guard presentationLock.withLock({ presentation == token }) else { return }
-                if write.position {
+                if write.position && !positionFirst {
                     try check(ax.set(.position, of: window, to: .point(write.frame.origin)))
                 }
                 presentationLock.withLock { displayedMotion[id] = write.frame }
@@ -637,8 +648,10 @@ private final class AppWindows: @unchecked Sendable {
         let token = presentationLock.withLock { presentation }
         queue.async { [self] in
             defer { scheduler.main.async { completion() } }
-            guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id],
-                  (try? canPresent(window, id: id)) == true else { return }
+            guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
+            if motionTimeouts.remove(id) != nil { ax.setMessagingTimeout(window, seconds: 0.05) }
+            guard (try? canPresent(window, id: id)) == true,
+                  presentationLock.withLock({ presentation == token }) else { return }
             _ = ax.perform(.raise, on: window)
         }
     }
@@ -647,9 +660,11 @@ private final class AppWindows: @unchecked Sendable {
         let token = presentationLock.withLock { presentation }
         queue.async { [self] in
             defer { scheduler.main.async { completion() } }
-            guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id],
-                  (try? value(application, .frontmost)?.bool) == true,
-                  (try? canPresent(window, id: id)) == true else { return }
+            guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
+            if motionTimeouts.remove(id) != nil { ax.setMessagingTimeout(window, seconds: 0.05) }
+            guard (try? value(application, .frontmost)?.bool) == true,
+                  (try? canPresent(window, id: id)) == true,
+                  presentationLock.withLock({ presentation == token }) else { return }
             _ = ax.set(.main, of: window, to: .bool(true))
         }
     }
@@ -708,30 +723,31 @@ private final class AppWindows: @unchecked Sendable {
         }
     }
 
-    func presentRail(id: UInt32, target: CGRect?, position: Bool, resize: Bool, focus: Bool,
+    func presentRail(id: UInt32, target: CGRect?, position: Bool, resize: Bool, focus: Bool, screenRight: CGFloat,
                      completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
         let token = presentationLock.withLock { presentation }
         queue.async { [self] in
-            presentRail(id:id,target:target,position:position,resize:resize,focus:focus,token:token,failures:0,completion:completion)
+            presentRail(id:id,target:target,position:position,resize:resize,focus:focus,screenRight:screenRight,token:token,failures:0,completion:completion)
         }
     }
 
-    private func presentRail(id: UInt32, target: CGRect?, position: Bool, resize: Bool, focus: Bool, token: UUID,
+    private func presentRail(id: UInt32, target: CGRect?, position: Bool, resize: Bool, focus: Bool, screenRight: CGFloat, token: UUID,
                              failures: Int, completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
         var accepted: CGRect?, retrying = false
         defer { if !retrying { let result = accepted; scheduler.main.async { completion(result) } } }
         guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
+        if motionTimeouts.remove(id) != nil { ax.setMessagingTimeout(window, seconds: 0.05) }
         do {
             guard try canPresent(window,id:id) else { return }
             if let target {
-                // Establish a changed top before sizing so macOS does not
-                // constrain the height against the old top. Otherwise size
-                // first, which preserves partial windows at the left edge.
-                // Both orders use exactly one position write.
-                let positionFirst = resize && position && abs((facts.first { $0.id == id }?.frame.minY ?? target.minY) - target.minY) > 1
+                // Both orders use one position write. Resize at the old
+                // origin when it fits; otherwise establish the new origin.
+                var current = facts.first { $0.id == id }?.frame ?? target
+                if resize, let point = try value(window, .position)?.point { current.origin = point }
+                guard presentationLock.withLock({ presentation == token }) else { return }
+                let positionFirst = resize && position && positionBeforeSize(current: current, target: target, screenRight: screenRight)
                 if positionFirst { try check(ax.set(.position, of: window, to: .point(target.origin))) }
-                // Resize before positioning: macOS otherwise widens windows
-                // at the left edge to retain its minimum visible strip.
+                guard presentationLock.withLock({ presentation == token }) else { return }
                 if resize {
                     let size = target.size
                     try check(ax.set(.size, of: window, to: .size(size)))
@@ -744,10 +760,12 @@ private final class AppWindows: @unchecked Sendable {
                     try check(ax.set(.position, of: window, to: .point(origin)))
                 }
                 accepted = try frame(window)
+                if let accepted { presentationLock.withLock { displayedMotion[id] = accepted } }
                 if let index = facts.firstIndex(where: { $0.id == id }), let accepted { facts[index].frame = accepted }
             }
-            guard presentationLock.withLock({ presentation == token }), try canPresent(window,id:id) else { return }
+            guard presentationLock.withLock({ presentation == token }) else { return }
             if focus {
+                guard try canPresent(window,id:id) else { return }
                 try check(ax.set(.frontmost, of: application, to: .bool(true)))
                 guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return }
                 try check(ax.set(.main, of: window, to: .bool(true)))
@@ -783,10 +801,17 @@ private final class AppWindows: @unchecked Sendable {
             // no newer render supersedes this one; a hung app then costs nothing.
             retrying = true
             queue.after(milliseconds: 50 << (failures+1)) { [weak self] in
-                self?.presentRail(id:id,target:target,position:position,resize:resize,focus:focus,token:token,
+                self?.presentRail(id:id,target:target,position:position,resize:resize,focus:focus,screenRight:screenRight,token:token,
                                   failures:failures+1,completion:completion)
             }
         } catch { /* Another app's queue and the CLI remain independent. */ }
+    }
+
+    private func positionBeforeSize(current: CGRect, target: CGRect, screenRight: CGFloat) -> Bool {
+        let fitsCurrent = current.minX + target.width <= screenRight && current.minX + target.width >= 1
+        if fitsCurrent { return target.height > current.height && target.minY < current.minY }
+        if target.maxX <= screenRight && target.maxX >= 1 { return true }
+        return target.minX < current.minX
     }
 
     /// Shutdown is synchronous so a terminating process cannot abandon its

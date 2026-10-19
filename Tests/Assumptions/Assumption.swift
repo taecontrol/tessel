@@ -46,9 +46,11 @@ package enum Assumption: String, CaseIterable, Sendable {
     case displayFrameDemand = "display-frame-demand"
     case reduceMotionNotifications = "reduce-motion-notifications"
     case pointerPressNotifications = "pointer-press-notifications"
+    case axResizeAnchoring = "ax-resize-anchoring"
 
     package var statement: String {
         switch self {
+        case .axResizeAnchoring: "AXSize can be constrained by the current positive x; moving left before growing allows the requested width."
         case .pointerPressNotifications: "An NSEvent global mouse-down monitor receives a press delivered to another app before subsequent drag events."
         case .axVerticalClamping: "AXPosition keeps the top below the menu bar and at least 32 points visible at the screen bottom."
         case .axHorizontalSliver: "AXPosition accepts a one-point horizontal sliver, but a wholly off-screen window snaps back to show 40 points."

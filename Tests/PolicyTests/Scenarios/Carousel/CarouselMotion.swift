@@ -6,6 +6,77 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct CarouselMotion {
+    @Test("a clipped moving window still receives its exact final write after reaching the screen edge early")
+    func clippedMotionAlwaysWritesTheFinalFrame() {
+        requireCarousel(Scenario.run("final write after horizontal clamping") { s in
+            let f = CarouselFixture(s, presets: Array(repeating: 0.5, count: 4), duration: 400), a = f.ids[0]
+            f.press("alt-l"); f.mac.clearMotionHistory()
+            f.tessel.pressKey("alt-l"); f.tessel.pressKey("alt-l"); s.settle()
+            let last = f.mac.geometryWrites.last { $0.window == a && $0.attribute == .position }
+            s.expect("the final display batch includes the clipped window even when intermediate frames stopped changing", last?.frame == f.mac.displaySamples.count)
+            f.near(Double(last?.accepted.maxX ?? -1), 1, "the leaving window's final write preserves one point")
+        })
+    }
+
+    @Test("disabling during motion stops display demand and resumes ordinary catalog notifications")
+    func disablingDuringMotionRestoresObservation() {
+        requireCarousel(Scenario.run("disable an active carousel") { s in
+            let f = CarouselFixture(s), a = f.ids[0], b = f.ids[1]
+            f.press("alt-l"); f.tessel.pressKey("alt-l")
+            s.after(milliseconds: 30, "disable during movement") { f.tessel.changeConfig("") }
+            s.settle()
+            s.expect("the experiment is disabled", !f.tessel.status.enabled)
+            let count = f.mac.displaySamples.count
+            f.app.groupTabs([a,b], selected: a); s.settle()
+            s.expect("ordinary native-tab notifications are observed after motion is disabled", f.tessel.windows.contains { $0.id == a && $0.tabs == 2 })
+            s.expect("disabled motion requests no more display frames", f.mac.displaySamples.count == count)
+        })
+    }
+
+    @Test("retargeting before the first tick uses the frame staged by a prior card reveal")
+    func preparedFramesReplaceOlderMotionHistory() {
+        requireCarousel(Scenario.run("card preparation replaces old geometry") { s in
+            let fraction = 490.0 / 1718
+            let f = CarouselFixture(s, presets: Array(repeating: fraction, count: 4)), ids = f.ids
+            f.select(ids[1]); f.press("alt-shift-j")
+            f.select(ids[3]); f.press("alt-shift-j"); f.press("alt-k")
+            f.press("alt-h")
+            f.pair(ids[0], ids[2], focused: ids[0])
+            f.mac.clearMotionHistory()
+            f.tessel.pressKey("alt-h"); f.tessel.pressKey("alt-l"); s.settle()
+            f.pair(ids[0], ids[2], focused: ids[2])
+            s.expect("a canceled expansion does not replay geometry from an older rail", f.mac.geometryWrites.isEmpty)
+        })
+    }
+
+    @Test("instant growth moves left before resizing and does not learn the screen edge as an app maximum")
+    func instantGrowthAtTheRightEdge() {
+        requireCarousel(Scenario.run("instant width at the right edge") { s in
+            let f = CarouselFixture(s, duration: 0), b = f.ids[1]
+            f.press("alt-l"); f.press("alt-r")
+            f.near(f.frame(b).width, f.width(2.0/3), "right-hand half grows to two thirds")
+            f.press("alt-r")
+            f.near(f.frame(b).minX, f.area.minX, "full width moves to the left edge")
+            f.near(f.frame(b).width, f.area.width, "screen position never becomes an intrinsic maximum")
+        })
+    }
+
+    @Test("native fullscreen during motion cancels the landing and never enters the closet")
+    func nativeFullscreenInterruptsMotion() {
+        requireCarousel(Scenario.run("fullscreen interrupts an animated tile") { s in
+            let f = CarouselFixture(s), b = f.ids[1]
+            f.press("alt-l"); f.mac.clearMotionHistory()
+            f.tessel.pressKey("alt-l")
+            s.after(milliseconds: 30, "the selected app enters native fullscreen") { f.app.enterFullscreen(b) }
+            s.settle()
+            s.expect("the fullscreen window leaves workspace management", f.tessel.windows.first { $0.id == b }?.workspace == nil)
+            s.expect("fullscreen never enters the closet", !f.mac.isInCloset(b))
+            let delivered = f.mac.displaySamples.count
+            f.mac.scheduler.main.after(milliseconds: 1_000) {}; s.settle()
+            s.expect("fullscreen interrupts display demand", f.mac.displaySamples.count == delivered)
+        })
+    }
+
     @Test("a busy app drops intermediate frames while a healthy neighbor lands and receives focus")
     func busyAppDoesNotQueueHealthyMotion() {
         requireCarousel(Scenario.run("independent animated AX lanes") { s in
@@ -156,7 +227,8 @@ import Testing
             s.settle(); f.pair(ids[4],ids[5],focused:ids[5])
             let lastPress = start + 90
             s.expect("repeat motion uses intermediate frames", f.mac.displaySamples.count >= 2)
-            s.expect("no animation is queued behind the final key (last write \(f.mac.geometryWrites.map(\.at).max() ?? 0), limit \(lastPress + 89), late \(f.mac.geometryWrites.filter { $0.at > lastPress + 89 }.map { "\($0.window) \($0.attribute) @\($0.at)" }))", f.mac.geometryWrites.allSatisfy { $0.at <= lastPress + 80 + 9 })
+            let finalFrame = Int(ceil((f.mac.displaySamples.last?.time ?? 0) * 1_000))
+            s.expect("no AX batch queues behind the final display frame; its writes fit E16's eight-millisecond frame budget", f.mac.geometryWrites.allSatisfy { $0.at <= finalFrame + 7 })
             s.expect("the final display frame is within duration plus one refresh", (f.mac.displaySamples.last?.time ?? .infinity) <= Double(lastPress + 80)/1_000 + 1.0/120)
         })
         requireCarousel(Scenario.run("reverse from current display frame") { s in

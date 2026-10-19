@@ -378,7 +378,10 @@ The status item shows the workspace number and one bar per rail.
 Local layout changes use a demand-driven NSScreen display link and the
 prototype's critically damped spring. Retargeting starts from geometry confirmed
 by each AX worker. Slow apps retain at most one intermediate frame; the final
-frame is read back and retried. Workspace switches and sends stay instant.
+frame is always written, read back and retried. Resize ordering accounts for
+the window's current screen position; clipped geometry never becomes an
+intrinsic app width limit. Returning tiles are sized on screen before motion.
+Workspace switches and sends stay instant.
 Mouse presses cancel motion before dragging, and Reduce Motion notifications
 make subsequent commands instant. No display callbacks run at rest.
 

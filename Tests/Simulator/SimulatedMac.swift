@@ -342,7 +342,12 @@ package final class SimulatedMac: @unchecked Sendable {
     }
     func applySize(_ id: UInt32, _ size: CGSize) {
         guard let spec = windows[id]?.spec else { return }
-        let accepted = CGSize(width: max(spec.minimumSize.width, min(spec.maximumSize.width, size.width)),
+        var maximumWidth = spec.maximumSize.width
+        if spec.positionAcceptance == .screenEdges && spec.frame.minX > geometry.frame.minX {
+            assume(.axResizeAnchoring)
+            maximumWidth = min(maximumWidth, geometry.frame.maxX - spec.frame.minX)
+        }
+        let accepted = CGSize(width: max(spec.minimumSize.width, min(maximumWidth, size.width)),
                               height: max(spec.minimumSize.height, min(spec.maximumSize.height, size.height)))
         for member in groupMembers(id) { windows[member]?.spec.frame.size = accepted }
         notify(.resized, node: .window(id))

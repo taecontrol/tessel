@@ -4,14 +4,15 @@ import CoreGraphics
 import Ports
 #endif
 
-/// Owns display demand and the displayed geometry. There is at most one AX
-/// batch in flight; late display frames are discarded rather than queued.
+/// Owns display demand and interpolated geometry. AX workers reserve one
+/// intermediate batch per app and discard late frames rather than queue them.
 @MainActor
 final class CarouselAnimator {
     struct Write: Sendable {
         let frame: CGRect
         let position: Bool
         let resize: Bool
+        let screenRight: CGFloat
     }
     typealias Writer = ([UInt32: Write], Bool, @escaping @MainActor @Sendable () -> Void) -> Void
     private let display: any DisplayFramePort
@@ -63,9 +64,11 @@ final class CarouselAnimator {
                     }
                     frame.origin.x = max(bounds.minX + 1 - frame.width, min(bounds.maxX - 1, frame.minX))
                     frame.origin.y = max(menuBottom, min(bounds.maxY - 32, frame.minY))
-                    if self.frames[id] == frame { continue }
+                    // Intermediate writes may have been skipped by a busy AX
+                    // lane. Every moving window still receives the landing.
+                    if p < 1, self.frames[id] == frame { continue }
                     batch[id] = Write(frame: frame, position: a.origin != b.origin || a.size != b.size || bounce != nil,
-                                      resize: a.size != b.size)
+                                      resize: a.size != b.size, screenRight: bounds.maxX)
                 }
                 let displayed = batch.mapValues(\.frame)
                 busy = true

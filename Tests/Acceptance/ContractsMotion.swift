@@ -2,6 +2,25 @@ import Foundation
 import Testing
 
 extension Acceptance.Contracts {
+    @Test("ax-resize-anchoring: moving left before growing avoids a false width maximum", contract(.axResizeAnchoring))
+    func resizeUsesTheCurrentScreenPosition() throws {
+        let id = try fixture.open(); _ = try window(id)
+        let screen = try native("screen"), full = try #require(screen.screen), area = try #require(screen.axVisibleFrame)
+        let size = [full[2] - 20, 300.0], y = area[1] + 10
+        try #require(try write(id, "AXPosition", [200, y]) == 0)
+        try #require(try write(id, "AXSize", size) == 0)
+        try requireFinalState("the old positive x constrains the requested width") {
+            let frame = try native("retained", ["id": id]).window?.frame ?? []
+            return frame.count == 4 && abs(frame[2] - (full[2] - 200)) <= 1
+        }
+        try #require(try write(id, "AXPosition", [10, y]) == 0)
+        try #require(try write(id, "AXSize", size) == 0)
+        try requireFinalState("moving first accepts the full requested width") {
+            let frame = try native("retained", ["id": id]).window?.frame ?? []
+            return frame.count == 4 && abs(frame[0] - 10) <= 1 && abs(frame[2] - size[0]) <= 1
+        }
+    }
+
     @Test("pointer-press-notifications: a global monitor receives a press in another fixture app", contract(.pointerPressNotifications))
     func pointerPressInterruptsBeforeDragging() throws {
         let id = try fixture.open(); _ = try window(id)
@@ -67,6 +86,14 @@ extension Acceptance.Contracts {
         try requireFinalState("closet return restores visibility without activating its owner") {
             let state = try desktop.observe()
             return state.visibleIDs.contains(a) && state.frontmostFixturePID == anchor.pid
+        }
+        let sibling = try fixture.open(key: "sibling"); _ = try window(sibling)
+        try desktop.activate(key: "sibling")
+        try native("closetHide", ["ids": [a]]); try native("closetShow", ["ids": [a]])
+        try #require(try write(sibling, "AXRaise") == 0)
+        try requireFinalState("raising the active card key restores its order after a sibling returns") {
+            let state = try desktop.observe()
+            return state.frontmostFixturePID == fixture.pid && state.visibleIDs.filter { [a,sibling].contains($0) }.first == sibling
         }
     }
 
