@@ -64,12 +64,11 @@ struct TesselBuild {
         try Data("enum BuildInfo { static let version = \"0.1.0+\(stamp)\" }\n".utf8).write(to: buildInfo)
         let common = try sources(in: "Sources/Shared")
 
-        func compile(_ folder: String, to output: URL, extra: [URL] = []) throws {
+        func compileCommand(_ folder: String, to output: URL, extra: [URL] = []) throws -> [String] {
             let command = ["xcrun", "swiftc", "-parse-as-library", "-swift-version", "6", "-package-name", "tessel", "-O", "-target", "arm64-apple-macos27.0", "-o", output.path]
                 + (["Sources/App", "Sources/CLI"].contains(folder) && options.variant == "dev" ? ["-D", "TESSEL_DEVELOPMENT"] : [])
             let policy = try folder == "Sources/App" ? sources(in: "Sources/Ports") + sources(in: "Sources/Policy") : []
-            let inputs = try (common + policy + sources(in: folder) + extra).map(\.path)
-            guard try run(command + inputs, capture: false).status == 0 else { throw Failure("Compilation of \(folder) failed.") }
+            return try command + (common + policy + sources(in: folder) + extra).map(\.path)
         }
 
         func sign(_ path: URL, identifier: String? = nil) throws {
@@ -87,13 +86,26 @@ struct TesselBuild {
             (name, bundleID, "Sources/App", "TesselApp", [buildInfo]),
             ("Tessel Fixture", "com.taecontrol.tessel.fixture", "Tests/Fixture", "TesselFixture", []),
         ]
+        // Each whole-module compile uses about one core, so the executables
+        // compile concurrently; signing and installation stay sequential.
+        var compiles: [(folder: String, command: [String])] = []
+        for bundle in bundles {
+            let macOS = stage.appending(path: bundle.name + ".app/Contents/MacOS")
+            try manager.createDirectory(at: macOS, withIntermediateDirectories: true)
+            compiles.append((bundle.folder, try compileCommand(bundle.folder, to: macOS.appending(path: bundle.executable), extra: bundle.extra)))
+            if bundle.executable == "TesselApp" {
+                compiles.append(("Sources/CLI", try compileCommand("Sources/CLI", to: macOS.appending(path: "tessel"))))
+            }
+        }
+        let succeeded = Results(count: compiles.count)
+        DispatchQueue.concurrentPerform(iterations: compiles.count) { index in
+            succeeded[index] = (try? run(compiles[index].command, capture: false).status) == 0
+        }
+        if let failed = compiles.indices.first(where: { !succeeded[$0] }) { throw Failure("Compilation of \(compiles[failed].folder) failed.") }
         for bundle in bundles {
             let app = bundle.executable == "TesselApp"
             let path = stage.appending(path: bundle.name + ".app")
             let macOS = path.appending(path: "Contents/MacOS")
-            try manager.createDirectory(at: macOS, withIntermediateDirectories: true)
-            try compile(bundle.folder, to: macOS.appending(path: bundle.executable), extra: bundle.extra)
-            if app { try compile("Sources/CLI", to: macOS.appending(path: "tessel")) }
             let info: [String: Any] = [
                 "CFBundleIdentifier": bundle.identifier, "CFBundleExecutable": bundle.executable,
                 "CFBundleName": bundle.name, "CFBundlePackageType": "APPL",
@@ -186,6 +198,16 @@ struct TesselBuild {
         process.waitUntilExit()
         reading.wait()
         return (process.terminationStatus, String(decoding: outputData, as: UTF8.self), String(decoding: errorData.data, as: UTF8.self))
+    }
+
+    final class Results: @unchecked Sendable {
+        private let lock = NSLock()
+        private var values: [Bool]
+        init(count: Int) { values = Array(repeating: false, count: count) }
+        subscript(index: Int) -> Bool {
+            get { lock.withLock { values[index] } }
+            set { lock.withLock { values[index] = newValue } }
+        }
     }
 
     final class Collected: @unchecked Sendable {

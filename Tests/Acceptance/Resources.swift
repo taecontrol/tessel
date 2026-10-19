@@ -56,7 +56,9 @@ extension Acceptance {
                 print("E36 preparing fixture window \(index + 1)/20")
                 fflush(nil)
                 let window = try fixture.open(key: "idle\(index)")
-                try desktop.activate(key: "idle\(index)")
+                // The fixture app stays frontmost, so AppKit keys each later
+                // window as it opens; activating it again would re-observe them all.
+                if index == 0 { try desktop.activate(key: "idle\(index)") }
                 try desktop.expectShown(window)
                 if index.isMultiple(of: 2), index > 0 {
                     try desktop.key(index / 2 + 1, send: true)
@@ -76,7 +78,7 @@ extension Acceptance {
             let setupFramesStart = try harness.displayFrames()
             for index in 0..<20 {
                 let id = try fixture.open(kind: index.isMultiple(of: 2) ? "heavyText" : "web", key: "idle\(index)", ["widthFraction": 0.4])
-                try desktop.activate(key: "idle\(index)")
+                if index == 0 { try desktop.activate(key: "idle\(index)") }
                 try desktop.expectFocus(id)
                 // Native focus can precede the catalog's new-window arrival.
                 // Finish each setup command before opening the next fixture.

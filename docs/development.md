@@ -15,7 +15,9 @@ code-signing identity from your keychain. Use your Apple Development identity.
 The file is ignored; never commit its contents, a certificate, or a team ID.
 
 Run `scripts/build`. It builds the `tessel-build` tool from `Tools/Build`, which
-compiles optimized binaries and installs signed bundles in `.build/apps`. It refuses missing, unavailable, or ad-hoc signing identities
+compiles optimized binaries and installs signed bundles in `.build/apps`. Each
+whole-module compile uses about one core, so the app, CLI and fixture binaries
+compile concurrently. It refuses missing, unavailable, or ad-hoc signing identities
 before building a bundle. Every rebuild changes the app binary's build version,
 so the permission-preservation test exercises a real signature change.
 
@@ -125,7 +127,6 @@ in a fresh signed observer when the suite starts; E15 and E24 failures repeat
 it. The Reduce Motion journey checks the other value natively: a configured
 400 ms carousel move requests no display frames.
 
-
 The observer validates the running fixture's signed identifier before reading a
 window or posting a key, revalidating on every operation. Audit-bound Security
 code objects avoid repeated construction during latency sampling; exec and PID
@@ -179,8 +180,13 @@ CI runs on `xcode-27` (macOS 27). The Policy job runs bare tests, the layer chec
 known-bug mutants, trace repetition and the simulator-evidence guard. The
 Acceptance job signs and builds once, then runs contracts, journeys (including
 permission denial/restart), latency, resources and the rails status-item capture.
-Resources retain their 90 s command budget. The job has a ten-minute timeout for
-these suites, signed rebuilds and runner setup, with margin for a slower runner.
+Resources retain their 90 s command budget. The job has a twelve-minute timeout
+for these suites, three optimized builds (the signed bundles, the signed-rebuild
+journey and the daily-variant argument check) and runner setup. The carousel's
+contracts, E15, E24 and larger compiles put a green run near nine and a half
+minutes on `xcode-27`, so ten minutes no longer left margin for a slower runner.
+`scripts/verify` checks the test selection once; its Interactive launchd job
+does not repeat that check.
 Latency samples and the app-rendered rails capture are uploaded even on failure.
 
 The runner first hides the Dock: fixture Dock icons can move the visible frame's
