@@ -8,7 +8,7 @@ import Testing
 @Suite @MainActor struct CarouselMotion {
     @Test("#26 E14: cards enter from 32 points, leave at the bottom, remember state and bounce at rail ends")
     func verticalCardsRememberEveryRailState() {
-        requireCarouselMotion(Scenario.run("vertical card stack") { s in
+        requireCarousel(Scenario.run("vertical card stack") { s in
             let f = CarouselFixture(s, presets: [0.5,0.5,0.5,0.5,0.5]), ids = f.ids
             let topIDs = Array(ids.prefix(3)), bottomIDs = Array(ids.suffix(2))
             f.select(ids[3]); f.press("alt-shift-j")
@@ -47,7 +47,7 @@ import Testing
 
     @Test("#26 E16: horizontal motion follows the display spring, writes each moving window once per frame and lands exactly", arguments: [80,400])
     func displayFramesCarryTheNormalizedSpring(duration: Int) {
-        requireCarouselMotion(Scenario.run("display spring duration=\(duration)") { s in
+        requireCarousel(Scenario.run("display spring duration=\(duration)") { s in
             let f = CarouselFixture(s, duration: duration), a = f.ids[0], b = f.ids[1], c = f.ids[2]
             f.press("alt-l")
             let before = f.snapshot(), start = Double(f.mac.scheduler.now) / 1_000
@@ -84,7 +84,7 @@ import Testing
 
     @Test("#26 E16: width animation sizes only the changing tile and never writes an unchanged floating window")
     func widthMotionDoesNotRewriteUnchangedWindows() {
-        requireCarouselMotion(Scenario.run("width frame write budget") { s in
+        requireCarousel(Scenario.run("width frame write budget") { s in
             let f = CarouselFixture(s), a = f.ids[0]
             let dialog = f.app.open(WindowSpec(subrole: "AXDialog")); s.settle(); f.select(a)
             f.mac.clearMotionHistory(); f.press("alt-r")
@@ -104,7 +104,7 @@ import Testing
 
     @Test("#26 E16: swaps, rail transfers, arrivals, closes and gap reloads animate on display frames", arguments: ["swap","transfer","open","close","gaps"])
     func everyLayoutChangingActionUsesDisplayFrames(action: String) {
-        requireCarouselMotion(Scenario.run("animated action \(action)") { s in
+        requireCarousel(Scenario.run("animated action \(action)") { s in
             let f = CarouselFixture(s)
             f.press("alt-l"); f.mac.clearMotionHistory()
             switch action {
@@ -128,7 +128,7 @@ import Testing
 
     @Test("#26 E17: interrupt retargets from the displayed frame and keyboard repeats finish within one duration")
     func interruptionsRetargetWithoutQueuing() {
-        requireCarouselMotion(Scenario.run("thirty millisecond keyboard repeats") { s in
+        requireCarousel(Scenario.run("thirty millisecond keyboard repeats") { s in
             let f = CarouselFixture(s, presets: Array(repeating: 0.5, count: 6)), ids = f.ids
             f.press("alt-l"); f.mac.clearMotionHistory()
             let start = f.mac.scheduler.now
@@ -139,7 +139,7 @@ import Testing
             s.expect("no animation is queued behind the final key", f.mac.geometryWrites.allSatisfy { $0.at <= lastPress + 80 + 9 })
             s.expect("the final display frame is within duration plus one refresh", (f.mac.displaySamples.last?.time ?? .infinity) <= Double(lastPress + 80)/1_000 + 1.0/120)
         })
-        requireCarouselMotion(Scenario.run("reverse from current display frame") { s in
+        requireCarousel(Scenario.run("reverse from current display frame") { s in
             let f = CarouselFixture(s), b = f.ids[1]
             f.press("alt-l"); let initial = f.frame(b).minX, target = initial
             f.mac.clearMotionHistory(); let start = f.mac.scheduler.now
@@ -159,7 +159,7 @@ import Testing
 
     @Test("#26 E17: a mouse drag interrupts motion and its requested frame survives settling")
     func mouseInterruptCancelsTheAnimatedTarget() {
-        requireCarouselMotion(Scenario.run("mouse interruption") { s in
+        requireCarousel(Scenario.run("mouse interruption") { s in
             let f = CarouselFixture(s), b = f.ids[1]
             f.press("alt-l"); f.mac.clearMotionHistory(); f.tessel.pressKey("alt-l")
             var dragged = CGPoint.zero
@@ -179,7 +179,7 @@ import Testing
 
     @Test("#26 E18: zero duration and Reduce Motion write the final layout once without intermediate frames", arguments: ["zero", "startup", "notification"])
     func disabledMotionWritesOnlyFinalFrames(mode: String) {
-        requireCarouselMotion(Scenario.run("instant motion \(mode)") { s in
+        requireCarousel(Scenario.run("instant motion \(mode)") { s in
             let f = CarouselFixture(s, duration: mode == "zero" ? 0 : 80, reduced: mode == "startup")
             f.press("alt-l")
             if mode == "notification" {
@@ -196,12 +196,12 @@ import Testing
                     s.expect("instant command writes each final attribute at most once", writes.filter { $0.window == id && $0.attribute == attribute }.count <= 1)
                 }
             }
-        }, pending: mode == "notification")
+        })
     }
 
     @Test("#26 E19: entering and leaving windows retain a one-point sliver, show before motion and hide after it")
     func closetTimingAndScreenEdgesAreSafeThroughoutMotion() {
-        requireCarouselMotion(Scenario.run("one-point horizontal edges and closet timing") { s in
+        requireCarousel(Scenario.run("one-point horizontal edges and closet timing") { s in
             let f = CarouselFixture(s), a = f.ids[0], c = f.ids[2]
             f.press("alt-l"); f.mac.clearMotionHistory(); f.press("alt-l")
             let writes = f.mac.geometryWrites
@@ -226,7 +226,7 @@ import Testing
 
     @Test("#26 E20: a wall bounce displaces windows on display frames and returns exactly without changing focus", arguments: [80,400])
     func bounceIsVisibleAndReturnsExactly(duration: Int) {
-        requireCarouselMotion(Scenario.run("wall bounce duration=\(duration)") { s in
+        requireCarousel(Scenario.run("wall bounce duration=\(duration)") { s in
             let f = CarouselFixture(s, duration: duration), a = f.ids[0]
             let before = f.snapshot(), focus = f.mac.focusedWindow, start = Double(f.mac.scheduler.now)/1_000
             f.mac.clearMotionHistory(); f.press("alt-h")
@@ -244,7 +244,3 @@ import Testing
 }
 
 func carouselSpring(_ p: Double) -> Double { p >= 1 ? 1 : 1 - (1 + 7.43*p) * exp(-7.43*p) }
-
-func requireCarouselMotion(_ result: ScenarioResult, pending: Bool = true, sourceLocation: SourceLocation = #_sourceLocation) {
-    requireCarousel(result, motionRequired: pending, sourceLocation: sourceLocation)
-}

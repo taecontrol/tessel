@@ -92,6 +92,10 @@ struct AppStatus: Codable, Sendable {
     var workspaces = WorkspaceStatus()
     /// Raw monotonic seconds (`CLOCK_MONOTONIC_RAW`) when tessel produced this answer.
     var answeredAt: Double? = nil
+    #if TESSEL_DEVELOPMENT
+    struct TestMotion: Codable, Sendable { var displayFrames: UInt64 = 0 }
+    var testMotion: TestMotion? = nil
+    #endif
 }
 
 struct Reply: Codable, Sendable {

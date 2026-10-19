@@ -77,6 +77,20 @@ final class WindowCatalog {
         app.presentRail(id:id,target:frame,position:position,resize:resize,focus:focus,completion:completion)
     }
 
+    func writeMotion(pid: Int32, writes: [UInt32: CarouselAnimator.Write], final: Bool,
+                     completion: @escaping @MainActor @Sendable ([UInt32: CGRect], Bool) -> Void) {
+        guard let app = apps[pid] else { completion([:], false); return }
+        app.writeMotion(writes, final: final, completion: completion)
+    }
+
+    func raise(pid: Int32, id: UInt32, completion: @escaping @MainActor @Sendable () -> Void) {
+        guard let app = apps[pid] else { completion(); return }
+        app.raise(id: id, completion: completion)
+    }
+
+    func beginMotion() { for pid in apps.keys.sorted() { apps[pid]?.setMotionActive(true) } }
+    func endMotion() { for pid in apps.keys.sorted() { apps[pid]?.setMotionActive(false) } }
+
     func windowIsGone(pid: Int32, id: UInt32, completion: @escaping @MainActor @Sendable (Bool) -> Void) {
         guard let app = apps[pid] else { completion(false); return }
         app.windowIsGone(id: id, completion: completion)
@@ -168,6 +182,12 @@ private final class AppWindows: @unchecked Sendable {
         let completion: @MainActor @Sendable () -> Void
     }
     private var validations: [UInt32: Validation] = [:]
+    private var motionPositions: [UInt32: CGPoint] = [:]
+    private var motionActive = false
+    private var deferredMotionRead = false
+    // The main lane reserves a slot before dispatching. A slow app can retain
+    // one intermediate batch, while other apps keep accepting fresh frames.
+    private var motionBusy = false
 
     init(pid: Int32, name: String, bundleId: String, hidden: Bool, generation: UUID,
          ax: any AccessibilityPort, scheduler: any SchedulingPort,
@@ -207,6 +227,16 @@ private final class AppWindows: @unchecked Sendable {
     }
 
     private func changed(_ notification: AXNotification, element: AXElement) {
+        queue.async { [self] in
+            if motionActive && [.resized, .layoutChanged, .valueChanged, .focusedWindowChanged, .mainWindowChanged].contains(notification) {
+                deferredMotionRead = true
+                return
+            }
+            handleChange(notification, element: element)
+        }
+    }
+
+    private func handleChange(_ notification: AXNotification, element: AXElement) {
         // A closing window can still be listed by the read that follows its event.
         let needsSettling = [.windowCreated, .sheetCreated, .mainWindowChanged,
                              .destroyed].contains(notification)
@@ -277,6 +307,7 @@ private final class AppWindows: @unchecked Sendable {
 
     private func readSnapshot() {
         guard !stopped else { return }
+        if motionActive { deferredMotionRead = true; return }
         updateSubscriptions([application], using: &appSubscriptions)
         do {
             guard let windows = try value(application, .windows)?.elements else { return }
@@ -500,6 +531,98 @@ private final class AppWindows: @unchecked Sendable {
         presentationLock.withLock {
             presentation = UUID()
             if invalidatingFocus { focusIntent = UUID() }
+        }
+        queue.async { [self] in motionPositions.removeAll() }
+    }
+
+    func setMotionActive(_ active: Bool) {
+        queue.async { [self] in
+            motionActive = active
+            if active { pending?.cancel() }
+            else if deferredMotionRead { deferredMotionRead = false; scheduleRead(after: 10) }
+        }
+    }
+
+    /// Geometry-only frames have a short timeout and no retry queue. Validate
+    /// positions before the batch so an intervening mouse drag wins. The final
+    /// batch uses the ordinary validation/readback and bounded busy-app retry.
+    func writeMotion(_ writes: [UInt32: CarouselAnimator.Write], final: Bool,
+                     completion: @escaping @MainActor @Sendable ([UInt32: CGRect], Bool) -> Void) {
+        let token = presentationLock.withLock { presentation }
+        if !final {
+            let reserved = presentationLock.withLock {
+                if motionBusy { return false }
+                motionBusy = true
+                return true
+            }
+            guard reserved else { scheduler.main.async { completion([:], false) }; return }
+        }
+        queue.async { [self] in
+            writeMotion(writes, final: final, token: token, failures: 0) { [self] frames, interrupted in
+                if !final { presentationLock.withLock { motionBusy = false } }
+                completion(frames, interrupted)
+            }
+        }
+    }
+
+    private func writeMotion(_ writes: [UInt32: CarouselAnimator.Write], final: Bool, token: UUID, failures: Int,
+                             completion: @escaping @MainActor @Sendable ([UInt32: CGRect], Bool) -> Void) {
+        var accepted: [UInt32: CGRect] = [:], interrupted = false, retrying = false
+        defer {
+            if !retrying {
+                let result = accepted, cancelled = interrupted
+                scheduler.main.async { completion(result, cancelled) }
+            }
+        }
+        guard !stopped, presentationLock.withLock({ presentation == token }) else { return }
+        let ids = writes.keys.sorted()
+        do {
+            var eligible: [UInt32] = []
+            for id in ids {
+                guard let window = elementsByID[id], let fact = facts.first(where: { $0.id == id }),
+                      !hidden, !fact.minimized, !fact.fullscreen else { continue }
+                if motionPositions[id] == nil || failures > 0 { ax.setMessagingTimeout(window, seconds: failures > 0 ? 0.05 : 0.002) }
+                guard isNativeFront(window, id: id) else { continue }
+                eligible.append(id)
+            }
+            for id in eligible {
+                guard presentationLock.withLock({ presentation == token }), let window = elementsByID[id], let write = writes[id] else { return }
+                if let previous = motionPositions[id], let point = try value(window, .position)?.point,
+                   abs(point.x - previous.x) > 1 || abs(point.y - previous.y) > 1 {
+                    interrupted = true
+                    return
+                }
+                if write.resize { try check(ax.set(.size, of: window, to: .size(write.frame.size))) }
+                if write.position {
+                    try check(ax.set(.position, of: window, to: .point(write.frame.origin)))
+                    motionPositions[id] = write.frame.origin
+                }
+            }
+            if final {
+                for id in eligible {
+                    guard let window = elementsByID[id] else { continue }
+                    let result = try frame(window)
+                    accepted[id] = result
+                    motionPositions[id] = result.origin
+                    if let index = facts.firstIndex(where: { $0.id == id }) { facts[index].frame = result }
+                }
+                publishSnapshot()
+            }
+        } catch AXReadError.unresponsive where final && failures < 4 {
+            retrying = true
+            queue.after(milliseconds: 100 << failures) { [weak self] in
+                self?.writeMotion(writes, final: true, token: token, failures: failures + 1, completion: completion)
+            }
+        } catch { /* A late intermediate frame is discarded; the final batch retries. */ }
+    }
+
+    func raise(id: UInt32, completion: @escaping @MainActor @Sendable () -> Void) {
+        let token = presentationLock.withLock { presentation }
+        queue.async { [self] in
+            defer { scheduler.main.async { completion() } }
+            guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id],
+                  (try? canPresent(window, id: id)) == true else { return }
+            _ = ax.perform(.raise, on: window)
         }
     }
 

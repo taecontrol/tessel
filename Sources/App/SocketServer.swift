@@ -74,8 +74,25 @@ final class SnapshotStore: WindowPublishing, @unchecked Sendable {
     func markReady() { lock.withLock { ready = true } }
 
     func update(status: AppStatus) {
-        lock.withLock { self.status = status }
+        lock.withLock {
+            #if TESSEL_DEVELOPMENT
+            let motion = self.status.testMotion
+            #endif
+            self.status = status
+            #if TESSEL_DEVELOPMENT
+            self.status.testMotion = motion
+            #endif
+        }
     }
+
+    #if TESSEL_DEVELOPMENT
+    func recordDisplayFrame() {
+        lock.withLock { status.testMotion?.displayFrames += 1 }
+    }
+    func enableMotionInstrumentation() {
+        lock.withLock { status.testMotion = AppStatus.TestMotion() }
+    }
+    #endif
 
     func update(pid: pid_t, windows: [WindowRecord]?) {
         lock.withLock { self.windows[pid] = windows }
