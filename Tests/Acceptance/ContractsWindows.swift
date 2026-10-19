@@ -274,5 +274,33 @@ extension Acceptance.Contracts {
         try #require(desktop.near(state.frame, [frame[0], full[1] + full[3] - frame[1] - frame[3], frame[2], frame[3]]))
         try #require(desktop.near(axVisible, [visible[0], full[1] + full[3] - visible[1] - visible[3], visible[2], visible[3]]))
         try #require(desktop.near(try desktop.observe().area, axVisible))
+        // This is the capture's independent frame source, including a busy
+        // app: WindowServer metadata must match accepted AX geometry.
+        for x in [10.0, full[2] - 1] {
+            try #require(try write(id, "AXPosition", [x, axVisible[1] + 10]) == 0)
+            let accepted = try window(id).frame
+            try requireFinalState("CG window bounds match accepted AX top-origin geometry") {
+                try native("cgFrames").cgFrames?[String(id)].map { desktop.near($0, accepted) } == true
+            }
+        }
+        let accepted = try window(id).frame
+        try native("motionStart", ["targets": [["pid": fixture.pid, "ids": [id]]]])
+        defer { _ = try? native("motionStop") }
+        kill(fixture.pid, SIGSTOP)
+        let stoppedAt = monotonicSeconds()
+        do {
+            defer { kill(fixture.pid, SIGCONT) }
+            let cgFrame = try #require(try native("cgFrames").cgFrames?[String(id)])
+            try #require(desktop.near(cgFrame, accepted), "WindowServer geometry remains observable while the fixture cannot answer AX")
+            var samples: [NativeContractReply.MotionSample] = []
+            try requireFinalState("the independent motion observer samples the stopped fixture") {
+                samples = try native("motionSamples").motionSamples?.filter { ($0.startedAt ?? 0) >= stoppedAt } ?? []
+                return samples.count >= 2
+            }
+            try #require(samples.allSatisfy { sample in
+                sample.windows.contains { $0.id == id && $0.valid && desktop.near($0.frame, accepted) }
+            }, "motion geometry remains valid without a reply from the fixture")
+        }
+
     }
 }

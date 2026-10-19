@@ -4,7 +4,7 @@ diff --git a/Sources/Policy/Workspaces.swift b/Sources/Policy/Workspaces.swift
 --- a/Sources/Policy/Workspaces.swift
 +++ b/Sources/Policy/Workspaces.swift
 @@ -99,9 +99,7 @@
-                 if let focused { rails.select(focused) }
+                 if let focused { carousel.select(focused) }
              }
              installKeys()
 -            // A layout change retains the native selection. Its notification

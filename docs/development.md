@@ -15,7 +15,9 @@ code-signing identity from your keychain. Use your Apple Development identity.
 The file is ignored; never commit its contents, a certificate, or a team ID.
 
 Run `scripts/build`. It builds the `tessel-build` tool from `Tools/Build`, which
-compiles optimized binaries and installs signed bundles in `.build/apps`. It refuses missing, unavailable, or ad-hoc signing identities
+compiles optimized binaries and installs signed bundles in `.build/apps`. Each
+whole-module compile uses about one core, so the app, CLI and fixture binaries
+compile concurrently. It refuses missing, unavailable, or ad-hoc signing identities
 before building a bundle. Every rebuild changes the app binary's build version,
 so the permission-preservation test exercises a real signature change.
 
@@ -53,7 +55,7 @@ Swift's hash seed, which is what can reorder an unsorted iteration; every scenar
 suite runs contributes to that digest, and one small scenario is also replayed
 twice within each process. CI runs 3.
 
-The production catalog, Workspaces, Rails, closet recovery and config reload run
+The production catalog, Workspaces, Carousel, closet recovery and config reload run
 against a simulated macOS behind small platform ports. Its virtual clock proves
 tessel's own delays; enumerated schedules expose races without depending on
 macOS timing. A failed scenario reports the expectation, schedule and port trace
@@ -85,7 +87,8 @@ With no arguments, `scripts/verify` runs every real-system suite except the
 disposable-runner permission steps. `--journeys` includes those steps on CI;
 `--permission` selects just those steps. The signing-and-permission journey has
 separate signing and permission tests so the default can skip only the latter. Captures
-run only with `TESSEL_CAPTURE_WORKSPACES=1`. Select a suite as above or pass a test
+run only with their opt-in flag: `TESSEL_CAPTURE_WORKSPACES=1` for AppKit views
+or `TESSEL_CAPTURE_CAROUSEL=1` for E21 geometry recordings. Select a suite or pass a test
 name fragment, such as `scripts/verify switchWorkspaces`. Empty selections fail
 before a GUI session starts. The script sets `TESSEL_ACCEPTANCE=1`; a direct
 `TESSEL_ACCEPTANCE=1 swift build --build-tests` compiles these suites without
@@ -109,6 +112,20 @@ tessel is observed through its bundled CLI. The harness cleans up its own
 processes and data. It always passes `--test-fixture-only`, so only fixture
 processes are observed or managed, including crash recovery. The daily build
 rejects that argument. Another tessel instance can contaminate these fixtures.
+
+The harness owns the Reduce Motion Given rather than inheriting the desktop's
+setting; GitHub's macOS images turn Reduce Motion on, which made every carousel
+move instant on CI. Each launch passes tessel `-reduceMotion NO`, or `YES` where
+a journey asks for it. That argument domain precedes the user's preference in
+tessel's process only. macOS protects the persistent preference, and the private
+setter the Reduce Motion contract uses changes only the observer's own process,
+so nothing desktop-wide changes and neither cleanup nor an interrupted run has
+anything to restore. A launch waits until `status --json` reports the matching
+effective duration. Each suite that launches the app prints a `Motion:` line
+with the effective and configured durations and both Reduce Motion values, read
+in a fresh signed observer when the suite starts; E15 and E24 failures repeat
+it. The Reduce Motion journey checks the other value natively: a configured
+400 ms carousel move requests no display frames.
 
 The observer validates the running fixture's signed identifier before reading a
 window or posting a key, revalidating on every operation. Audit-bound Security
@@ -140,7 +157,7 @@ that child QoS changes cannot lift. Interrupting verification removes the job.
 ### Resources
 
 `Resources.swift` keeps foundation E22's twenty default-config windows, workspace
-E36's twenty windows across ten workspaces, and rails E29's twenty windows
+E36's twenty windows across ten workspaces, and carousel E24's twenty windows
 across five workspaces and multiple rails. Each retains its setup and one-second
 settle, then observes one 20-second idle window from outside the app with
 `proc_pid_rusage` (`rusage_info_v0`). Interrupt wakeups must be at most 11;
@@ -163,8 +180,13 @@ CI runs on `xcode-27` (macOS 27). The Policy job runs bare tests, the layer chec
 known-bug mutants, trace repetition and the simulator-evidence guard. The
 Acceptance job signs and builds once, then runs contracts, journeys (including
 permission denial/restart), latency, resources and the rails status-item capture.
-Resources retain their 90 s command budget. The job has a ten-minute timeout for
-these suites, signed rebuilds and runner setup, with margin for a slower runner.
+Resources retain their 90 s command budget. The job has a twelve-minute timeout
+for these suites, three optimized builds (the signed bundles, the signed-rebuild
+journey and the daily-variant argument check) and runner setup. The carousel's
+contracts, E15, E24 and larger compiles put a green run near nine and a half
+minutes on `xcode-27`, so ten minutes no longer left margin for a slower runner.
+`scripts/verify` checks the test selection once; its Interactive launchd job
+does not repeat that check.
 Latency samples and the app-rendered rails capture are uploaded even on failure.
 
 The runner first hides the Dock: fixture Dock icons can move the visible frame's
@@ -311,93 +333,187 @@ Before the first public release (#6), revisit the bundle IDs, config schema,
 and read-only CLI contract. A command that changes state or exposes titles needs
 an architecture decision before implementation.
 
-## Rails experiment (#17)
+## Carousel experiment (#26)
 
-`[experiments] rails = true` enables workspaces in rail layout, independently
-of the `workspaces` flag. Without it, the workspace experiment keeps its
-one-window layout and shortcuts. With both flags absent, tessel only observes.
-Reloading into rails forms one row per existing workspace in arrival order.
-The active workspace and focused window remain selected. Enabling either
-layout never raises the front app's last-read focus: that read can predate a
-newer native selection, so the first render only lays windows out and the
-next focus report selects the window that really has focus. Membership and rail
-positions are session state, with no persistence across restarts.
+`[experiments] carousel = true` enables the carousel layout independently of
+`workspaces`. The former `rails` key is unknown and reports its line number.
+Without carousel, the workspace experiment keeps its one-window layout and
+shortcuts. With both experiments absent, tessel only observes.
 
-A rail is a horizontal row of windows with individual widths, separated by the
-outer gap. Windows keep their current width, capped at the rail area's width,
-and take the area's height. Height-constrained windows remain tiled, aligned
-to the top; their CLI reason explains the constraint. A row that fits starts
-at the area's left edge. A longer row forms a ring: the last window's next
-neighbor is the first. Focus moves without scrolling when the destination is
-fully visible. Otherwise the row scrolls to reveal it with a 56-point peek;
-wide windows are centered. The 56-point peek is the scroll target. Each window
-then uses the single ring placement exposing the most of it. In a short ring,
-that can put the next neighbor on the opposite edge, for any window count.
-Completely off-screen windows go into the closet.
-Focus, scrolling and elevator travel never resize windows.
-A rail write that times out against a busy or briefly hung app is retried
-after 100, 200, 400 and 800 ms, like a failed read, unless a newer render
-replaces it. An app that stays hung longer keeps its stale frame until the next
-render.
+Each workspace owns a stack of rails (rows). Existing windows enter one rail in
+arrival order, retaining their observed widths; an exact preset is recognized.
+New windows enter at half width immediately right of the focused tile, receive
+focus, and are revealed with the smallest scroll. Presets are one third, one
+half, two thirds and full width, measured as `p * (area.width + outer) - outer`.
+The area is the primary display's visible frame inset by the outer gap.
 
-Option+H/L (`focus left|right`) wraps within the current rail. Option+K/J
-(`focus up|down`) visits adjacent rails, stopping at either end. Each rail
-remembers its focused window and scroll position. Option+Shift+H/L
-(`move left|right`) swaps neighbors, including across the ring's end.
-Option+Shift+K/J (`move up|down`) inserts the window after the destination
-rail's remembered window and follows it. Moving beyond an end creates a rail,
-except when already alone at that end. Empty rails disappear.
+Option+R (`cycle width`) chooses the next preset, keeping the tile's left edge
+still unless a minimal scroll is needed to show it completely. AX readback
+learns rejected minimum and maximum widths; later cycles skip them. Mouse
+widths remain exact until cycling. A rail shorter than the area stretches its
+windows proportionally; that stretch and end expansion preserve nominal widths.
+Height-constrained windows stay tiled at the top, with an explanatory reason.
 
-New windows enter to the right of the current window. Closing selects the
-left neighbor and closes the gap. Sending still follows the window to the
-selected workspace, inserting after its current rail's remembered window.
-When a rail empties on close, move or send, its current position selects the
-rail below, or the one above if it was last. Minimize/hide instead selects the
-most recently focused available window anywhere in the workspace, even when
-that empties a rail. This preserves the workspace experiment's focus policy.
-Minimized or hidden windows leave their rail temporarily; restoring inserts
-after their former left neighbor when that rail survives, or after the current
-window otherwise. External activation selects the window's workspace and rail
-and reveals it. Dialogs float as before, sheets follow their parents, and
-native fullscreen windows have no rail or workspace.
+Option+H/L (`focus left|right`) first selects the nearest complete window in
+that direction. Otherwise it advances one stop: a window edge meeting the
+same side of the area, clamped to the strip's ends. Focus waits for a complete
+window. At an end, another press expands its edge tile to fill the area; a
+press away leaves expansion. The initial rail starts with its first tile
+expanded when possible. Navigation and swaps never wrap.
 
-A manually moved window stays where released until the next rail render.
-Successful window moves redraw the rail even when a ring's final target frames
-coincide. A manual resize updates that window's width and repositions its right
-neighbors.
-Disabling rails or quitting returns all managed windows fully inside the
-visible desktop. After a crash, closet recovery still works with the flag off,
-but a partially visible window stays where it was: no persisted membership
-identifies it as a former rail window.
+Option+K/J (`focus up|down`) selects the adjacent rail. Each rail remembers its
+stop, focus and expansion. Option+Shift+H/L (`move left|right`) swaps neighboring
+tiles and keeps focus. Option+Shift+K/J (`move up|down`) inserts after the
+remembered tile of the adjacent rail, creating a rail beyond an end unless the
+moving tile is already alone there. Empty rails disappear.
 
-Numeric workspace/send shortcuts keep their meanings. `focus next|previous`
-remain bindable aliases for rail traversal, with no default binding in rails.
-`[keys]` overrides merge with the layout's defaults. Directional rail commands
-are validated with the flag off, but their shortcuts are registered only while
-rails is enabled. `windows --json` adds
-nullable one-based `rail` and `slot` fields, and `status --json` reports
-`workspaces.layout`, the nullable current `rail`, and `railCount`. The status
-item shows the workspace number and one bar per rail, highlighting the current
-one; its AX label includes the current rail and total. The map overlay belongs
-to #18, and the floating layer to #19.
+Closing focus selects the left neighbor, or the right if it was first. An empty
+rail selects the rail below, or the one above if it was last. Minimize/hide
+retains the workspace experiment's most-recent-focus policy. Restoring a tile
+uses its former rail and left neighbor when available. Native-tab replacement
+retains tile identity, nominal width, learned limits and focus. Dialogs keep
+their frames, sheets follow their parents, and native fullscreen stays outside
+workspace management. Workspace switching and sends remain instant.
 
-Rail scenarios prove geometry, membership, native-tab replacement, retries and
-focus ordering in virtual time. Journeys check real scroll/elevator hotkeys,
-CLI fields, the status-item AX label and recovery. Fixtures accept width
-fractions of the usable area, keeping fitting and overflowing setups independent
-of screen size. Resource E29 runs with `scripts/verify --resources` and the
-unchanged ADR 0003 limits. Capture the app's own status button with:
+Numeric workspace/send shortcuts retain their meanings. `focus next|previous`
+are bindable aliases for horizontal traversal. `[keys]` overrides merge with
+defaults; an empty string disables a binding. Directional and width commands
+are validated with the experiment off, but registered only when it is active.
 
-```sh
-TESSEL_CAPTURE_WORKSPACES=1 scripts/verify captureRailsStatusItem
+```toml
+[experiments]
+carousel = true
+
+[animation]
+duration = 80
+
+[keys]
+alt-r = "cycle width"
 ```
 
-The PNGs are `.work/captures/E26-workspace-1-rail-{1,2}.png`. Both owner captures
-live in `Tests/Acceptance/Captures.swift` and require the capture environment flag.
+`duration` accepts TOML integers from 0 through 1000 and defaults to 80 ms.
+`status --json` reports `workspaces.layout: "carousel"`, `animationDuration`
+(the effective duration, zero with Reduce Motion), the nullable one-based `rail`
+and `railCount`. `windows --json` includes nullable one-based `rail` and `slot`.
+The status item shows the workspace number and one bar per rail.
+
+Local layout changes use a demand-driven NSScreen display link and the
+prototype's critically damped spring. Retargeting starts from geometry confirmed
+by each AX worker, reading back interrupted writes once their lane drains.
+An unanswered read skips that tile's intermediate guesses. Slow apps retain at
+most one intermediate frame; the final frame is always written, read back and
+retried. Resize ordering accounts for
+the window's current screen position; clipped geometry never becomes an
+intrinsic app width limit. Returning tiles are sized on screen before motion.
+Workspace switches and sends stay instant.
+Mouse presses cancel motion before dragging, and Reduce Motion notifications
+make subsequent commands instant. No display callbacks run at rest.
+If display callbacks stop or never arrive, a one-shot deadline at the motion's
+end plus 50 ms submits the same exact final AX layout and releases display
+demand. Normal landing, retargeting and cancellation remove that deadline;
+there is no recurring fallback timer or idle display demand.
+Window motion reports `AXWindowMoved`; sizing and native fullscreen entry report
+`AXWindowResized`, including in the WebKit fixture. During motion, resize events
+revalidate the affected root's fullscreen state on its AX lane before deferring
+full enumeration. Confirmed fullscreen state cancels further motion and removes
+workspace membership. An already admitted AX batch can finish before that state
+is observed; notification delivery alone is not an atomic fullscreen guard.
+
+Downward cards focus the incoming selection before raising its other windows.
+Preparation confirms native focus and CG order before moving frames; bounded
+focus readback retries never repeat activation or AXRaise.
+AXFrontmost activation brings every window of the incoming app forward, and CG
+can show that order after AX has confirmed the focus. The card's background-app
+windows are raised only once CG shows it, or at the motion's deadline;
+otherwise the activation would cover them with the incoming app's other windows.
+If focus confirmation exhausts those retries, preparation is cancelled and the
+ordinary instant presenter lands the selected rail with its bounded AX retries.
+Upward cards retain the leaving selection until it has moved down and hidden.
+The active key is raised last; sibling raises restore AXMain without another
+raise or app activation. An active app can keep its window above a raised
+background window, so activation and ordering are confirmed separately.
+When an external selection makes a revealed window the active key, the card
+moves without waiting to be above that one window; it must still be above every
+other window of the rail it covers.
+Horizontally entering and leaving tiles keep at least one point on screen;
+leaving tiles hide after motion. Size writes happen after showing a tile.
+
+Fixture-only development status adds `testMotion.displayFrames`. The app's real
+display adapter increments it, and the signed development CLI preserves it.
+The resource suite samples only outside its measured idle window. Daily builds
+contain neither the counter nor this status field.
+
+A manually moved tile stays where released until the next layout change. A
+busy AX presentation retries after 100, 200, 400 and 800 ms unless superseded.
+Completely off-screen tiles live in the closet; they are shown before sizing.
+Disabling the experiment or quitting returns managed windows inside the desktop.
+Crash recovery uses the same closet boundary without persisted membership.
+
+### Native motion contracts and E21 capture
+
+[ADR 0005](adr/0005-animate-tiled-windows-through-accessibility.md) records why
+live geometry uses AX and vertical motion uses cards. The signed contracts in
+`ContractsMotion.swift` pin vertical menu-bar/32-point clamps, horizontal
+one-point edges/40-point snapback, AXMain/AXRaise across apps, retained closet
+handles and lossy hidden size writes, resize anchoring at the current x,
+display-frame demand, Reduce Motion notifications and pointer-down delivery.
+The Reduce Motion contract changes the preference through HIServices' private
+setter, which affects only the observer's own process: it pins how NSWorkspace
+reads and announces the interface preference, not a desktop-wide change.
+A window ID lookup on a notified element can fail mid-fullscreen with
+cannotComplete. The observer records that error and attributes the element by
+AX equality instead, as the catalog does during motion: `ax-notifications`
+requires the handle it registered, and other contracts accept a retained window
+handle equal to the notified element (such as the auxiliary fullscreen root
+that `transient-window-lists` watches at application level).
+The timeout contract also proves that configuring AX messaging timeouts is local
+client state, even while the target app is stopped; it consumes no simulated
+remote-delivery time. The simulator declares the corresponding assumption IDs;
+these native facts must be verified before changing its behavior.
+
+E15's motion observer uses fixture-owned WindowServer bounds, as the capture
+does. The primary-screen contract exercises that display sampler while its
+fixture is stopped: geometry must remain valid without an AX reply. Native
+focus is read before geometry and CG order afterward, so a slow focus answer
+cannot pair earlier frames with later stacking. Missing CG metadata still
+falls back to AX; an unanswered read remains invalid.
+
+The display link runs on the observer's own sampler thread, never on the main
+thread that serves observation commands. A full observation waits on AX replies
+from fixtures that are busy with tessel's motion writes, and such commands have
+held the main thread for over 300 ms in the middle of a card. E15 drains the
+samples while it waits and requires one sample per delivered display callback.
+The busy frontmost app answers the sampler's focused-application read, so that
+read uses the 20 ms focused-only bound; an unanswered read reports zero.
+
+Record the E1, E3, E7, E10 and E14 journeys at both 80 and 400 ms with:
+
+```sh
+TESSEL_CAPTURE_CAROUSEL=1 scripts/verify captureCarouselMotionForOwnerReview
+```
+
+The independent signed observer samples each fixture's WindowServer rectangle
+and CG order on delivered display callbacks, plus answered AX focus. It validates
+fixture identities and discovers the E10 arrival through fixture-owned CG IDs.
+The primary-screen contract pins CG bounds against accepted AX geometry, even
+while the fixture is stopped. Missing CG descriptions use short AX reads. No Screen
+Recording, screenshots, real titles or app contents are captured. Every sample
+carries its display timestamp and raw-clock start/end around the reads;
+callback gaps and read spans remain visible. Batches drain within the bounded
+socket buffer and the capture requires a complete callback sequence.
+
+Outputs are ignored `.build/captures/carousel/carousel-motion.json` and
+`.build/captures/carousel/index.html`. The self-contained HTML replays measured
+rectangles with invented numbered titles, provides frame stepping, a geometry
+timeline and filmstrips, and holds samples without interpolation. The fixed
+recording window includes bounce and a settled tail; final states use the usual
+5 s margin. Only latency judges speed. Copy the HTML and JSON to the owner's
+review destination when requested. E21 remains pending until the owner compares
+it with the accepted prototype; generating the recording does not accept it.
 
 ## Journeys and latency (#24)
 
-`scripts/verify --journeys` runs eight journeys. The signing-and-permission
+`scripts/verify --journeys` runs nine journeys. The signing-and-permission
 journey includes the disposable-runner-only permission steps under the guard
 described above. Foundation E11 (CLI failure) and E14 (permission restart) prove
 their timing decisions in the deterministic layer. The same journey wiring
@@ -417,29 +533,54 @@ deterministic policy layer and are not tagged in these files:
 
 | Journey | Journey example IDs |
 | --- | --- |
-| Enable | #1 E9; #2 E1; #17 E1 |
+| Enable | #1 E9; #2 E1 |
 | Switch | #2 E31, E32 |
 | Send | #2 E35 |
-| Rail scroll and elevator | #17 E24, E25 |
+| Rail scroll and elevator | Wiring regression (no policy example IDs) |
+| Carousel cards | #26 E15 |
+| Reduce Motion | Wiring check that Reduce Motion makes a carousel move instant (E18 belongs to P) |
 | Reload | File watcher wiring for save, atomic replace, chmod and delete |
-| Crash, quit and disable | #2 E28, E29, E34; #17 E3 |
+| Crash, quit and disable | #2 E28, E29, E34 |
 | CLI and config files | #1 E10, E12; #1 U-cli-args, U-private-transport, U-read-only-transport, U-stalled-clients, U-observer-identity, U-cpu-oracle, U-notification-retries |
 | Signing and permission | #1 E13, E15, E16 |
 
-Latency owns #2 U-switch-budget and #17 E28 in `Tests/Acceptance/Latency.swift`.
+Latency owns #2 U-switch-budget in `Tests/Acceptance/Latency.swift`.
 It records 100 workspace switches and 100 rail moves (50 scrolls and 50 elevator
-trips between apps). Each sample starts at the trusted fixture's real key
-`postedAt` and ends at the independent observer's `sampledAt` when destination frames, focus and CG
-visibility all match. Samples must finish within the final-state margin.
-Only this suite judges elapsed time: each kind's nearest-rank p95 must be at
-most 200 ms. It prints p50, p95 and maximum, and writes `.work/latency.json` with
-the samples, counts, percentiles and nonpersonal run metadata. CI uploads that
-artifact even on failure; incomplete runs retain their partial counts and the
+trips between apps). Four half-width windows traverse the complete pairs
+[1|2] → [2|3] → [3|4], then back, without wrapping. Crossing an already complete
+pair to select its outward tile is setup outside the measured scroll. The
+second rail contains a full-area singleton in another app. Every measured
+scroll advances a stop; every elevator changes apps.
+Each sample starts at the trusted fixture's real key `postedAt` and ends at the
+independent observer's `sampledAt` when destination frames, focus and CG
+visibility all match. Full observations read focus and CG visibility after AX
+geometry, so moving frames are not paired with an earlier preparation state. Samples must finish within the final-state margin.
+Only this suite judges elapsed time. Both workspace and carousel nearest-rank
+p95 remain at most 200 ms. The carousel latency suite explicitly configures
+`[animation] duration = 0`; E16/E17 independently prove animation timing against
+the virtual display clock at the policy boundary. This preserves the existing
+CI processing/observation budget without adding intentional display waiting.
+A local-only proposal to raise the animated total to 280 ms was withdrawn:
+recalibration requires evidence of its spread on CI's runner. Sample counts,
+percentiles, final-state predicates and resource limits remain unchanged.
+Timing ends at
+observed final WindowServer geometry, AX main/focus and CG visibility, including
+native completion and observation overhead. The signed primary-screen contract
+pins CG window bounds against accepted AX geometry, including the one-point
+edge and a stopped fixture. Rail samples read those bounds, then a focused-only
+AX/CG observation; its `sampledAt` dates the latest input. This avoids repeated
+AX reads of hidden windows and unrelated controls while measuring final geometry. The deterministic E17 deadline bounds display
+delivery at duration plus one refresh and separately bounds the final AX batch
+by E16's eight-millisecond frame budget; it does not claim that a callback's
+timestamp is the end of synchronous AX work.
+It prints p50, p95 and maximum, and writes `.work/latency.json` (schema 2) with
+the samples, counts, percentiles, configured animation duration, completion
+definition and nonpersonal run metadata. CI uploads that artifact even on failure; incomplete runs retain their partial counts and the
 failed sample index. No window listings or titles reach the artifact.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2 and #17.
+This table is the maintained example-to-layer map for issues #1, #2 and #26.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -525,35 +666,44 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #2 E36 | R |
 | #2 E37 | X |
 | #2 U-switch-budget | L |
-| #17 E1 | J |
-| #17 E2 | P |
-| #17 E3 | J |
-| #17 E4 | P |
-| #17 E5 | P |
-| #17 E6 | P |
-| #17 E7 | P |
-| #17 E8 | P |
-| #17 E9 | P |
-| #17 E10 | P |
-| #17 E11 | P |
-| #17 E12 | P |
-| #17 E13 | P |
-| #17 E14 | P |
-| #17 E15 | P |
-| #17 E16 | P |
-| #17 E17 | P |
-| #17 E18 | P |
-| #17 E19 | P |
-| #17 E20 | P |
-| #17 E21 | P |
-| #17 E22 | P |
-| #17 E23 | P |
-| #17 E24 | J |
-| #17 E25 | J |
-| #17 E26 | X |
-| #17 E27 | P |
-| #17 E28 | L |
-| #17 E29 | R |
+| #26 E1 | P |
+| #26 E2 | P |
+| #26 E3 | P |
+| #26 E4 | P |
+| #26 E5 | P |
+| #26 E6 | P |
+| #26 E7 | P |
+| #26 E8 | P |
+| #26 E9 | P |
+| #26 E10 | P |
+| #26 E11 | P |
+| #26 E12 | P |
+| #26 E13 | P |
+| #26 E14 | P |
+| #26 E15 | J |
+| #26 E16 | P |
+| #26 E17 | P |
+| #26 E18 | P |
+| #26 E19 | P |
+| #26 E20 | P |
+| #26 E21 | X |
+| #26 E22 | P |
+| #26 E23 | P |
+| #26 E24 | R |
+| #26 E25 | P |
+
+E21 has an opt-in executable capture in `CapturesCarousel.swift`; its visual
+review is pending for the owner. All mapped rows now have executable coverage.
+E15 owns J: the native cross-app stacking assertion takes precedence over the overlapping P range in
+the accepted spec. E14 and E16 own P; their untagged journey steps check wiring.
+
+All deterministic carousel examples run directly, including cards, spring
+frames, interrupts, Reduce Motion, edge safety and bounce. E21's recording is
+owner-reviewed visual evidence. Retained membership and AX-retry
+scenarios use duration zero; CarouselMotion proves the animated path. E4's
+command matrix checks settled invariants at duration zero, while E16 checks
+intermediate frames at 80 and 400 ms.
+
 
 ## Deterministic checks (#24)
 

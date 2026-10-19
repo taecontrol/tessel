@@ -116,16 +116,24 @@ extension Acceptance.Contracts {
         let id = try fixture.open(kind: "maxWidth")
         _ = try window(id)
         try #require(try write(id, "AXSize", [650, 400]) == 0)
-        try requireFinalState("the maximum width clamps an otherwise successful AXSize write") {
+        // A timeout names the last observed AX frame so a CI-only failure is diagnosable.
+        var last = "no observation"
+        func observe() throws -> NativeContractReply.Window? {
             let state = try native().roots.first { $0.id == id }
-            return state.map { $0.frame.count == 4 && abs($0.frame[2] - 480) <= 1 && abs($0.frame[3] - 400) <= 1 } == true
+            last = state.map { "AX frame \($0.frame), frame error \($0.frameError)" } ?? "window \(id) absent from AXWindows"
+            return state
+        }
+        func requireObserved(_ expectation: String, _ predicate: () throws -> Bool) throws {
+            do { try requireFinalState(expectation, predicate) } catch { throw HarnessError("\(error); last observation: \(last)") }
+        }
+        try requireObserved("the maximum width clamps an otherwise successful AXSize write") {
+            try observe().map { $0.frame.count == 4 && abs($0.frame[2] - 480) <= 1 && abs($0.frame[3] - 400) <= 1 } == true
         }
         try fixture.command("limits", ["key": "window", "minimum": [300.0, 200.0]])
         let initial = try #require(try fixture.command("ping").frames?["window"])
         try #require(try write(id, "AXSize", [100, 100]) == 0)
-        try requireFinalState("the minimum content size clamps the AXSize write") {
-            let state = try native().roots.first { $0.id == id }
-            return state.map { $0.frame.count == 4 && $0.frame[2] >= 300 && $0.frame[3] >= 200
+        try requireObserved("the minimum content size clamps the AXSize write") {
+            try observe().map { $0.frame.count == 4 && $0.frame[2] >= 300 && $0.frame[3] >= 200
                 && $0.frame[2] <= initial[2] && $0.frame[3] <= initial[3] } == true
         }
     }
@@ -189,15 +197,55 @@ extension Acceptance.Contracts {
         try #require(try native("events").events?.contains { $0.name == "AXWindowMoved" } == false)
     }
 
-    @Test("ax-messaging-timeout: hung fixture reads report cannotComplete", contract(.axMessagingTimeout))
+    @Test("ax-notifications: moves, sizes and fullscreen expose their native geometry notifications", contract(.axNotifications))
+    func geometryAndFullscreenNotifications() throws {
+        for kind in ["standard", "web"] {
+            let id = try fixture.open(kind: kind, key: kind)
+            try desktop.activate(key: kind)
+            let state = try window(id)
+            try watch(["AXWindowMoved", "AXWindowResized", "AXLayoutChanged", "AXValueChanged"], id: id)
+            try native("clearEvents")
+            try #require(try write(id, "AXPosition", [state.frame[0] + 20, state.frame[1] + 20]) == 0)
+            try #require(try write(id, "AXSize", [state.frame[2] + 30, state.frame[3] + 30]) == 0)
+            try expectEvent("AXWindowMoved", id: id)
+            try expectEvent("AXWindowResized", id: id)
+            sleep(seconds: 0.1)
+            let geometry = try #require(try native("events").events)
+            try #require(geometry.allSatisfy { ["AXWindowMoved", "AXWindowResized"].contains($0.name) }, "geometry echoes must remain distinct from layout/value state notifications")
+            try native("clearEvents")
+            try fixture.command("fullscreen", ["key": kind])
+            var entered = true
+            defer { if entered { _ = try? fixture.command("fullscreen", ["key": kind]) } }
+            try requireFinalState("the notification fixture enters native fullscreen") {
+                try native().focused?.fullscreen == true
+            }
+            // Production revalidates the notified element by AX equality with
+            // its retained handle; a window ID lookup can fail mid-transition.
+            var fullscreen: [NativeContractReply.Event] = []
+            let resized = try finalState {
+                fullscreen = try native("events").events ?? []
+                return fullscreen.contains { $0.name == "AXWindowResized" && $0.registered == true && $0.mainThread }
+            }
+            let described = fullscreen.map { "\($0.name) id=\($0.id ?? 0) idError=\($0.idError ?? 0) registered=\($0.registered.map(String.init) ?? "nil")" }
+            try #require(resized, "fullscreen must reach the resize-state revalidation path for the registered window: \(described)")
+            try #require(fullscreen.allSatisfy { $0.idError != 0 || $0.id == id }, "a resolved window ID must name the registered window: \(described)")
+            try fixture.command("fullscreen", ["key": kind])
+            entered = false
+        }
+    }
+
+    @Test("ax-messaging-timeout: timeout configuration is local and hung reads report cannotComplete", contract(.axMessagingTimeout))
     func axMessagingTimeout() throws {
         let id = try fixture.open()
         _ = try window(id)
         kill(fixture.pid, SIGSTOP)
         do {
             defer { kill(fixture.pid, SIGCONT) }
-            let result = try native("timeout", ["id": id, "seconds": 0.05])
-            try #require(result.result == 0 && result.readError == -25204)
+            for seconds in [0.002, 0.05] {
+                let result = try native("timeout", ["id": id, "seconds": seconds])
+                try #require(result.result == 0, "timeout configuration succeeds without a reply from the stopped app")
+                try #require(result.readError == -25204, "the subsequent remote AX read needs the app to answer")
+            }
         }
         try requireFinalState("the resumed fixture answers AX again") { try native("retained", ["id": id]).window?.roleError == 0 }
     }

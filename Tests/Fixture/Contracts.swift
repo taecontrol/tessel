@@ -11,12 +11,17 @@ struct FixtureContractError: Error, CustomStringConvertible {
 /// or the app's adapters, and revalidates each target before touching AX.
 @MainActor
 final class FixtureContracts: NSObject {
+    private let motionProbe = FixtureMotionProbe()
     private var handles: [UInt32: AXUIElement] = [:]
     private var bars: [AXUIElement] = []
     private var captured: [String: CFTypeRef] = [:]
     private var observer: AXObserver?
     private var observedPID: pid_t = 0
+    /// The window handle a `watch` registered, compared with each notified element.
+    private var watched: AXUIElement?
     private var events: [[String: Any]] = []
+    /// Each event's notified element, matched against retained handles when read.
+    private var eventElements: [AXUIElement] = []
     private var lifecycle: [[String: Any]] = []
     private var knownProcesses = Set<pid_t>()
     private var knownApplications: [pid_t: NSRunningApplication] = [:]
@@ -28,13 +33,14 @@ final class FixtureContracts: NSObject {
         let operation = command["operation"] as? String ?? "snapshot"
         switch operation {
         case "reset":
+            motionProbe.reset()
             stopObserving()
             NSWorkspace.shared.notificationCenter.removeObserver(self)
             spaces?.stop(returning: liveMovedWindows())
             spaces = nil
             moved.removeAll()
             handles.removeAll(); bars.removeAll(); captured.removeAll()
-            events.removeAll(); lifecycle.removeAll(); knownProcesses.removeAll()
+            events.removeAll(); eventElements.removeAll(); lifecycle.removeAll(); knownProcesses.removeAll()
             knownApplications.removeAll(); lifecycleCounts.removeAll()
             return [:]
         case "lifecycleStart":
@@ -46,8 +52,16 @@ final class FixtureContracts: NSObject {
             }
             return [:]
         case "lifecycle": return ["lifecycle": lifecycle, "lifecycleCounts": lifecycleCounts]
-        case "events": return ["events": events]
-        case "clearEvents": events.removeAll(); return [:]
+        case "events":
+            // A window ID lookup can fail on a notified element mid-transition.
+            // Identity with a retained window handle still names the window.
+            let retained = handles.sorted { $0.key < $1.key }
+            return ["events": zip(events, eventElements).map { event, element in
+                var event = event
+                event["handleID"] = retained.first { CFEqual($0.value, element) }?.key as Any? ?? NSNull()
+                return event
+            }]
+        case "clearEvents": events.removeAll(); eventElements.removeAll(); return [:]
         case "finder", "activateFinder": return try finder(activate: operation == "activateFinder")
         case "screen":
             guard let screen = NSScreen.screens.first else { throw FixtureContractError("primary screen unavailable") }
@@ -72,6 +86,36 @@ final class FixtureContracts: NSObject {
                     "terminated": app?.isTerminated ?? true]
         case "activate":
             NSRunningApplication(processIdentifier: pid)?.activate()
+            return [:]
+        case "cgFrames":
+            return ["cgFrames": Dictionary(uniqueKeysWithValues: fixtureCGFrames([pid]).map { (String($0.key), $0.value.frame) })]
+        case "motionStart": try motionProbe.start(command); return motionProbe.facts()
+        case "motionStop": motionProbe.stop(); return motionProbe.facts()
+        case "motionSamples": return motionProbe.facts(draining: command["drain"] as? Bool == true)
+        case "motionSetPreference":
+            guard let value = command["enabled"] as? Bool else { throw FixtureContractError("Reduce Motion needs a boolean") }
+            try motionProbe.setReduceMotion(value); return motionProbe.preferences()
+        case "motionPreferences": return motionProbe.preferences()
+        case "pointerStart": motionProbe.startPointer(); return motionProbe.facts()
+        case "pointerSamples": return motionProbe.facts()
+        case "pointerPress":
+            guard FixtureProbe.frontmostPID() == pid, let id = command["id"] as? UInt32, let window = handles[id],
+                  let position = FixtureProbe.value(window, kAXPositionAttribute), CFGetTypeID(position) == AXValueGetTypeID(),
+                  let size = FixtureProbe.value(window, kAXSizeAttribute), CFGetTypeID(size) == AXValueGetTypeID(),
+                  (CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []).contains(where: {
+                      ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == id
+                          && ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid
+                  }) else {
+                throw FixtureContractError("pointer presses require a retained frontmost fixture window")
+            }
+            var point = CGPoint.zero, dimensions = CGSize.zero
+            AXValueGetValue(position as! AXValue, .cgPoint, &point); AXValueGetValue(size as! AXValue, .cgSize, &dimensions)
+            let oldPointer = CGEvent(source: nil)?.location
+            let target = CGPoint(x: point.x + dimensions.width / 2, y: point.y + 12)
+            CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: target, mouseButton: .left)?.post(tap: .cghidEventTap)
+            CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: target, mouseButton: .left)?.post(tap: .cghidEventTap)
+            CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: target, mouseButton: .left)?.post(tap: .cghidEventTap)
+            if let oldPointer { CGWarpMouseCursorPosition(oldPointer) }
             return [:]
         case "snapshot": return snapshot(application, pid: pid)
         case "barOwner":
@@ -126,6 +170,7 @@ final class FixtureContracts: NSObject {
         case "watch":
             stopObserving()
             observedPID = pid
+            watched = command["id"] == nil ? nil : try retained(command, pid: pid)
             var created: AXObserver?
             let status = AXObserverCreate(pid, { _, element, name, context in
                 guard let context else { return }
@@ -183,9 +228,15 @@ final class FixtureContracts: NSObject {
         let application = AXUIElementCreateApplication(observedPID)
         AXUIElementSetMessagingTimeout(application, FixtureProbe.observationTimeout)
         let focused = read(application, kAXFocusedWindowAttribute), focus = self.element(focused.value)
-        events.append(["name": name, "id": id(element), "mainThread": Thread.isMainThread,
+        // A window ID lookup can fail on the notified element mid-transition;
+        // record the error and the element's identity separately from the ID.
+        var number: UInt32 = 0
+        let idError = fixtureWindowID(element, &number)
+        events.append(["name": name, "id": number, "idError": idError.rawValue,
+                       "registered": watched.map { CFEqual($0, element) } as Any? ?? NSNull(), "mainThread": Thread.isMainThread,
                        "focusedID": focus.map(id) as Any? ?? NSNull(), "focusedError": focused.error.rawValue,
                        "minimized": read(element, kAXMinimizedAttribute).value as? Bool as Any? ?? NSNull()])
+        eventElements.append(element)
     }
 
     private func registrations(_ command: [String: Any], application: AXUIElement, pid: pid_t, removing: Bool) throws -> [String: Any] {
@@ -219,6 +270,7 @@ final class FixtureContracts: NSObject {
         if let observer { CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes) }
         observer = nil
         observedPID = 0
+        watched = nil
     }
 
     private func liveMovedWindows() -> [UInt32] {

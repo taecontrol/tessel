@@ -43,6 +43,11 @@ struct Configuration: Codable, Sendable, Equatable {
     var experiments: [String: Bool] = [:]
     var keys = KeyChord.defaults
     var gaps = Gaps()
+    var animation = Animation()
+}
+
+struct Animation: Codable, Sendable, Equatable {
+    var duration: Int = 80
 }
 
 struct Gaps: Codable, Sendable, Equatable {
@@ -54,6 +59,7 @@ struct WorkspaceStatus: Codable, Sendable, Equatable {
     var reason = "experiment off"
     var active = 1
     var layout = "stack"
+    var animationDuration: Int = 80
     var rail: Int? = nil
     var railCount = 0
     var gaps = Gaps()
@@ -86,6 +92,10 @@ struct AppStatus: Codable, Sendable {
     var workspaces = WorkspaceStatus()
     /// Raw monotonic seconds (`CLOCK_MONOTONIC_RAW`) when tessel produced this answer.
     var answeredAt: Double? = nil
+    #if TESSEL_DEVELOPMENT
+    struct TestMotion: Codable, Sendable { var displayFrames: UInt64 = 0 }
+    var testMotion: TestMotion? = nil
+    #endif
 }
 
 struct Reply: Codable, Sendable {

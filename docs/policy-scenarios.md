@@ -1,6 +1,6 @@
 # Deterministic policy scenarios
 
-`swift test` runs the production catalog, Workspaces, Rails, closet recovery and
+`swift test` runs the production catalog, Workspaces, Carousel, closet recovery and
 configuration reload against a test-only simulated macOS. It does not launch an
 app, create windows, read real configuration, or use Accessibility. Simulator
 has only Ports and Assumptions as dependencies. Policy remains a separate target.
@@ -19,7 +19,7 @@ let result = Scenario.run("keep the native selection") { scenario in
     scenario.settle()
     app.select(1)
     mac.pause(after: .read(app)) // AX state captured; reply not delivered
-    tessel.configure(.rails)
+    tessel.configure(.carousel)
     scenario.settle()
     scenario.expect("window 1 keeps focus", mac.focusedWindow == 1)
     scenario.expect("window 1 is fully visible", mac.isFullyOnScreen(1))
@@ -30,7 +30,7 @@ requireScenario(result)
 `Tessel(on: mac)` composes the real objects directly when a test needs to own
 its lifetime. `Scenario.startTessel` retains that composition automatically.
 The facade exposes published `windows`, workspace `status`, configuration
-status, `configure(.off / .stack / .rails)`, `changeConfig` (the real 30 ms
+status, `configure(.off / .stack / .carousel)`, `changeConfig` (the real 30 ms
 reload debounce), `press("focus right")`, and `quit`. Presses go through the
 in-test hotkey registration. File watching and Carbon stay in real journeys.
 

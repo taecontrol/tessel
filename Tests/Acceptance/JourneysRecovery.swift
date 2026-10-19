@@ -65,7 +65,7 @@ extension Acceptance.Journeys {
             try requireFinalState("the orphan catalogued after AX resumes") { try harness.row(b) != nil }
             try desktop.expectInside([a, b])
         }
-        try step("#17 E3 rail disable, quit, crash and failed hide return managed windows") {
+        try step("rail disable, quit, crash and failed hide return managed windows") {
             for operation in ["disable", "quit", "stack-disable", "stack-quit", "crash-off", "crash-on", "failed-hide"] {
                 print("Rail cleanup: \(operation)")
                 try desktop.clear()
@@ -74,7 +74,7 @@ extension Acceptance.Journeys {
                     harness.stopApp()
                     ids = try (0..<4).map { try fixture.open(key: "w\($0)", ["widthFraction": 0.6]) }
                     try desktop.activate(key: "w0")
-                    try desktop.writeConfig(desktop.rails)
+                    try desktop.writeConfig(desktop.carousel)
                     try harness.startApp(fixtureReady: false, arguments: ["--test-failed-hide"])
                     try requireFinalState("safe disablement after a failed rail hide") {
                         let status = try harness.status().workspaces

@@ -24,7 +24,7 @@ enum ConfigParser {
             if line.first == "[" {
                 guard line.last == "]", !line.hasPrefix("[["),
                       let name = keyName(String(line.dropFirst().dropLast()).trimmingCharacters(in: horizontalWhitespace)),
-                      ["experiments", "keys", "gaps"].contains(name) else {
+                      ["experiments", "keys", "gaps", "animation"].contains(name) else {
                     throw ConfigError(line: lineNumber, message: "Unknown or invalid configuration table")
                 }
                 guard tables.insert(name).inserted else { throw ConfigError(line: lineNumber, message: "Duplicate \(name) table") }
@@ -39,26 +39,31 @@ enum ConfigParser {
             let canonical = table == "keys" ? KeyChord(key)?.name ?? key : key
             guard keys.insert(table + "." + canonical).inserted else { throw ConfigError(line: lineNumber, message: "Duplicate configuration key") }
             switch (table, key) {
-            case ("experiments", "workspaces"), ("experiments", "rails"):
+            case ("experiments", "workspaces"), ("experiments", "carousel"):
                 guard ["true", "false"].contains(value) else { throw ConfigError(line: lineNumber, message: "\(key) must be a boolean") }
                 configuration.experiments[key] = value == "true"
+            case ("animation", "duration"):
+                guard let duration = number(value, integer: true), (0...1000).contains(duration) else {
+                    throw ConfigError(line: lineNumber, message: "duration must be a TOML integer from 0 to 1000")
+                }
+                configuration.animation.duration = Int(duration)
             case ("gaps", "outer"):
                 guard let gap = number(value), gap.isFinite, gap >= 0 else { throw ConfigError(line: lineNumber, message: "outer must be a nonnegative TOML number") }
                 configuration.gaps.outer = gap
             case ("keys", _):
                 guard let chord = KeyChord(key) else { throw ConfigError(line: lineNumber, message: "Invalid key or modifier; use alt, shift, ctrl, cmd and a letter or digit") }
                 guard let command = string(value), command.isEmpty || WorkspaceCommand(command) != nil else {
-                    throw ConfigError(line: lineNumber, message: "Unknown command; use workspace 1…10, send 1…10, focus next|previous|left|right|up|down, or move left|right|up|down")
+                    throw ConfigError(line: lineNumber, message: "Unknown command; use workspace 1…10, send 1…10, focus next|previous|left|right|up|down, move left|right|up|down, or cycle width")
                 }
                 overrides[chord.name] = command
             default: throw ConfigError(line: lineNumber, message: "Unknown configuration key")
             }
         }
-        configuration.keys = (configuration.experiments["rails"] == true ? KeyChord.railDefaults : KeyChord.defaults).merging(overrides) { _,new in new }
+        configuration.keys = (configuration.experiments["carousel"] == true ? KeyChord.carouselDefaults : KeyChord.defaults).merging(overrides) { _,new in new }
         return configuration
     }
 
-    private static func number(_ value: String) -> Double? {
+    private static func number(_ value: String, integer: Bool = false) -> Double? {
         func matches(_ pattern: String) -> Bool {
             value.range(of: "\\A(?:" + pattern + ")\\z", options: .regularExpression) != nil
         }
@@ -68,7 +73,9 @@ enum ConfigParser {
                 return Int64(clean.dropFirst(2), radix: radix).map(Double.init)
             }
         }
-        guard matches("[+-]?(?:0|[1-9](?:_?[0-9])*)(?:\\.[0-9](?:_?[0-9])*)?(?:[eE][+-]?[0-9](?:_?[0-9])*)?") else { return nil }
+        let decimal = "[+-]?(?:0|[1-9](?:_?[0-9])*)"
+        let floating = "(?:\\.[0-9](?:_?[0-9])*)?(?:[eE][+-]?[0-9](?:_?[0-9])*)?"
+        guard matches(decimal + (integer ? "" : floating)) else { return nil }
         if !clean.contains("."), !clean.lowercased().contains("e") { return Int64(clean).map(Double.init) }
         return Double(clean)
     }

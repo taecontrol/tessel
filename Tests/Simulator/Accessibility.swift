@@ -82,7 +82,10 @@ extension SimulatedMac {
             guard let handle = handle(element, operation: "setMessagingTimeout \(seconds)s") else { return .cannotComplete }
             guard mac.scheduler.isActive else { return .cannotComplete }
             handle.timeout = seconds
-            finish(handle, operation: "setMessagingTimeout", status: .success)
+            // The signed hung-app contract proves this is client-side state,
+            // not a request/reply to the target app. Only remote calls below
+            // consume the model's AX delivery cost.
+            mac.scheduler.reply("AccessibilityPort.setMessagingTimeout reply \(handle.name) success", cost: 0)
             return .success
         }
         func copy(_ attribute: AXAttribute, of element: AXElement) -> AXResult<AXValue> {
@@ -287,11 +290,28 @@ extension SimulatedMac {
             assume(.windowGeometryWrites)
             var accepted = point
             if windows[id]?.spec.positionAcceptance == .rightEdgeStrip { accepted.x = min(point.x, geometry.frame.maxX - 40) }
+            if windows[id]?.spec.positionAcceptance == .screenEdges {
+                assume(.axVerticalClamping)
+                assume(.axHorizontalSliver)
+                let frame = windows[id]!.spec.frame
+                accepted.y = max(geometry.frame.maxY - geometry.visibleFrame.maxY, min(point.y, geometry.frame.height - 32))
+                if point.x >= geometry.frame.maxX { accepted.x = geometry.frame.maxX - 40 }
+                if point.x + frame.width <= geometry.frame.minX { accepted.x = geometry.frame.minX + 40 - frame.width }
+            }
+            if isCloseted(id) { assume(.closetAXIdentity) }
+            let write = recordGeometry(id, attribute: attribute, requested: value)
             applyPosition(id, accepted)
+            finishGeometry(id, index: write)
         case (.window(let id), .size, .size(let size)):
             assume(.axSizeConstraints)
             guard windows[id]?.spec.resizable == true else { return .other(-25200) }
+            let write = recordGeometry(id, attribute: attribute, requested: value)
+            if isCloseted(id) {
+                assume(.closetSizeLoss)
+                motion.shortSizes.insert(id)
+            }
             applySize(id, size)
+            finishGeometry(id, index: write)
         default:
             scheduler.failUnmodeled("AccessibilityPort.set \(attribute.rawValue) \(name(node))")
             return .cannotComplete

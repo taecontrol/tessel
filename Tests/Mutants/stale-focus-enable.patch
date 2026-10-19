@@ -6,7 +6,7 @@ diff --git a/Sources/Policy/Workspaces.swift b/Sources/Policy/Workspaces.swift
 @@ -113,17 +113,11 @@ final class Workspaces {
              enablingFront = applications.frontmostPID
              initialApplications = Set(applications.runningApplications.map(\.pid))
-             for id in entries.keys.sorted() { assign(id, to: 1); if railEnabled && railTile(id) { addRailTile(id, initial: true) } }
+             for id in entries.keys.sorted() { assign(id, to: 1); if carouselEnabled && railTile(id) { addCarouselTile(id, initial: true) } }
 -            // The front app already shows its focused window. Its last read
 -            // can predate a newer native selection; raising it would take
 -            // focus back, so render without a focus request. A fresh report

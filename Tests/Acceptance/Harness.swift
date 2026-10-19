@@ -29,7 +29,9 @@ struct Status: Decodable {
         let error: ConfigError?
     }
     struct Effective: Decodable, Equatable {
+        struct Animation: Decodable, Equatable { let duration: Int }
         let experiments: [String: Bool]
+        let animation: Animation
     }
     struct ConfigError: Decodable {
         let line: Int
@@ -45,6 +47,7 @@ struct Status: Decodable {
         let reason: String
         let active: Int
         let layout: String?
+        let animationDuration: Int
         let rail: Int?
         let gaps: Gaps
         let keys: [String: String]
@@ -253,6 +256,10 @@ final class Harness {
     var otherFixtures: [FixtureSession] = []
     var observer: FixtureSession!
     private(set) var appPID: pid_t = 0
+    /// What NSWorkspace reported in a fresh signed process when the suite began.
+    private(set) var desktopReduceMotion = false
+    /// The Reduce Motion value tessel was launched with; see `startApp`.
+    private(set) var appReduceMotion = false
     private var cleanups: [() -> Void] = []
     private var contracts: URL?
 
@@ -289,25 +296,47 @@ final class Harness {
         cleanups.append { [unowned self] in fixture.stop() }
         cleanups.append { [unowned self] in stopApp() }
         cleanups.append { [unowned self] in otherFixtures.forEach { $0.stop() } }
-        if launchApp { try startApp() }
+        guard let desktop = try observer.command("contract", ["operation": "motionPreferences", "pid": observer.pid]).contract?.reduceMotion else {
+            throw HarnessError("the signed observer did not report the desktop's Reduce Motion setting")
+        }
+        desktopReduceMotion = desktop
+        if launchApp {
+            try startApp()
+            print("Motion: \(try motionGiven())")
+            fflush(nil)
+        }
     }
 
     func shutdown() {
         while let cleanup = cleanups.popLast() { cleanup() }
     }
 
-    func startApp(fixtureReady: Bool = true, arguments: [String] = []) throws {
+    /// The harness owns the Reduce Motion Given instead of inheriting the
+    /// desktop's setting: GitHub's macOS images turn it on, which makes every
+    /// carousel move instant. macOS protects the persistent preference, and the
+    /// private setter the contracts use changes only its own process, so the
+    /// value reaches tessel through its argument domain, which NSWorkspace reads
+    /// before the user's. Nothing outside this launch changes, so neither
+    /// cleanup nor an interrupted run has anything to restore.
+    func startApp(fixtureReady: Bool = true, arguments: [String] = [], reduceMotion: Bool = false) throws {
         let capture = ProcessInfo.processInfo.environment["TESSEL_CAPTURE_WORKSPACES"] == "1" ? ["--test-capture-ui"] : []
         try run(["open", "-n", "-g", "--stdout", "/dev/null", "--stderr", "/dev/null",
                  "--env", "XDG_CONFIG_HOME=" + environment["XDG_CONFIG_HOME"]!, app.path,
-                 "--args", "--test-fixture-only"] + capture + arguments, timeout: margin, check: true)
+                 "--args", "--test-fixture-only", "-reduceMotion", reduceMotion ? "YES" : "NO"] + capture + arguments,
+            timeout: margin, check: true)
         guard let pid = finalValue({ processIDs(appExecutable).first }) else {
             throw HarnessError("signed development app did not launch")
         }
         appPID = pid
+        appReduceMotion = reduceMotion
         guard try finalState({ try invoke("status", "--json").status == 0 }) else {
             throw HarnessError("signed development app did not expose its status endpoint")
         }
+        // The effective duration is zero exactly when tessel reads Reduce Motion.
+        guard try finalState({
+            let status = try status()
+            return status.workspaces?.animationDuration == (reduceMotion ? 0 : status.config.effective.animation.duration)
+        }) else { throw HarnessError("tessel did not take the harness's Reduce Motion: \(try motionGiven())") }
         guard fixtureReady else { return }
         // Socket readiness does not prove that startup AX subscriptions exist.
         // Exercise one generic window before driving the app.
@@ -353,6 +382,25 @@ final class Harness {
         let paths = result.output.split(separator: "\n").filter { $0.hasPrefix("n/") && $0.hasSuffix(".sock") }
         guard paths.count == 1 else { throw HarnessError("expected one tessel endpoint, found \(paths.count)") }
         return String(paths[0].dropFirst())
+    }
+
+    /// Fixture-only status instrumentation. This counter observes the app's
+    /// real display-link adapter, not the observer's sampling display link.
+    func displayFrames() throws -> UInt64 {
+        let reply = try invoke("status", "--json")
+        let object = try JSONSerialization.jsonObject(with: reply.outputData) as? [String: Any]
+        guard let motion = object?["testMotion"] as? [String: Any], let frames = (motion["displayFrames"] as? NSNumber)?.uint64Value else {
+            throw HarnessError("fixture-only status must expose testMotion display frame instrumentation")
+        }
+        return frames
+    }
+
+    /// States the motion Given, so a failed motion example explains itself.
+    func motionGiven() throws -> String {
+        let status = try status()
+        return "effective animation duration \(status.workspaces.map { "\($0.animationDuration) ms" } ?? "unknown")"
+            + " (configured \(status.config.effective.animation.duration) ms); Reduce Motion: tessel \(appReduceMotion ? "on" : "off")"
+            + " (set by the harness), desktop \(desktopReduceMotion ? "on" : "off")"
     }
 
     func status() throws -> Status {

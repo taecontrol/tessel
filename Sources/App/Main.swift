@@ -58,11 +58,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.config = config
         let store = SnapshotStore(status: appStatus(config.status))
         self.store = store
+        let displayFrames = SystemDisplayFrames()
+        #if TESSEL_DEVELOPMENT
+        if LaunchOptions.fixtureOnly {
+            store.enableMotionInstrumentation()
+            displayFrames.onFrame = { store.recordDisplayFrame() }
+        }
+        #endif
         do { server = try SocketServer { store.reply(to: $0) } }
         catch { NSApp.terminate(nil); return }
         let workspaces = Workspaces(store: store, trusted: trusted, configuration: config.status.effective,
                                     applications: applications, ax: ax, screens: SystemScreen(), windowOrder: SystemWindowOrder(),
-                                    scheduler: scheduler, hotkeys: SystemHotkeys(), fixtureOnly: LaunchOptions.fixtureOnly) {
+                                    scheduler: scheduler, hotkeys: SystemHotkeys(), fixtureOnly: LaunchOptions.fixtureOnly,
+                                    motionPreferences: SystemMotionPreferences(), displayFrames: displayFrames, pointerActivity: SystemPointerActivity()) {
             try SkyLightCloset(simulateMissing: LaunchOptions.missingSkyLight, simulateFailedHide: LaunchOptions.failedHide)
         }
         self.workspaces = workspaces
@@ -110,7 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let workspace = workspaces?.status ?? WorkspaceStatus()
         if workspace.enabled {
             statusItem?.button?.title = String(workspace.active)
-            if workspace.layout == "rails" {
+            if workspace.layout == "carousel" {
                 let count = max(1,workspace.railCount)
                 let glyph = NSImage(size:NSSize(width:18,height:18),flipped:false) { rect in
                     let step = min(5,18/Double(count)), bar = min(3,step*0.6)
@@ -150,7 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Quit tessel", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         statusItem?.menu = menu
         let label = config.status.error.map { "Configuration error (line \($0.line))" }
-            ?? (workspace.enabled ? "Workspace \(workspace.active)" + (workspace.layout == "rails" ? ", rail \(workspace.rail ?? 0) of \(workspace.railCount)" : "") : "Workspaces disabled: \(workspace.reason)")
+            ?? (workspace.enabled ? "Workspace \(workspace.active)" + (workspace.layout == "carousel" ? ", rail \(workspace.rail ?? 0) of \(workspace.railCount)" : "") : "Workspaces disabled: \(workspace.reason)")
         statusItem?.button?.setAccessibilityLabel("tessel: " + label)
         statusItem?.button?.toolTip = label
         #if TESSEL_DEVELOPMENT

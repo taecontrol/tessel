@@ -74,7 +74,7 @@ extension Acceptance {
                 let status = try #require(try harness.status().workspaces)
                 try #require(!status.enabled && status.reason == "experiment off")
             }
-            try step("#17 E1 rails off leaves rail hotkeys unregistered") {
+            try step("rails off leaves rail hotkeys unregistered") {
                 for enabled in [false, true] {
                     if enabled {
                         try desktop.configure(desktop.stack, layout: "stack")
@@ -224,9 +224,9 @@ extension Acceptance {
         @Test("rail scroll and elevator journey")
         func railScrollAndElevator() throws {
             let ids = try desktop.railSetup()
-            try step("#17 E24 CLI reports rail, slot, layout and nulls outside a rail") {
+            try step("CLI reports rail, slot, layout and nulls outside a rail") {
                 try desktop.post(kVK_ANSI_J, shift: true)
-                try desktop.expectFocus(ids[0])
+                try desktop.expectShown(ids[0])
                 try requireFinalState("the moved fixture rail and slot fields") {
                     let rows = try harness.rows()
                     let rail = try harness.status().workspaces?.rail
@@ -235,7 +235,7 @@ extension Acceptance {
                             rows.contains { $0.id == id && $0.rail == 1 && $0.slot == index + 1 }
                         } && rail == 2
                 }
-                try #require(try harness.status().workspaces?.layout == "rails")
+                try #require(try harness.status().workspaces?.layout == "carousel")
                 let dialog = try fixture.open(kind: "dialog", key: "dialog")
                 try desktop.expectFocus(dialog)
                 try requireFinalState("the floating fixture listed") { try harness.row(dialog)?.workspace == 1 }
@@ -246,32 +246,44 @@ extension Acceptance {
                 let leaked = result.output.contains("\"title\"") || result.output.contains("Fixture dialog")
                 try #require(hasNulls && !leaked, "floating fixtures expose null rail/slot and no titles")
                 try fixture.command("close", ["key": "dialog"])
-                try desktop.expectFocus(ids[0])
+                // AppKit focuses the singleton within close, so native focus
+                // proves nothing about tessel. Until tessel retires the dialog,
+                // the next key still applies to it: Up from a floating window
+                // is previous in arrival order, the last upper-rail tile.
+                try requireFinalState("tessel retired the closed dialog") { try harness.row(dialog) == nil }
+                try desktop.expectShown(ids[0])
             }
-            try step("real scroll hotkeys move the ring and focus its destination") {
+            try step("real scroll hotkeys reveal the next destination") {
                 try desktop.post(kVK_ANSI_K)
-                try desktop.expectFocus(ids[4])
-                let before = try #require(try desktop.window(ids[2])).frame
-                try desktop.post(kVK_ANSI_L)
-                try desktop.expectFocus(ids[1])
+                try requireFinalState("the upper rail has landed and the singleton has hidden before external selection") {
+                    let observation = try desktop.observe()
+                    return !observation.visibleIDs.contains(ids[0]) && desktop.focused(ids[1], in: observation)
+                        && observation.windows.filter { observation.visibleIDs.contains($0.id) }.allSatisfy {
+                            abs($0.frame[1] - observation.area[1] - 10) <= 1
+                        }
+                }
+                try desktop.activate(key: "w1")
+                let before = try #require(try desktop.window(ids[3])).frame
                 try desktop.post(kVK_ANSI_L)
                 try desktop.expectFocus(ids[2])
+                try desktop.post(kVK_ANSI_L)
+                try desktop.expectFocus(ids[3])
                 try requireFinalState("the scrolled destination fully visible at a changed position") {
                     let observation = try desktop.observe()
                     return observation.windows.contains {
-                        $0.id == ids[2] && !desktop.near($0.frame, before)
+                        $0.id == ids[3] && !desktop.near($0.frame, before)
                             && $0.frame[0] >= observation.area[0] + 9
                             && $0.frame[0] + $0.frame[2] <= observation.area[0] + observation.area[2] - 9
                     }
                 }
             }
-            try step("#17 E25 status item AX label tracks real elevator trips") {
+            try step("status item AX label tracks real elevator trips") {
                 try desktop.expectMenu("Workspace 1, rail 1 of 2")
                 try desktop.post(kVK_ANSI_J)
                 try desktop.expectFocus(ids[0])
                 try desktop.expectMenu("Workspace 1, rail 2 of 2")
                 try desktop.post(kVK_ANSI_K)
-                try desktop.expectFocus(ids[2])
+                try desktop.expectFocus(ids[3])
                 try desktop.expectMenu("Workspace 1, rail 1 of 2")
             }
         }
@@ -287,16 +299,15 @@ extension Acceptance {
             }
             try step("atomic replacement reloads the file watcher and rail layout") {
                 let revision = try harness.status().config.revision
-                let width = try #require(try desktop.window(window)).frame[2]
                 let replacement = harness.configFile.appendingPathExtension("new")
-                try Data((desktop.rails + "[gaps]\nouter = 11\n").utf8).write(to: replacement)
+                try Data((desktop.carousel + "[gaps]\nouter = 11\n").utf8).write(to: replacement)
                 try #require(rename(replacement.path, harness.configFile.path) == 0)
                 try requireFinalState("the atomically replaced config and rail geometry") {
                     let status = try harness.status(), observation = try desktop.observe()
-                    return status.config.revision > revision && status.workspaces?.layout == "rails"
+                    return status.config.revision > revision && status.workspaces?.layout == "carousel"
                         && status.workspaces?.gaps.outer == 11 && observation.windows.contains {
                             $0.id == window && desktop.near($0.frame, [observation.area[0] + 11, observation.area[1] + 11,
-                                width, observation.area[3] - 22])
+                                observation.area[2] - 22, observation.area[3] - 22])
                         }
                 }
             }

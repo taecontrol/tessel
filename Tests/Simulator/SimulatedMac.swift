@@ -3,7 +3,7 @@ import CoreGraphics
 import Ports
 import Assumptions
 
-package enum PositionAcceptance: String, CaseIterable, Sendable { case requested, rightEdgeStrip }
+package enum PositionAcceptance: String, CaseIterable, Sendable { case requested, rightEdgeStrip, screenEdges }
 package enum OffDisplayMembership: String, CaseIterable, Sendable { case included, omitted }
 package enum MinimizedRaiseReply: String, CaseIterable, Sendable { case success, cannotComplete }
 
@@ -16,6 +16,7 @@ package struct WindowSpec: Sendable {
     package var parent: UInt32?
     package var positionAcceptance: PositionAcceptance
     package var offDisplayMembership: OffDisplayMembership
+    package var closetHeightLoss: Double = 0
     package var minimizedRaiseReply: MinimizedRaiseReply
     package init(frame: CGRect = CGRect(x: 40, y: 60, width: 451, height: 400), subrole: String = "AXStandardWindow",
                  resizable: Bool = true, minimumSize: CGSize = CGSize(width: 1, height: 1),
@@ -96,6 +97,7 @@ package final class SimulatedMac: @unchecked Sendable {
                                   visibleFrame: CGRect(x: 0, y: 0, width: 1024, height: 737))
     var usedAssumptions: Set<Assumption> = []
     var foundation = FoundationState()
+    var motion = MotionState()
 
     struct AppState {
         let pid: Int32, alias: String, bundleID: String
@@ -112,6 +114,7 @@ package final class SimulatedMac: @unchecked Sendable {
         var deferredActivations = 0
         var activationPending = false
         var activationCompletion = DeferredActivationCompletion.focusWrite
+        var activationOrderDelay = 0
     }
     struct Window {
         let id: UInt32, pid: Int32
@@ -283,11 +286,12 @@ package final class SimulatedMac: @unchecked Sendable {
         windows[id]?.fullscreen = enabled
         windows[id]?.spaces = [enabled ? 10_000 + UInt64(id) : 1]
         active = enabled ? 10_000 + UInt64(id) : 1
-        notify(.layoutChanged, node: .window(id))
+        notify(.resized, node: .window(id))
     }
     @MainActor func drag(_ id: UInt32, point: CGPoint) {
         assume(.windowGeometryWrites)
         action("drag window \(id) to \(point.x),\(point.y)")
+        pressPointer()
         applyPosition(id, point)
     }
     @MainActor func resize(_ id: UInt32, size: CGSize) {
@@ -339,13 +343,18 @@ package final class SimulatedMac: @unchecked Sendable {
     }
     func applySize(_ id: UInt32, _ size: CGSize) {
         guard let spec = windows[id]?.spec else { return }
-        let accepted = CGSize(width: max(spec.minimumSize.width, min(spec.maximumSize.width, size.width)),
+        var maximumWidth = spec.maximumSize.width
+        if spec.positionAcceptance == .screenEdges && spec.frame.minX > geometry.frame.minX {
+            assume(.axResizeAnchoring)
+            maximumWidth = min(maximumWidth, geometry.frame.maxX - spec.frame.minX)
+        }
+        let accepted = CGSize(width: max(spec.minimumSize.width, min(maximumWidth, size.width)),
                               height: max(spec.minimumSize.height, min(spec.maximumSize.height, size.height)))
         for member in groupMembers(id) { windows[member]?.spec.frame.size = accepted }
         notify(.resized, node: .window(id))
     }
     func applyPosition(_ id: UInt32, _ point: CGPoint) {
         for member in groupMembers(id) { windows[member]?.spec.frame.origin = point }
-        notify(.layoutChanged, node: .window(id))
+        notify(.moved, node: .window(id))
     }
 }

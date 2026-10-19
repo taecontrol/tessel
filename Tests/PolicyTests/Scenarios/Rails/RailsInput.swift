@@ -5,13 +5,14 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct RailInput {
-    @Test("#17 E7; #17 E16: cross-app elevator travel and external activation preserve the destination selection", arguments: WriteOrder.allCases)
+    @Test("cross-app elevator travel and external activation preserve the destination selection", arguments: WriteOrder.allCases)
     func crossAppElevator(order: WriteOrder) {
         requireScenario(Scenario.run("cross-app elevator", writes: order) { s in
             let f = RailFixture(s, widths: [0.25, 0.08, 0.08, 0.08]), a = f.ids[0]
             let other = f.mac.launch(), b = other.open(WindowSpec(frame: CGRect(x: 40, y: 60, width: 250, height: 400)))
             s.settle(); f.focus(b); f.order([a, b] + Array(f.ids.dropFirst()))
             f.press("move down", focus: b)
+            f.press("focus up", focus: a); f.press("focus down", focus: b)
             let sizes = f.frames(f.ids + [b]).map(\.size)
             for _ in 0..<3 {
                 f.press("focus up", focus: a)
@@ -26,7 +27,7 @@ import Testing
         })
     }
 
-    @Test("#17 E7: an accepted but unconfirmed activation is rechecked after 50 virtual milliseconds")
+    @Test("an accepted but unconfirmed activation is rechecked after 50 virtual milliseconds")
     func deferredActivation() {
         requireScenario(Scenario.run("unconfirmed cross-app activation", writes: .readsFirst) { s in
             let f = RailFixture(s, widths: [0.25]), a = f.ids[0]
@@ -50,7 +51,7 @@ import Testing
         })
     }
 
-    @Test("#17 E16: external same-app focus uses the 50 ms virtual decision window")
+    @Test("external same-app focus uses the 50 ms virtual decision window")
     func externalFocusDelay() {
         requireScenario(Scenario.run("bounded external focus decision", writes: .readsFirst) { s in
             let f = RailFixture(s, widths: [0.25, 0.25]), a = f.ids[0], b = f.ids[1]
@@ -69,7 +70,7 @@ import Testing
         })
     }
 
-    @Test("#17 E16: external focus reveals off-screen and hidden-rail windows, and follows workspaces")
+    @Test("external focus reveals off-screen and hidden-rail windows, and follows workspaces")
     func externalFocus() {
         requireScenario(Scenario.run("external rail/workspace selection") { s in
             let f = RailFixture(s, widths: Array(repeating: 0.45, count: 4)), ids = f.ids
@@ -84,7 +85,7 @@ import Testing
         })
     }
 
-    @Test("#17 E16; #17 E22: external activation follows a healthy, busy or hung rail owner", arguments: ["healthy", "busy", "hung"], WriteOrder.allCases)
+    @Test("external activation follows a healthy, busy or hung rail owner", arguments: ["healthy", "busy", "hung"], WriteOrder.allCases)
     func externalFromOwner(state: String, order: WriteOrder) {
         requireScenario(Scenario.run("external activation from \(state) owner", writes: order) { s in
             let f = RailFixture(s, widths: [0.25]), a = f.ids[0]
@@ -99,7 +100,7 @@ import Testing
         })
     }
 
-    @Test("#17 E16; #17 E22: owner revalidation cannot override newer keyboard or native focus", arguments: ["keyboard", "reorder", "external", "same-app"], WriteOrder.allCases)
+    @Test("owner revalidation cannot override newer keyboard or native focus", arguments: ["keyboard", "reorder", "external", "same-app"], WriteOrder.allCases)
     func supersededOwnerRead(action: String, order: WriteOrder) {
         requireScenario(Scenario.run("owner read superseded by \(action)", writes: order) { s in
             let f = RailFixture(s, widths: [0.25]), a = f.ids[0]
@@ -135,7 +136,7 @@ import Testing
 
     enum ActivationStep: String, CaseIterable { case activate, read, deliver, down }
 
-    @Test("#17 E7; #17 E16: an activation queued before an elevator command cannot undo its newer rail selection")
+    @Test("an activation queued before an elevator command cannot undo its newer rail selection")
     func staleActivation() {
         let enumeration = SimulatedMac()
         let orders = enumeration.orders(of: ActivationStep.allCases, requiring: [
@@ -172,10 +173,10 @@ import Testing
         }
     }
 
-    @Test("#17 E22: a hung app cannot block healthy scrolling, elevator travel or cached publication", arguments: [false, true])
+    @Test("a hung app cannot block healthy scrolling, elevator travel or cached publication", arguments: [false, true])
     func hungApp(beforeObserved: Bool) {
         requireScenario(Scenario.run("hung app beforeObserved=\(beforeObserved)") { s in
-            let f = RailFixture(s, widths: [0.45, 0.45, 0.45]), ids = f.ids
+            let f = RailFixture(s, widths: Array(repeating: (WorkspaceScenarios.area(s.mac).width - 10) / (2 * WorkspaceScenarios.area(s.mac).width), count: 3)), ids = f.ids
             let other = f.mac.launch(), h = other.open(WindowSpec(frame: CGRect(x: 40, y: 60, width: 400, height: 400)))
             if beforeObserved {
                 other.hang(); f.app.select(ids[0])
@@ -201,12 +202,12 @@ import Testing
                 s.settle()
                 f.press("focus down", focus: ids[2])
             }
-            s.expect("cached workspace state remains readable", f.tessel.status.enabled && f.tessel.status.layout == "rails")
+            s.expect("cached workspace state remains readable", f.tessel.status.enabled && f.tessel.status.layout == "carousel")
             s.expect("healthy window rows remain published", Set(ids).isSubset(of: Set(f.tessel.windows.map(\.id))))
         })
     }
 
-    @Test("#17 E22: burst input retains the latest focus and finishes every pending position", arguments: [false, true])
+    @Test("burst input retains the latest focus and finishes every pending position", arguments: [false, true])
     func burst(layout: Bool) {
         requireScenario(Scenario.run("burst layout=\(layout)") { s in
             let fraction = 0.3
@@ -214,27 +215,24 @@ import Testing
             let other = f.mac.launch(), b = other.open(WindowSpec(frame: CGRect(x: 40, y: 60, width: floor(f.area.width * fraction), height: 400)))
             s.settle()
             let ids = [f.ids[0], b, f.ids[1], f.ids[2]], c = ids[2], d = ids[3]
-            f.order(ids); f.select(layout ? c : ids[0])
+            f.order(ids)
+            f.tessel.pressKey("alt-r"); f.tessel.pressKey("alt-r"); f.tessel.pressKey("alt-r"); s.settle()
+            f.select(layout ? c : ids[0])
             other.busy(forMilliseconds: 300)
             s.step("two commands while app-B is busy") {
                 f.tessel.press("focus right")
                 f.tessel.press(layout ? "focus left" : "focus right")
             }
             s.settle(); f.focus(c)
-            let width = f.frame(c).width, step = width + 10
-            let offset = layout ? 3 * step - (f.area.width - 56 - width) : 0
-            for (index, id) in ids.enumerated() {
-                var x = f.area.minX + Double(index) * step - offset
-                if index == 0 && layout && x + width < 56 { x += 4 * step }
-                f.near(f.frame(id).minX, x, "pending position for window \(id) completes")
-                f.near(f.frame(id).width, width, "burst preserves width")
-                s.expect("worked burst keeps window \(id) on screen", f.mac.isVisible(id))
-            }
+            for id in f.ids { f.near(f.frame(id).width, floor(f.area.width * fraction), "burst preserves existing nominal width") }
+            f.near(f.frame(b).width, (f.area.width + 10) / 3 - 10, "arrival retains its selected third")
+            f.near(f.frame(b).maxX + 10, f.frame(c).minX, "the busy neighbour reaches its final position beside the healthy tile")
+            f.near(f.frame(c).maxX + 10, f.frame(d).minX, "the healthy right neighbour reaches its final position")
             s.expect("the last right/left command is still selected", f.mac.focusedWindow == c && f.mac.focusedWindow != d)
         })
     }
 
-    @Test("#17 E22: rail write retries use 100/200/400/800 ms virtual delays and stop until another render")
+    @Test("rail write retries use 100/200/400/800 ms virtual delays and stop until another render")
     func retryDelays() {
         requireScenario(Scenario.run("bounded rail write retries", writes: .readsFirst) { s in
             let f = RailFixture(s, widths: [0.3, 0.3, 0.3])
@@ -264,13 +262,13 @@ import Testing
             s.expect("the main lane publishes while AX is outstanding", publishedDuringTimeout)
             f.unchanged([b], [before])
             other.resume(); s.settle(); f.unchanged([b], [before])
-            f.press("focus right", focus: d)
-            let expected = f.area.maxX - 56 - f.frame(d).width - 2 * (f.frame(d).width + 10)
-            f.near(f.frame(b).minX, expected, "a subsequent render retries the stale pending position")
+            f.select(d)
+            f.near(f.frame(b).maxX + 10, f.frame(c).minX, "a subsequent render completes the stale pending position exactly")
+            f.near(f.frame(c).maxX + 10, f.frame(d).minX, "the final neighbours remain contiguous")
         })
     }
 
-    @Test("#17 E22: a newer workspace render cancels an outstanding rail write retry")
+    @Test("a newer workspace render cancels an outstanding rail write retry")
     func supersededRetry() {
         requireScenario(Scenario.run("cancel superseded rail retry", writes: .readsFirst) { s in
             let f = RailFixture(s, widths: [0.3, 0.3, 0.3])
@@ -289,7 +287,7 @@ import Testing
         })
     }
 
-    @Test("#17 E23: commands, defaults, overrides, aliases and invalid-line recovery retain effective bindings")
+    @Test("commands, defaults, overrides, aliases and invalid-line recovery retain effective bindings")
     func configuration() {
         requireScenario(Scenario.run("rail key configuration") { s in
             let f = RailFixture(s), ids = f.ids
@@ -304,20 +302,19 @@ import Testing
                 s.expect("send \(number) keeps its numeric key", keys["alt-shift-\(digit)"] == "send \(number)")
             }
             s.expect("rail aliases have no default binding", !keys.values.contains("focus next") && !keys.values.contains("focus previous"))
-            f.tessel.changeConfig("[experiments]\nrails = true\n[keys]\nalt-a = 'focus next'\nalt-b = 'focus previous'\nalt-c = 'move down'\nalt-l = 'focus left'\n")
+            f.tessel.changeConfig("[experiments]\ncarousel = true\n[keys]\nalt-a = 'focus next'\nalt-b = 'focus previous'\nalt-c = 'move down'\nalt-l = 'focus left'\n")
             s.settle()
             let effective = f.tessel.status.keys
             s.expect("overrides merge with unchanged numeric defaults", effective["alt-l"] == "focus left" && effective["alt-1"] == "workspace 1")
             s.expect("aliases and new commands are accepted", effective["alt-a"] == "focus next" && effective["alt-b"] == "focus previous" && effective["alt-c"] == "move down")
-            f.press("focus left", focus: ids[2]); f.press("focus next", focus: ids[0])
             f.press("focus next", focus: ids[1]); f.press("focus previous", focus: ids[0]); f.press("move down", focus: ids[0])
-            f.tessel.changeConfig("[experiments]\nrails = true\n[keys]\nalt-a = 'move sideways'\n")
+            f.tessel.changeConfig("[experiments]\ncarousel = true\n[keys]\nalt-a = 'move sideways'\n")
             s.settle()
             s.expect("invalid commands report their line", f.tessel.configuration.error?.line == 4)
             let message = f.tessel.configuration.error?.message ?? ""
             s.expect("error lists every directional command", message.contains("focus next|previous|left|right|up|down") && message.contains("move left|right|up|down"))
             s.expect("invalid edits keep all effective bindings", f.tessel.status.keys == effective)
-            f.press("focus up", focus: ids[2])
+            f.press("focus up", focus: ids[1])
             f.tessel.changeConfig("[experiments]\nworkspaces = true\n[keys]\nalt-a = 'move right'\n")
             s.settle()
             s.expect("rails-off keeps workspace focus defaults and still validates directional overrides", f.tessel.status.keys["alt-j"] == "focus next" && f.tessel.status.keys["alt-k"] == "focus previous" && f.tessel.configuration.error == nil)

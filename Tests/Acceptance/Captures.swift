@@ -45,13 +45,14 @@ extension Acceptance {
             try harness.startApp()
         }
 
-        @Test("#17 E26: rails status item capture")
+        @Test("rails status item capture")
         func captureRailsStatusItem() throws {
             let ids = try desktop.railSetup([0.3, 0.3, 0.3])
             try desktop.post(38, shift: true)
             try desktop.expectFocus(ids[0])
             try desktop.post(40)
-            try desktop.expectFocus(ids[2])
+            // The upper rail remembers the departed tile's right neighbor.
+            try desktop.expectFocus(ids[1])
             for (rail, code) in [(2, 38), (1, 40)] {
                 let name = "E26-workspace-1-rail-\(rail)"
                 let source = harness.configFile.deletingLastPathComponent().appending(path: "ui-captures/" + name + ".png")

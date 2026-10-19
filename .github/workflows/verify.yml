@@ -11,9 +11,11 @@ jobs:
   acceptance:
     name: Acceptance
     runs-on: xcode-27
-    # Journeys (including signed rebuilds), contracts, 200 latency samples and
-    # three 20 s idle windows share setup; ten minutes leaves runner margin.
-    timeout-minutes: 10
+    # Journeys (including two optimized rebuilds), contracts, 200 latency
+    # samples and three 20 s idle windows share setup. With the carousel's
+    # suites a green run takes about nine and a half minutes, so twelve leaves
+    # runner margin.
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - name: Configure ephemeral certificate signing

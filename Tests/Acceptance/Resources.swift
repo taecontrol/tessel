@@ -18,7 +18,7 @@ extension Acceptance {
             let footprintBytes: UInt64
         }
 
-        private func verifyIdleResources(_ example: String) throws {
+        private func verifyIdleResources(_ example: String, displayFramesBefore: UInt64? = nil) throws {
             let budget = try JSONDecoder().decode(Budget.self, from: Data(contentsOf: root.appending(path: "Tests/Acceptance/resource-budget.json")))
             let before = try resources(harness.appPID)
             print(String(format: "%@: start footprint %.2f MB (limit < %.2f MB)", example,
@@ -37,6 +37,9 @@ extension Acceptance {
             try #require(wakeups <= budget.interruptWakeups, "Interrupt wakeups exceeded the wakeup limit")
             try #require(cpu <= budget.cpuNanoseconds, "CPU time exceeded the CPU limit")
             try #require(after.footprintBytes < budget.footprintBytes, "End footprint must be below the footprint limit")
+            if let displayFramesBefore {
+                try #require(try harness.displayFrames() == displayFramesBefore, "The app must receive zero display frames while idle")
+            }
         }
 
         @Test("#1 E22: idle resource budget") func e22TwentyIdleWindowsStayWithinWakeupCPUAndFootprintLimits() throws {
@@ -53,7 +56,9 @@ extension Acceptance {
                 print("E36 preparing fixture window \(index + 1)/20")
                 fflush(nil)
                 let window = try fixture.open(key: "idle\(index)")
-                try desktop.activate(key: "idle\(index)")
+                // The fixture app stays frontmost, so AppKit keys each later
+                // window as it opens; activating it again would re-observe them all.
+                if index == 0 { try desktop.activate(key: "idle\(index)") }
                 try desktop.expectShown(window)
                 if index.isMultiple(of: 2), index > 0 {
                     try desktop.key(index / 2 + 1, send: true)
@@ -67,12 +72,13 @@ extension Acceptance {
             sleep(seconds: 1)
             try verifyIdleResources("E36")
         }
-        @Test("#17 E29: rails idle resource budget") func e29RailsAcrossWorkspacesKeepTheIdleResourceBudget() throws {
+        @Test("#26 E24: carousel receives zero idle display frames and keeps the resource budget") func carouselAcrossWorkspacesKeepsTheIdleResourceBudget() throws {
             try harness.reset()
-            try desktop.configure(desktop.rails, layout: "rails")
+            try desktop.configure("[experiments]\ncarousel = true\n", layout: "carousel")
+            let setupFramesStart = try harness.displayFrames()
             for index in 0..<20 {
-                let id = try fixture.open(key: "idle\(index)", ["widthFraction": 0.4])
-                try desktop.activate(key: "idle\(index)")
+                let id = try fixture.open(kind: index.isMultiple(of: 2) ? "heavyText" : "web", key: "idle\(index)", ["widthFraction": 0.4])
+                if index == 0 { try desktop.activate(key: "idle\(index)") }
                 try desktop.expectFocus(id)
                 // Native focus can precede the catalog's new-window arrival.
                 // Finish each setup command before opening the next fixture.
@@ -99,7 +105,10 @@ extension Acceptance {
                 return rows.count == 20 && Set(rows.compactMap(\.workspace)).count == 5 && rows.contains { ($0.rail ?? 0) > 1 }
             }
             sleep(seconds: 1)
-            try verifyIdleResources("Rails E29")
+            let frames = try harness.displayFrames()
+            let given = try harness.motionGiven()
+            try #require(frames > setupFramesStart, "The display counter must increase during setup motion before it can prove idle zero frames; \(given)")
+            try verifyIdleResources("Carousel E24", displayFramesBefore: frames)
         }
     }
 }

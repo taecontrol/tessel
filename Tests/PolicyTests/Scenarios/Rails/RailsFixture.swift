@@ -25,8 +25,16 @@ import Simulator
         if let first = ids.first { app.select(first) }
         tessel = scenario.startTessel()
         scenario.settle()
-        tessel.configure(.rails)
+        // These retained membership/focus/AX-retry scenarios exercise instant
+        // presentation. CarouselMotion independently proves animated delivery.
+        tessel.changeConfig("[experiments]\ncarousel = true\n[animation]\nduration = 0\n")
         scenario.settle()
+        // Retained regressions start in the unexpanded rail. E1 proves the
+        // workspace-start expansion independently.
+        if ids.count > 1, let first = ids.first, let last = ids.last {
+            app.select(last); scenario.settle()
+            app.select(first); scenario.settle()
+        }
         scenario.expect("setup: every opened window is listed", tessel.windows.map(\.id) == ids)
         if let first = ids.first { focus(first) }
     }

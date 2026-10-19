@@ -9,6 +9,25 @@ struct MacAssumption: TestTrait {
 func contract(_ assumption: Assumption) -> MacAssumption { MacAssumption(assumption: assumption) }
 
 struct NativeContractReply: Codable {
+    struct MotionSample: Codable {
+        struct Window: Codable { let id: UInt32; let valid: Bool; let frame: [Double]; let visible: Bool; let source: String? }
+        let at: Double
+        let frame: Int?
+        let startedAt: Double?
+        let sampledAt: Double?
+        let focused: UInt32?
+        let windows: [Window]
+        let order: [UInt32]
+        let frontmost: Int32
+    }
+    let cgFrames: [String: [Double]]?
+    let motionSamples: [MotionSample]?
+    let motionFrameCount: Int?
+    let pointerPresses: Int?
+    let pointerEvents: [String]?
+    let reduceMotion: Bool?
+    let motionChanges: [Bool]?
+    let sampledAt: Double?
     struct Window: Codable {
         let id: UInt32
         let idError: Int32
@@ -33,6 +52,11 @@ struct NativeContractReply: Codable {
     struct Event: Codable {
         let name: String
         let id: UInt32?
+        let idError: Int32?
+        /// Whether the notified element equals the handle `watch` registered.
+        let registered: Bool?
+        /// The retained window handle equal to the notified element, if any.
+        let handleID: UInt32?
         let pid: Int32?
         let knownPID: Int32?
         let mainThread: Bool
@@ -162,12 +186,19 @@ extension Acceptance {
             try #require(results == Array(repeating: 0, count: names.count), "native AX notification registration failed: \(results ?? [])")
         }
 
+        /// A notification names `id` by its window ID or, when that lookup fails
+        /// mid-transition, by AX equality with the observer's retained handle.
         func expectEvent(_ name: String, id: UInt32? = nil, minimized: Bool? = nil) throws {
-            try requireFinalState("native \(name) notification") {
-                try native("events").events?.contains { event in
-                    event.name == name && event.mainThread && (id == nil || event.id == id)
+            var events: [NativeContractReply.Event] = []
+            guard try finalState({
+                events = try native("events").events ?? []
+                return events.contains { event in
+                    event.name == name && event.mainThread && (id == nil || event.id == id || event.handleID == id)
                         && (minimized == nil || event.minimized == minimized)
-                } == true
+                }
+            }) else {
+                let described = events.map { "\($0.name) id=\($0.id ?? 0) idError=\($0.idError ?? 0) handle=\($0.handleID.map(String.init) ?? "nil")" }
+                throw HarnessError("native \(name) notification\(id.map { " for \($0)" } ?? "") did not arrive within the final-state margin; events \(described)")
             }
         }
 

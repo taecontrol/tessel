@@ -24,7 +24,7 @@ package enum AXAttribute: String, Sendable {
 
 package enum AXNotification: String, Sendable {
     case destroyed = "AXUIElementDestroyed", minimized = "AXWindowMiniaturized", restored = "AXWindowDeminiaturized"
-    case resized = "AXWindowResized", layoutChanged = "AXLayoutChanged", valueChanged = "AXValueChanged"
+    case moved = "AXWindowMoved", resized = "AXWindowResized", layoutChanged = "AXLayoutChanged", valueChanged = "AXValueChanged"
     case windowCreated = "AXWindowCreated", focusedWindowChanged = "AXFocusedWindowChanged"
     case mainWindowChanged = "AXMainWindowChanged", sheetCreated = "AXSheetCreated"
 }

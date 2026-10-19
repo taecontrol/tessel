@@ -3,6 +3,7 @@ import ApplicationServices
 import Darwin
 import Security
 import SwiftUI
+import WebKit
 
 @_silgen_name("_AXUIElementGetWindow")
 func fixtureWindowID(_ element: AXUIElement, _ id: UnsafeMutablePointer<CGWindowID>) -> AXError
@@ -89,6 +90,10 @@ final class Fixture: NSObject, NSApplicationDelegate {
         source.setEventHandler { [weak self] in self?.receive() }
         source.resume()
         self.source = source
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        _ = try? contracts.perform(["operation":"reset"])
     }
 
     func receive() {
@@ -453,6 +458,22 @@ final class Fixture: NSObject, NSApplicationDelegate {
         let label = NSTextField(labelWithString: "Generic fixture window")
         label.frame = NSRect(x: 30, y: 100, width: 350, height: 30)
         window.contentView?.addSubview(label)
+        if kind == "heavyText" {
+            let scroll = NSScrollView(frame: window.contentView!.bounds)
+            scroll.autoresizingMask = [.width,.height]
+            let text = NSTextView(frame: scroll.bounds)
+            text.isEditable = false
+            text.string = (1...4_000).map { "Invented fixture paragraph \($0): window movement redraws this text." }.joined(separator: "\n")
+            text.autoresizingMask = [.width]
+            scroll.documentView = text
+            window.contentView = scroll
+        }
+        if kind == "web" {
+            let web = WKWebView(frame: window.contentView!.bounds)
+            web.autoresizingMask = [.width,.height]
+            web.loadHTMLString("<html><body style='font:16px system-ui'>" + (1...300).map { "<p>Invented fixture row \($0)</p>" }.joined() + "</body></html>",baseURL:nil)
+            window.contentView = web
+        }
         if ["contentTabs", "emptyContentTabs", "manyContentTabs"].contains(kind) {
             let tabs = NSTabView(frame: NSRect(x: 20, y: 20, width: 420, height: 220))
             for index in 1...(kind == "manyContentTabs" ? 5 : 3) {
@@ -493,18 +514,19 @@ final class Fixture: NSObject, NSApplicationDelegate {
         // Timed checks poll focused-only observations against a deadline, so a
         // busy app is asked again rather than allowed to consume that deadline.
         // Setup and one-shot reads wait for a briefly busy app to answer.
-        let timeout: Float = focusedOnly ? 0.02 : FixtureProbe.observationTimeout
-        let front = FixtureProbe.frontmostPID(timeout: timeout)
-        let listed = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
-        let visible = Set(listed.compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
-        let visibleIDs = listed.compactMap { item -> UInt32? in
+        let timeout: Float = focusedOnly ? FixtureProbe.focusedObservationTimeout : FixtureProbe.observationTimeout
+        var front = FixtureProbe.frontmostPID(timeout: timeout)
+        var listed = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
+        var visible = Set(listed.compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
+        var visibleIDs = listed.compactMap { item -> UInt32? in
             guard let owner = item[kCGWindowOwnerPID as String] as? NSNumber, pids.contains(owner.int32Value) else { return nil }
             return (item[kCGWindowNumber as String] as? NSNumber)?.uint32Value
         }
-        let order = Dictionary(uniqueKeysWithValues: listed.enumerated().compactMap { index, item -> (UInt32, Int)? in
+        var order = Dictionary(uniqueKeysWithValues: listed.enumerated().compactMap { index, item -> (UInt32, Int)? in
             (item[kCGWindowNumber as String] as? NSNumber).map { ($0.uint32Value, index) }
         })
         var result: [[String: Any]] = []
+        var owners: [UInt32: pid_t] = [:], mains: [UInt32: Bool] = [:]
         for pid in pids {
             // A command can change frontmost apps after that early snapshot.
             // Never block a destination check on the now-hidden source's AX.
@@ -540,6 +562,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
                     _ = AXValueGetValue(fields[1] as! AXValue, .cgSize, &size)
                 }
                 let main = fields[2] as? Bool ?? false
+                owners[id] = pid; mains[id] = main
                 result.append(["id": id, "frame": [position.x, position.y, size.width, size.height],
                                "visible": visible.contains(id), "main": main && front == pid,
                                "focused": focusedID == id && front == pid,
@@ -597,6 +620,38 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 desktop = FixtureProbe.value(focused as! AXUIElement, kAXSubroleAttribute) == nil
             }
         }
+        if !focusedOnly {
+            // A multi-window AX read spans several display frames. Pair its
+            // geometry with live focus and CG membership taken afterwards,
+            // just like the motion probe, rather than an earlier preparation
+            // snapshot which would force another full observation.
+            front = FixtureProbe.frontmostPID(timeout: timeout)
+            var focusedID: UInt32 = 0
+            if let front, pids.contains(front), FixtureProbe.isFixture(front) {
+                let application = AXUIElementCreateApplication(front)
+                AXUIElementSetMessagingTimeout(application, timeout)
+                if let focused = FixtureProbe.value(application, kAXFocusedWindowAttribute),
+                   CFGetTypeID(focused) == AXUIElementGetTypeID() {
+                    _ = fixtureWindowID(focused as! AXUIElement, &focusedID)
+                }
+            }
+            listed = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
+            visible = Set(listed.compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
+            visibleIDs = listed.compactMap { item -> UInt32? in
+                guard let owner = item[kCGWindowOwnerPID as String] as? NSNumber, pids.contains(owner.int32Value) else { return nil }
+                return (item[kCGWindowNumber as String] as? NSNumber)?.uint32Value
+            }
+            order = Dictionary(uniqueKeysWithValues: listed.enumerated().compactMap { index, item -> (UInt32, Int)? in
+                (item[kCGWindowNumber as String] as? NSNumber).map { ($0.uint32Value, index) }
+            })
+            for index in result.indices {
+                guard let id = result[index]["id"] as? UInt32 else { continue }
+                result[index]["visible"] = visible.contains(id)
+                result[index]["order"] = order[id] ?? Int.max
+                result[index]["main"] = mains[id] == true && owners[id] == front
+                result[index]["focused"] = id == focusedID && owners[id] == front
+            }
+        }
         let frontmostFixture = front.map { pids.contains($0) } ?? false
         // Cached activation metadata serves setup, outside the switch deadline.
         let workspaceFront = focusedOnly ? nil : NSWorkspace.shared.frontmostApplication?.processIdentifier
@@ -631,13 +686,15 @@ private struct FixedWidthFixture: SwiftUI.App {
     }
 }
 
-// The independent oracle reads only this repository's fixture. It never reads titles.
-enum FixtureProbe {
-    @MainActor private static var processCodes: [pid_t: SecCode] = [:]
+/// Signature validation for the code objects one thread owns. The main actor
+/// and the motion sampler thread each keep their own cache.
+struct FixtureCodes {
+    static let fixture = "com.taecontrol.tessel.fixture"
+    private var processCodes: [pid_t: SecCode] = [:]
 
     /// LaunchServices can temporarily omit live processes during activation.
     /// Validate the running code's signature instead of trusting that cache.
-    @MainActor static func hasSignature(_ pid: pid_t, identifier: String) -> Bool {
+    mutating func hasSignature(_ pid: pid_t, identifier: String) -> Bool {
         guard let code = runningCode(pid) else { return false }
         var requirement: SecRequirement?
         guard SecRequirementCreateWithString(("identifier \"" + identifier + "\"") as CFString, [], &requirement) == errSecSuccess,
@@ -649,9 +706,9 @@ enum FixtureProbe {
         return valid
     }
 
-    @MainActor private static func runningCode(_ pid: pid_t) -> SecCode? {
+    private mutating func runningCode(_ pid: pid_t) -> SecCode? {
         if let code = processCodes[pid] { return code }
-        if let code = auditBoundCode(pid) {
+        if let code = Self.auditBoundCode(pid) {
             processCodes = processCodes.filter { kill($0.key, 0) == 0 }
             if processCodes.count >= 32 { processCodes.removeAll() }
             processCodes[pid] = code
@@ -681,14 +738,26 @@ enum FixtureProbe {
         guard SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributeAudit: audit as CFData] as CFDictionary, [], &code) == errSecSuccess else { return nil }
         return code
     }
+}
 
-    @MainActor static func isFixture(_ pid: pid_t) -> Bool { hasSignature(pid, identifier: "com.taecontrol.tessel.fixture") }
+// The independent oracle reads only this repository's fixture. It never reads titles.
+enum FixtureProbe {
+    @MainActor private static var codes = FixtureCodes()
+
+    @MainActor static func hasSignature(_ pid: pid_t, identifier: String) -> Bool {
+        codes.hasSignature(pid, identifier: identifier)
+    }
+
+    @MainActor static func isFixture(_ pid: pid_t) -> Bool { hasSignature(pid, identifier: FixtureCodes.fixture) }
 
     /// A timed-out AX read means the app did not answer, not that a window is
     /// absent or unfocused. The system-wide focused-application read is also
     /// answered by the frontmost app. A briefly busy main thread can miss
     /// 20 ms; a stopped app still costs one bounded wait per read.
     static let observationTimeout: Float = 0.1
+    /// Focused-only observations and the motion sampler's focus read use a
+    /// shorter bound, so a busy app cannot stall the next sample.
+    static let focusedObservationTimeout: Float = 0.02
 
     static func frontmostPID(timeout: Float = observationTimeout) -> pid_t? {
         let system = AXUIElementCreateSystemWide()

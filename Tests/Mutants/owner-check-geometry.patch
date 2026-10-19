@@ -5,7 +5,7 @@ index 8f9e624..59207cf 100644
 --- a/Sources/Policy/Workspaces.swift
 +++ b/Sources/Policy/Workspaces.swift
 @@ -448,8 +448,9 @@ final class Workspaces {
-         if railEnabled, let focused, let owner = entries[focused]?.pid,
+         if carouselEnabled, let focused, let owner = entries[focused]?.pid,
             let pid = entries[id]?.pid, owner != pid {
              guard applications.isAlive(owner) else { return }
 +            let token = transition

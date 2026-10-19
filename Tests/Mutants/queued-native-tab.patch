@@ -4,15 +4,15 @@
 diff --git a/Sources/Policy/WindowCatalog.swift b/Sources/Policy/WindowCatalog.swift
 --- a/Sources/Policy/WindowCatalog.swift
 +++ b/Sources/Policy/WindowCatalog.swift
-@@ -658,14 +658,6 @@
+@@ -840,14 +840,6 @@
      /// on a busy system for the user to select another tab in between.
      /// Windows without a native tab bar need no AX read.
-     private func isNativeFront(_ window: AXElement, id: UInt32) -> Bool {
+     private func isNativeFront(_ window: AXElement, id: UInt32, timeout: Float = 0.05) -> Bool {
 -        let groups = facts.first(where: { $0.id == id })?.nativeTabGroups ?? []
 -        // Its bar can leave the former root before the successor is published.
 -        // The retained group still identifies the real selected native window.
 -        for bar in groups.isEmpty ? (nativeBars[id] ?? []) : groups {
--            ax.setMessagingTimeout(bar, seconds: 0.05)
+-            ax.setMessagingTimeout(bar, seconds: timeout)
 -            if let front = try? value(bar, .window)?.element,
 -               front != window { return false }
 -        }
@@ -22,7 +22,7 @@ diff --git a/Sources/Policy/WindowCatalog.swift b/Sources/Policy/WindowCatalog.s
 diff --git a/Sources/Policy/Workspaces.swift b/Sources/Policy/Workspaces.swift
 --- a/Sources/Policy/Workspaces.swift
 +++ b/Sources/Policy/Workspaces.swift
-@@ -324,8 +324,7 @@
+@@ -353,8 +353,7 @@
              // can select it again over a tab the user has just chosen.
              let owner = focused.flatMap { entries[$0]?.pid }
              let stillFront = owner == applications.frontmostPID

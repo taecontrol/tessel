@@ -19,11 +19,15 @@ workspaces, one tiled window at a time, with configurable gaps and shortcuts.
 Inactive windows live in a hidden Space; disabling the flag or quitting returns
 them to the current desktop. The CLI remains read-only.
 
-The optional `[experiments] rails = true` experiment arranges each workspace
-as remembered rows of windows. Option+H/L moves focus around a row;
-Option+K/J moves up/down between rows. Add Shift to move the window instead.
-Windows keep their widths and fill the available height. Fully off-screen
-windows use the same hidden Space. Rails enables workspaces by itself.
+The optional `[experiments] carousel = true` experiment arranges each workspace
+as remembered rows of windows. Option+H/L visits edge stops without wrapping;
+Option+K/J moves between rows. Add Shift to move the window instead.
+Option+R cycles widths through one third, one half, two thirds and full.
+Short rows stretch to fill the area, and an end window can expand without
+changing its nominal width. Fully off-screen windows use the same hidden Space.
+Carousel enables workspaces by itself. Layout changes use an 80 ms spring through
+Accessibility; `[animation] duration` accepts 0–1000 ms, and macOS Reduce Motion
+makes them instant. Workspace switches and sends remain instant.
 
 Build from source with Xcode 27 using [the development guide](docs/development.md).
 
