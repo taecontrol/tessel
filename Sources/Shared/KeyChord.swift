@@ -1,12 +1,13 @@
 import Foundation
 
 enum WorkspaceCommand: Sendable {
-    case workspace(Int), send(Int), next, previous, focus(Direction), move(Direction)
+    case workspace(Int), send(Int), next, previous, focus(Direction), move(Direction), cycleWidth
 
     enum Direction: String, Sendable { case left, right, up, down }
 
     init?(_ text: String) {
         switch text {
+        case "cycle width": self = .cycleWidth
         case "focus next": self = .next
         case "focus previous": self = .previous
         default:
@@ -49,8 +50,9 @@ struct KeyChord: Sendable {
         name = (Self.modifierOrder.filter { modifiers.contains($0) } + [key]).joined(separator: "-")
     }
 
-    static var railDefaults: [String:String] {
+    static var carouselDefaults: [String:String] {
         var keys = defaults
+        keys["alt-r"] = "cycle width"
         for (key,direction) in [("h","left"),("j","down"),("k","up"),("l","right")] {
             keys["alt-"+key] = "focus "+direction
             keys["alt-shift-"+key] = "move "+direction

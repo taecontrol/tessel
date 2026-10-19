@@ -5,7 +5,7 @@ import Simulator
 import Testing
 @testable import Policy
 
-enum Layout: String, CaseIterable, Sendable { case off, stack, rails }
+enum Layout: String, CaseIterable, Sendable { case off, stack, carousel }
 
 @MainActor final class Tessel {
     let workspaces: Workspaces
@@ -27,7 +27,7 @@ enum Layout: String, CaseIterable, Sendable { case off, stack, rails }
         workspaces = Workspaces(store: rows, trusted: true, configuration: config.status.effective,
                                 applications: mac.applications, ax: mac.ax, screens: mac.screens,
                                 windowOrder: mac.windowOrder, scheduler: mac.scheduler, hotkeys: keys,
-                                fixtureOnly: true) { mac.closetPort }
+                                fixtureOnly: true, motionPreferences: mac.motionPreferences) { mac.closetPort }
         catalog = WindowCatalog(workspaces: workspaces, applications: mac.applications, ax: mac.ax, scheduler: mac.scheduler)
         workspaces.catalog = catalog
         configurationPublications.append((mac.scheduler.now, config.status))
@@ -41,7 +41,7 @@ enum Layout: String, CaseIterable, Sendable { case off, stack, rails }
 
     func configure(_ layout: Layout) {
         mac.action("configure \(layout.rawValue)")
-        input.data = Data((layout == .off ? "" : "[experiments]\n\(layout == .rails ? "rails" : "workspaces") = true\n").utf8)
+        input.data = Data((layout == .off ? "" : "[experiments]\n\(layout == .carousel ? "carousel" : "workspaces") = true\n").utf8)
         input.unreadable = false
         config.reload()
     }

@@ -74,7 +74,7 @@ extension Acceptance.Journeys {
                     harness.stopApp()
                     ids = try (0..<4).map { try fixture.open(key: "w\($0)", ["widthFraction": 0.6]) }
                     try desktop.activate(key: "w0")
-                    try desktop.writeConfig(desktop.rails)
+                    try desktop.writeConfig(desktop.carousel)
                     try harness.startApp(fixtureReady: false, arguments: ["--test-failed-hide"])
                     try requireFinalState("safe disablement after a failed rail hide") {
                         let status = try harness.status().workspaces

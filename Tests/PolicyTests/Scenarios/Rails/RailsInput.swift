@@ -12,6 +12,7 @@ import Testing
             let other = f.mac.launch(), b = other.open(WindowSpec(frame: CGRect(x: 40, y: 60, width: 250, height: 400)))
             s.settle(); f.focus(b); f.order([a, b] + Array(f.ids.dropFirst()))
             f.press("move down", focus: b)
+            f.press("focus up", focus: a); f.press("focus down", focus: b)
             let sizes = f.frames(f.ids + [b]).map(\.size)
             for _ in 0..<3 {
                 f.press("focus up", focus: a)
@@ -175,7 +176,7 @@ import Testing
     @Test("a hung app cannot block healthy scrolling, elevator travel or cached publication", arguments: [false, true])
     func hungApp(beforeObserved: Bool) {
         requireScenario(Scenario.run("hung app beforeObserved=\(beforeObserved)") { s in
-            let f = RailFixture(s, widths: [0.45, 0.45, 0.45]), ids = f.ids
+            let f = RailFixture(s, widths: Array(repeating: (WorkspaceScenarios.area(s.mac).width - 10) / (2 * WorkspaceScenarios.area(s.mac).width), count: 3)), ids = f.ids
             let other = f.mac.launch(), h = other.open(WindowSpec(frame: CGRect(x: 40, y: 60, width: 400, height: 400)))
             if beforeObserved {
                 other.hang(); f.app.select(ids[0])
@@ -201,7 +202,7 @@ import Testing
                 s.settle()
                 f.press("focus down", focus: ids[2])
             }
-            s.expect("cached workspace state remains readable", f.tessel.status.enabled && f.tessel.status.layout == "rails")
+            s.expect("cached workspace state remains readable", f.tessel.status.enabled && f.tessel.status.layout == "carousel")
             s.expect("healthy window rows remain published", Set(ids).isSubset(of: Set(f.tessel.windows.map(\.id))))
         })
     }
@@ -214,16 +215,17 @@ import Testing
             let other = f.mac.launch(), b = other.open(WindowSpec(frame: CGRect(x: 40, y: 60, width: floor(f.area.width * fraction), height: 400)))
             s.settle()
             let ids = [f.ids[0], b, f.ids[1], f.ids[2]], c = ids[2], d = ids[3]
-            f.order(ids); f.select(layout ? c : ids[0])
+            f.order(ids)
+            f.tessel.pressKey("alt-r"); f.tessel.pressKey("alt-r"); f.tessel.pressKey("alt-r"); s.settle()
+            f.select(layout ? c : ids[0])
             other.busy(forMilliseconds: 300)
             s.step("two commands while app-B is busy") {
                 f.tessel.press("focus right")
                 f.tessel.press(layout ? "focus left" : "focus right")
             }
             s.settle(); f.focus(c)
-            for id in ids {
-                f.near(f.frame(id).width, floor(f.area.width * fraction), "burst preserves width")
-            }
+            for id in f.ids { f.near(f.frame(id).width, floor(f.area.width * fraction), "burst preserves existing nominal width") }
+            f.near(f.frame(b).width, (f.area.width + 10) / 3 - 10, "arrival retains its selected third")
             f.near(f.frame(b).maxX + 10, f.frame(c).minX, "the busy neighbour reaches its final position beside the healthy tile")
             f.near(f.frame(c).maxX + 10, f.frame(d).minX, "the healthy right neighbour reaches its final position")
             s.expect("the last right/left command is still selected", f.mac.focusedWindow == c && f.mac.focusedWindow != d)
@@ -260,7 +262,7 @@ import Testing
             s.expect("the main lane publishes while AX is outstanding", publishedDuringTimeout)
             f.unchanged([b], [before])
             other.resume(); s.settle(); f.unchanged([b], [before])
-            f.press("focus right", focus: d)
+            f.select(d)
             f.near(f.frame(b).maxX + 10, f.frame(c).minX, "a subsequent render completes the stale pending position exactly")
             f.near(f.frame(c).maxX + 10, f.frame(d).minX, "the final neighbours remain contiguous")
         })
@@ -300,19 +302,19 @@ import Testing
                 s.expect("send \(number) keeps its numeric key", keys["alt-shift-\(digit)"] == "send \(number)")
             }
             s.expect("rail aliases have no default binding", !keys.values.contains("focus next") && !keys.values.contains("focus previous"))
-            f.tessel.changeConfig("[experiments]\nrails = true\n[keys]\nalt-a = 'focus next'\nalt-b = 'focus previous'\nalt-c = 'move down'\nalt-l = 'focus left'\n")
+            f.tessel.changeConfig("[experiments]\ncarousel = true\n[keys]\nalt-a = 'focus next'\nalt-b = 'focus previous'\nalt-c = 'move down'\nalt-l = 'focus left'\n")
             s.settle()
             let effective = f.tessel.status.keys
             s.expect("overrides merge with unchanged numeric defaults", effective["alt-l"] == "focus left" && effective["alt-1"] == "workspace 1")
             s.expect("aliases and new commands are accepted", effective["alt-a"] == "focus next" && effective["alt-b"] == "focus previous" && effective["alt-c"] == "move down")
             f.press("focus next", focus: ids[1]); f.press("focus previous", focus: ids[0]); f.press("move down", focus: ids[0])
-            f.tessel.changeConfig("[experiments]\nrails = true\n[keys]\nalt-a = 'move sideways'\n")
+            f.tessel.changeConfig("[experiments]\ncarousel = true\n[keys]\nalt-a = 'move sideways'\n")
             s.settle()
             s.expect("invalid commands report their line", f.tessel.configuration.error?.line == 4)
             let message = f.tessel.configuration.error?.message ?? ""
             s.expect("error lists every directional command", message.contains("focus next|previous|left|right|up|down") && message.contains("move left|right|up|down"))
             s.expect("invalid edits keep all effective bindings", f.tessel.status.keys == effective)
-            f.press("focus up", focus: ids[2])
+            f.press("focus up", focus: ids[1])
             f.tessel.changeConfig("[experiments]\nworkspaces = true\n[keys]\nalt-a = 'move right'\n")
             s.settle()
             s.expect("rails-off keeps workspace focus defaults and still validates directional overrides", f.tessel.status.keys["alt-j"] == "focus next" && f.tessel.status.keys["alt-k"] == "focus previous" && f.tessel.configuration.error == nil)

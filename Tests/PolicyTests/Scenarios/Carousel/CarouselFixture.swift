@@ -6,8 +6,6 @@ import Testing
 @testable import Policy
 
 /// Exercise the real catalog and presenter, including AX acceptance and readback.
-/// Until the parser lands, bootstrap its predecessor so semantic failures are
-/// observable independently of E22. This never supplies carousel decisions.
 @MainActor struct CarouselFixture {
     let s: Scenario
     let app: SimulatedApp
@@ -41,8 +39,7 @@ import Testing
     }
     func configure(duration: Int) {
         let text = Self.config + "[animation]\nduration = \(duration)\n"
-        if (try? ConfigParser.parse(Data(Self.config.utf8))) != nil { tessel.changeConfig(text) }
-        else { tessel.configure(.rails) }
+        tessel.changeConfig(text)
     }
     func press(_ key: String) { s.step(key) { tessel.pressKey(key) }; s.settle() }
     func select(_ id: UInt32) { app.select(id); s.settle() }
@@ -107,7 +104,7 @@ import Testing
 
 /// Remove expected-issue scopes as phases 2 and 3 implement each example.
 /// The explicit red mode proves they really fail; no assertion is disabled.
-func requireCarousel(_ result: ScenarioResult, sourceLocation: SourceLocation = #_sourceLocation) {
+func requireCarousel(_ result: ScenarioResult, motionRequired: Bool = false, sourceLocation: SourceLocation = #_sourceLocation) {
     #expect(!result.trace.contains { $0.contains("STOP ") }, "Carousel must not fail because of an unmodeled operation or scheduler bound", sourceLocation: sourceLocation)
     #expect(!result.failures.contains { $0.hasPrefix("Expected settled") }, "Carousel scenarios must settle without a broken scheduler setup", sourceLocation: sourceLocation)
     let check = {
@@ -117,8 +114,8 @@ func requireCarousel(_ result: ScenarioResult, sourceLocation: SourceLocation = 
                 + "\nTrace tail:\n" + result.trace.suffix(20).joined(separator: "\n")), sourceLocation: sourceLocation)
         }
     }
-    if ProcessInfo.processInfo.environment["TESSEL_CAROUSEL_RED"] == "1" { check() }
-    else { withKnownIssue("Carousel behaviour awaits delivery phases 2–3; run TESSEL_CAROUSEL_RED=1 to expose the red assertions") { check() } }
+    if !motionRequired || ProcessInfo.processInfo.environment["TESSEL_CAROUSEL_RED"] == "1" { check() }
+    else { withKnownIssue("Carousel motion awaits delivery phase 3; run TESSEL_CAROUSEL_RED=1 to expose the red assertions") { check() } }
 }
 
 /// Independent coverage oracle; even an empty sample must report the whole hole.

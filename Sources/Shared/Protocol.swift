@@ -43,6 +43,11 @@ struct Configuration: Codable, Sendable, Equatable {
     var experiments: [String: Bool] = [:]
     var keys = KeyChord.defaults
     var gaps = Gaps()
+    var animation = Animation()
+}
+
+struct Animation: Codable, Sendable, Equatable {
+    var duration: Int = 80
 }
 
 struct Gaps: Codable, Sendable, Equatable {
@@ -54,6 +59,7 @@ struct WorkspaceStatus: Codable, Sendable, Equatable {
     var reason = "experiment off"
     var active = 1
     var layout = "stack"
+    var animationDuration: Int = 80
     var rail: Int? = nil
     var railCount = 0
     var gaps = Gaps()

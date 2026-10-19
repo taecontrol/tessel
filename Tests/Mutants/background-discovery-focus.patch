@@ -21,4 +21,4 @@ index 8f9e624..d84be26 100644
 +            render(focusing: selection, relayout: false, takeFocus: !firstSnapshot,
                     layoutWindows: hiddenReplacements)
          } else if !replacements.isEmpty {
-             if let focused, replacements.contains(focused), railPresentation?.pending.contains(focused) == true {
+             if let focused, replacements.contains(focused), carouselPresentation?.pending.contains(focused) == true {

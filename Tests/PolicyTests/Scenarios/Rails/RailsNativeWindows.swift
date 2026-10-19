@@ -38,7 +38,7 @@ import Testing
             let before = f.frame(a), limit = floor(width ? f.area.width * 0.3 : f.area.height / 2)
             f.app.limitSize(a, maximum: width ? CGSize(width: limit, height: 100_000) : CGSize(width: 100_000, height: limit))
             s.settle(); f.unchanged([a], [before])
-            f.tessel.changeConfig("[experiments]\nrails = true\n[gaps]\nouter = 11\n")
+            f.tessel.changeConfig("[experiments]\ncarousel = true\n[gaps]\nouter = 11\n")
             s.settle()
             let row = f.tessel.windows.first { $0.id == a }
             s.expect("the constrained window stays tiled", row?.state == .tiled && row?.rail == 1)
@@ -63,7 +63,7 @@ import Testing
         requireScenario(Scenario.run("visible constrained window") { s in
             let f = RailFixture(s, widths: [0.25, 0.25]), a = f.ids[0]
             f.app.limitSize(a, maximum: CGSize(width: 100_000, height: f.area.height / 2))
-            f.tessel.changeConfig("[experiments]\nrails = true\n[gaps]\nouter = 11\n")
+            f.tessel.changeConfig("[experiments]\ncarousel = true\n[gaps]\nouter = 11\n")
             s.settle()
             let original = f.frame(a)
             f.app.drag(a, to: CGPoint(x: original.minX + 23, y: original.minY + 17))
@@ -126,7 +126,6 @@ import Testing
             let tabs = f.mac.launch(), first = tabs.open(WindowSpec()), next = tabs.open(WindowSpec())
             tabs.groupTabs([first, next], selected: first)
             s.settle(); f.focus(first); f.order([a, first, b])
-            let width = f.frame(first).width
             if mode == "detached" {
                 tabs.detachTab(first); s.settle()
                 f.order([a, first, next, b]); f.focus(next)
@@ -157,12 +156,14 @@ import Testing
             if mode == "background" { f.app.select(a) }
             s.settle(); f.order([next], rail: 2)
             s.expect("the former native root is retired", !f.tessel.windows.contains { $0.id == first })
-            f.near(f.frame(next).width, width, "replacement retains the group's width")
+            f.near(f.frame(next).width, f.area.width, "the replacement fills its singleton rail")
             if mode == "background" { f.focus(a); f.press("focus down", focus: next) }
             else {
                 f.focus(next); f.press("focus up", focus: a); f.press("focus right", focus: b)
                 f.press("focus down", focus: next)
             }
+            f.press("move up", focus: next)
+            f.near(f.frame(next).width, (f.area.width - 10) / 2, "the replacement retains its nominal half when rejoining the source rail")
         })
     }
 

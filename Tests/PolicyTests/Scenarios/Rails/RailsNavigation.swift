@@ -20,7 +20,7 @@ import Testing
         requireScenario(Scenario.run("visible focus via \(command)") { s in
             let f = RailFixture(s, widths: [0.25, 0.25]), a = f.ids[0], b = f.ids[1]
             if command == "alias" {
-                f.tessel.changeConfig("[experiments]\nrails = true\n[keys]\nalt-a = 'focus next'\n")
+                f.tessel.changeConfig("[experiments]\ncarousel = true\n[keys]\nalt-a = 'focus next'\n")
                 s.settle()
             }
             let before = f.frame(a)
@@ -59,7 +59,7 @@ import Testing
             f.press("move down", focus: ids[0]); f.order([ids[0]], rail: 2)
             f.order([ids[1], ids[2]])
             f.near(f.frame(ids[0]).minX, f.area.minX, "new rail starts at the left")
-            f.press("focus up", focus: ids[2]); f.press("move down", focus: ids[2]); f.order([ids[0], ids[2]], rail: 2)
+            f.press("focus up", focus: ids[1]); f.select(ids[2]); f.press("move down", focus: ids[2]); f.order([ids[0], ids[2]], rail: 2)
             f.press("move up", focus: ids[2]); f.order([ids[1], ids[2]])
             f.press("move up", focus: ids[2]); f.order([ids[2]])
             s.expect("moving above the first rail creates a third", f.tessel.status.railCount == 3)
@@ -75,7 +75,7 @@ import Testing
     func verticalAfterMemory() {
         requireScenario(Scenario.run("vertical move after remembered middle") { s in
             let f = RailFixture(s), ids = f.ids
-            f.press("move down", focus: ids[0]); f.press("focus up", focus: ids[2])
+            f.press("move down", focus: ids[0]); f.press("focus up", focus: ids[1]); f.select(ids[2])
             f.press("move down", focus: ids[2]); f.order([ids[0], ids[2]], rail: 2)
             f.press("focus left", focus: ids[0]); f.press("focus up", focus: ids[1])
             f.press("move down", focus: ids[1]); f.order([ids[0], ids[1], ids[2]])
@@ -86,7 +86,7 @@ import Testing
     @Test("directional input before the first catalog arrival is a no-op", arguments: WriteOrder.allCases)
     func beforeArrival(order: WriteOrder) {
         requireScenario(Scenario.run("input before first arrival", writes: order) { s in
-            let tessel = s.startTessel(.rails)
+            let tessel = s.startTessel(.carousel)
             s.settle()
             let app = s.mac.launch(windows: 1)
             for command in ["focus left", "focus right", "focus up", "focus down"] { tessel.press(command) }

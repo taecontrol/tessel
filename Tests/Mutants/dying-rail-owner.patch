@@ -12,7 +12,7 @@ index 8f9e624..7c6801c 100644
 -        // Preserve the dying rail owner so removal selects its adjacent rail.
 +        // macOS promotes another app before delivering process termination.
 +        // Preserve the dead rail owner so removal selects its adjacent rail.
-         if railEnabled, let focused, let owner = entries[focused]?.pid,
+         if carouselEnabled, let focused, let owner = entries[focused]?.pid,
 -           let pid = entries[id]?.pid, owner != pid {
 -            guard applications.isAlive(owner) else { return }
 -            catalog?.windowIsGone(pid: owner, id: focused) { [weak self] gone in

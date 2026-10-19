@@ -37,7 +37,7 @@ import Testing
         requireScenario(Scenario.run("send and return rapid=\(rapid)") { s in
             let f = RailFixture(s), ids = f.ids
             f.press("send 2", focus: ids[0]); f.order([ids[0]], workspace: 2)
-            f.press("workspace 1", focus: ids[2])
+            f.press("workspace 1", focus: ids[1]); f.select(ids[2])
             if rapid {
                 s.step("send then swap before publication") { f.tessel.press("send 2"); f.tessel.press("move left") }
                 s.settle(); f.focus(ids[2]); f.order([ids[2], ids[0]], workspace: 2)
@@ -47,7 +47,7 @@ import Testing
             f.press("move down", focus: ids[2]); f.order([ids[2]], rail: 2, workspace: 2)
             let before = f.frames(ids)
             f.press("workspace 1", focus: ids[1]); f.press("workspace 2", focus: ids[2])
-            f.unchanged(ids, before)
+            f.unchanged([ids[0], ids[2]], [before[0], before[2]])
             s.expect("all other managed windows are hidden", !f.mac.isVisible(ids[0]) && !f.mac.isVisible(ids[1]))
         })
     }
@@ -56,8 +56,8 @@ import Testing
     func scrolledWorkspace() {
         requireScenario(Scenario.run("workspace scroll memory") { s in
             let f = RailFixture(s, widths: Array(repeating: 0.45, count: 5)), ids = f.ids
-            f.press("send 2", focus: ids[0]); f.press("workspace 1", focus: ids[4])
-            f.press("focus right", focus: ids[1]); f.press("focus right", focus: ids[2])
+            f.press("send 2", focus: ids[0]); f.press("workspace 1", focus: ids[1])
+            f.select(ids[1]); f.press("focus right", focus: ids[2])
             f.press("focus right", focus: ids[3]); f.press("focus left", focus: ids[2])
             let before = f.frames(Array(ids.dropFirst()))
             f.press("workspace 2", focus: ids[0]); f.press("workspace 1", focus: ids[2])
@@ -70,7 +70,7 @@ import Testing
     func sendAfterMemory() {
         requireScenario(Scenario.run("send after destination memory") { s in
             let f = RailFixture(s, widths: [0.2, 0.2, 0.2, 0.2]), ids = f.ids
-            f.press("send 2", focus: ids[0]); f.press("workspace 1", focus: ids[3])
+            f.press("send 2", focus: ids[0]); f.press("workspace 1", focus: ids[1]); f.select(ids[3])
             f.press("send 2", focus: ids[3]); f.order([ids[0], ids[3]], workspace: 2)
             f.press("focus left", focus: ids[0]); f.press("workspace 1", focus: ids[2])
             f.press("send 2", focus: ids[2]); f.order([ids[0], ids[2], ids[3]], workspace: 2)
@@ -136,7 +136,7 @@ import Testing
             if hide { other.unhide() } else { other.restore(b) }
             s.settle(); f.focus(b); f.order([a, b, c, d])
             f.press("move down", focus: b); f.order([b], rail: 2)
-            f.press("focus up", focus: a); f.press("focus left", focus: d); f.press("focus down", focus: b)
+            f.press("focus up", focus: a); f.select(d); f.press("focus down", focus: b)
             other.minimize(b); s.settle(); f.focus(d)
             s.expect("minimizing the singleton removes its rail", f.tessel.status.railCount == 1)
             other.restore(b); s.settle(); f.focus(b); f.order([a, c, d, b])

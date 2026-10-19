@@ -11,7 +11,7 @@ diff --git a/Sources/Policy/Workspaces.swift b/Sources/Policy/Workspaces.swift
              render(focusing: selection, relayout: false, takeFocus: !firstSnapshot || selection != nil && expectedFocus == selection,
                     layoutWindows: hiddenReplacements)
          } else if !replacements.isEmpty {
--            if let focused, replacements.contains(focused), railPresentation?.pending.contains(focused) == true {
+-            if let focused, replacements.contains(focused), carouselPresentation?.pending.contains(focused) == true {
 -                // The old native root rejected this current presentation. Its
 -                // successor owns the unfinished position and focus intent.
 -                render(focusing: focused, relayout: false)

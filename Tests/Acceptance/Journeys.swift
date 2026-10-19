@@ -235,7 +235,7 @@ extension Acceptance {
                             rows.contains { $0.id == id && $0.rail == 1 && $0.slot == index + 1 }
                         } && rail == 2
                 }
-                try #require(try harness.status().workspaces?.layout == "rails")
+                try #require(try harness.status().workspaces?.layout == "carousel")
                 let dialog = try fixture.open(kind: "dialog", key: "dialog")
                 try desktop.expectFocus(dialog)
                 try requireFinalState("the floating fixture listed") { try harness.row(dialog)?.workspace == 1 }
@@ -289,11 +289,11 @@ extension Acceptance {
                 let revision = try harness.status().config.revision
                 let width = try #require(try desktop.window(window)).frame[2]
                 let replacement = harness.configFile.appendingPathExtension("new")
-                try Data((desktop.rails + "[gaps]\nouter = 11\n").utf8).write(to: replacement)
+                try Data((desktop.carousel + "[gaps]\nouter = 11\n").utf8).write(to: replacement)
                 try #require(rename(replacement.path, harness.configFile.path) == 0)
                 try requireFinalState("the atomically replaced config and rail geometry") {
                     let status = try harness.status(), observation = try desktop.observe()
-                    return status.config.revision > revision && status.workspaces?.layout == "rails"
+                    return status.config.revision > revision && status.workspaces?.layout == "carousel"
                         && status.workspaces?.gaps.outer == 11 && observation.windows.contains {
                             $0.id == window && desktop.near($0.frame, [observation.area[0] + 11, observation.area[1] + 11,
                                 width, observation.area[3] - 22])
