@@ -30,6 +30,14 @@ import Testing
             s.expect("a focus-only command performs no geometry writes", f.mac.geometryWrites.isEmpty)
             s.expect("a focus-only command requests no display frames", f.mac.displayFrameRequests == 0)
         })
+        requireCarousel(Scenario.run("focus chooses the nearest of several complete thirds") { s in
+            let f = CarouselFixture(s, presets: Array(repeating: 1.0/3, count: 5)), ids = f.ids
+            f.press("alt-l"); f.focus(ids[1])
+            let before = f.snapshot(); f.mac.clearMotionHistory()
+            f.press("alt-l"); f.focus(ids[2]); f.unchanged(before)
+            f.press("alt-h"); f.focus(ids[1]); f.unchanged(before)
+            s.expect("crossing complete thirds neither writes geometry nor requests frames", f.mac.geometryWrites.isEmpty && f.mac.displayFrameRequests == 0)
+        })
     }
 
     @Test("#26 E3: mixed widths visit every edge stop while focus waits for a complete window")
@@ -101,6 +109,18 @@ import Testing
             f.near(f.frame(a).width, f.width(presets[0]), "first nominal width survives stretching")
             f.near(f.frame(b).width, f.width(presets[1]), "second nominal width survives stretching")
         })
+        if presets == [1.0/3, 1.0/3] {
+            requireCarousel(Scenario.run("short rail redistributes a capped peer's width") { s in
+                let f = CarouselFixture(s, presets: presets, duration: 0), a = f.ids[0], b = f.ids[1]
+                let cap = f.area.width * 0.4
+                f.app.limitSize(a, maximum: CGSize(width: cap, height: 100_000))
+                f.press("alt-l")
+                f.near(f.frame(a).width, cap, "the capped tile retains its maximum")
+                f.near(f.frame(b).minX, f.frame(a).maxX + 10, "the remaining tile follows the capped peer")
+                f.near(f.frame(b).maxX, f.area.maxX, "the remaining tile fills the area")
+                f.invariants("capped short rail")
+            })
+        }
     }
 
     @Test("#26 E6: full-width neighbours are never left as a split pair")

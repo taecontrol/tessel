@@ -6,6 +6,23 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct CarouselMotion {
+    @Test("a native tab selection during motion publishes its successor after the final frame")
+    func nativeTabChangeDuringMotionFinishesEnumeration() {
+        requireCarousel(Scenario.run("native tab selection during motion") { s in
+            let f = CarouselFixture(s, presets: [0.5, 0.5])
+            let tabs = f.mac.launch()
+            let spec = WindowSpec(frame: CGRect(x: 40, y: 60, width: 849, height: 1064), positionAcceptance: .screenEdges)
+            let first = tabs.open(spec), next = tabs.open(spec)
+            tabs.groupTabs([first,next], selected: first); s.settle()
+            s.expect("the native group is known before motion", f.tessel.windows.first { $0.id == first }?.tabs == 2 && !f.tessel.windows.contains { $0.id == next })
+            f.tessel.pressKey("alt-r")
+            s.after(milliseconds: 30, "the user selects another native tab") { tabs.selectTab(next) }
+            s.settle()
+            s.expect("the group publishes only its selected successor", f.tessel.windows.count == 3 && f.tessel.windows.first { $0.id == next }?.tabs == 2 && !f.tessel.windows.contains { $0.id == first })
+            f.focus(next)
+        })
+    }
+
     @Test("a downward card lands after its app outlasts the bounded preparation focus retries")
     func delayedDownwardFocusEventuallyLands() {
         requireCarousel(Scenario.run("late card focus after a busy app recovers") { s in
@@ -65,6 +82,23 @@ import Testing
             let first = f.mac.geometryWrites.dropFirst(mark).first { $0.window == a && $0.attribute == .size }?.requested.size?.width ?? 0
             s.expect("the new spring starts from the native intermediate width", first > 849 && first < interrupted)
             f.pair(a,b,focused:b)
+        })
+        requireCarousel(Scenario.run("mutation reachability: failed current-frame read") { s in
+            let f = CarouselFixture(s, presets:[0.5,0.5],duration:400), a=f.ids[0]
+            f.press("alt-l"); f.press("alt-h")
+            f.tessel.pressKey("alt-h")
+            let reading=f.mac.pause(after:.call("AccessibilityPort.copy AXPosition window \(a) \(f.app.alias)"))
+            if case .paused = reading {} else { s.expect("old width call is outstanding",false) }
+            f.mac.scheduler.resume()
+            let writing=f.mac.pause(after:.call("MainLane.async native event"))
+            if case .paused = writing {} else { s.expect("old width is returning",false) }
+            let interrupted=f.frame(a).width, mark=f.mac.geometryWrites.count
+            s.expect("interrupted width is between half and two thirds",interrupted>f.width(0.5) && interrupted<f.width(2.0/3))
+            f.app.busy(forMilliseconds:4)
+            f.tessel.pressKey("alt-r"); s.settle()
+            let after=f.mac.geometryWrites.dropFirst(mark).filter { $0.window == a && $0.attribute == .size }.compactMap { $0.requested.size?.width }
+            s.expect("same-direction retarget never starts behind native width", !after.isEmpty && after.allSatisfy { $0 >= interrupted-1 })
+            f.near(f.frame(a).width,f.width(2.0/3),"new width lands")
         })
     }
 
@@ -199,7 +233,15 @@ import Testing
             f.press("alt-k"); f.select(ids[0]); f.press("alt-l"); f.press("alt-l")
             f.pair(ids[1],ids[2],focused:ids[2])
             let top = f.snapshot(topIDs.filter { f.mac.isVisible($0) }), topFocus = f.mac.focusedWindow
+            @MainActor func expectRaiseBudget(since mark: Int) {
+                let raises = f.mac.scheduler.trace.dropFirst(mark).filter { $0.contains("AccessibilityPort.perform AXRaise window") }
+                for id in bottomIDs {
+                    s.expect("moving card window \(id) is raised at most once", raises.filter { $0.contains("window \(id) ") }.count <= 1)
+                }
+            }
+            var raiseMark = f.mac.scheduler.trace.count
             f.mac.clearMotionHistory(); f.press("alt-j")
+            expectRaiseBudget(since: raiseMark)
             f.unchanged(bottom); f.expanded(ids[4])
             s.expect("bottom focus and expanded end are remembered", f.mac.focusedWindow == bottomFocus)
             let incoming = f.mac.geometryWrites.filter { $0.window == ids[4] && $0.attribute == .position }
@@ -210,7 +252,9 @@ import Testing
             s.expect("visible source tiles hide only after the last animated frame", top.keys.allSatisfy { id in
                 f.mac.visibilityChanges.contains { !$0.showing && $0.windows.contains(id) && $0.at >= lastMotion }
             })
+            raiseMark = f.mac.scheduler.trace.count
             f.mac.clearMotionHistory(); f.press("alt-k"); f.unchanged(top)
+            expectRaiseBudget(since: raiseMark)
             s.expect("top middle stop and focus return", f.mac.focusedWindow == topFocus)
             let outgoing = f.mac.geometryWrites.filter { $0.window == ids[4] && $0.attribute == .position }
             f.near(Double(outgoing.last?.requested.point?.y ?? -1), 1117 - 32, "outgoing card ends with 32 points visible")
@@ -346,12 +390,15 @@ import Testing
             let f = CarouselFixture(s), b = f.ids[1]
             f.press("alt-l"); f.mac.clearMotionHistory(); f.tessel.pressKey("alt-l")
             var dragged = CGPoint.zero
+            var framesAtPress = 0
             s.after(milliseconds:30,"drag the moving window") {
                 let current = f.frame(b)
                 dragged = CGPoint(x:current.minX+23,y:current.minY+17)
+                framesAtPress = f.mac.displaySamples.count
                 f.app.drag(b,to:dragged)
             }
             s.settle()
+            s.expect("the pointer press cancels even the already pending display callback", f.mac.displaySamples.count == framesAtPress)
             s.expect("the drag interrupts a real animation", f.mac.displaySamples.count >= 2)
             s.expect("mouse geometry wins over the abandoned animation target", f.frame(b).origin == dragged)
             let count = f.mac.displaySamples.count

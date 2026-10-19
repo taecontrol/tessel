@@ -51,6 +51,12 @@ import Testing
                 for p in [1.0, 2.0/3, 1, 2.0/3] { f.press("alt-r"); f.near(f.frame(id).width, f.width(p), "cycle skips rejected smaller presets") }
                 let requested = f.mac.geometryWrites.filter { $0.window == id && $0.attribute == .size }.compactMap { $0.requested.size?.width }
                 s.expect("a rejected small width is never requested again", !requested.isEmpty && requested.allSatisfy { $0 >= f.width(2.0/3) - 1 })
+                f.app.minimize(id); s.settle()
+                f.app.restore(id); s.settle(); f.focus(id)
+                f.mac.clearMotionHistory()
+                for p in [1.0, 2.0/3] { f.press("alt-r"); f.near(f.frame(id).width, f.width(p), "restored windows retain learned minimum widths") }
+                let restoredRequests = f.mac.geometryWrites.filter { $0.window == id && $0.attribute == .size }.compactMap { $0.requested.size?.width }
+                s.expect("restoring never retries a rejected small preset", !restoredRequests.isEmpty && restoredRequests.allSatisfy { $0 >= f.width(2.0/3) - 1 })
             } else {
                 f.press("alt-r"); f.near(f.frame(id).width, f.width(2.0/3), "maximum fixture reaches two thirds")
                 f.press("alt-r"); f.near(f.frame(id).width, f.width(1.0/3), "rejected full width wraps to the next accepted third")
@@ -61,6 +67,16 @@ import Testing
             }
             f.focus(id)
         })
+        if maximum {
+            requireCarousel(Scenario.run("a constrained edge bounces without trying rejected expansion") { s in
+                let f = CarouselFixture(s, presets: [0.5, 0.5], duration: 0), b = f.ids[1]
+                f.app.limitSize(b, maximum: CGSize(width: f.area.width * 0.8, height: 100_000))
+                f.press("alt-l"); f.press("alt-r"); f.press("alt-r")
+                f.mac.clearMotionHistory(); f.press("alt-l")
+                s.expect("a rejected full width is not retried by edge expansion", !f.mac.geometryWrites.contains { $0.attribute == .size })
+                f.invariants("maximum-constrained edge")
+            })
+        }
     }
 
     @Test("#26 E9: a mouse width remains unsnapped and the next cycle chooses the next larger preset")
@@ -79,5 +95,16 @@ import Testing
             f.near(f.frame(b).width, f.area.width * 0.4, "navigation does not snap the mouse width")
             f.press("alt-r"); f.near(f.frame(b).width, f.width(0.5), "next preset above forty percent is half")
         })
+        for end in [false, true] {
+            requireCarousel(Scenario.run("mouse width leaves \(end ? "end" : "start") expansion") { s in
+                let f = CarouselFixture(s)
+                if end { for _ in 0..<3 { f.press("alt-l") } }
+                let id = end ? f.ids[2] : f.ids[0]
+                f.expanded(id); f.mac.clearMotionHistory()
+                f.app.resize(id, to: CGSize(width: f.area.width * 0.4, height: f.area.height)); s.settle()
+                f.near(f.frame(id).width, f.area.width * 0.4, "a mouse resize ends expansion and keeps its exact width")
+                s.expect("leaving expansion does not resize the mouse-controlled tile", !f.mac.geometryWrites.contains { $0.window == id && $0.attribute == .size })
+            })
+        }
     }
 }
