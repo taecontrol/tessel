@@ -353,6 +353,18 @@ import Testing
             f.mac.scheduler.main.after(milliseconds:1_000) {}; s.settle()
             s.expect("the abandoned animation requests no more frames", f.mac.displaySamples.count == count)
         })
+        requireCarousel(Scenario.run("mouse width interrupts an in-flight size animation") { s in
+            let f = CarouselFixture(s), a = f.ids[0]
+            f.tessel.pressKey("alt-r")
+            s.after(milliseconds: 30, "resize the moving tile with the mouse") {
+                f.app.drag(a, to: f.frame(a).origin)
+                f.app.resize(a, to: CGSize(width: f.area.width * 0.4, height: f.area.height))
+            }
+            s.settle()
+            f.near(f.frame(a).width, f.area.width * 0.4, "the interrupted mouse width wins")
+            f.press("alt-l")
+            f.near(f.frame(a).width, f.area.width * 0.4, "the next command preserves the adopted mouse width")
+        })
     }
 
     @Test("#26 E18: zero duration and Reduce Motion write the final layout once without intermediate frames", arguments: ["zero", "startup", "notification"])

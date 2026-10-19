@@ -247,6 +247,12 @@ final class Workspaces {
         var newlyTiled = Set<UInt32>()
         var enteredFullscreen = false
         var resizedRail = false
+        // A pointer interruption gives geometry back to the user. Drop sizing
+        // suppression before consuming its first observed width; afterward the
+        // old observation has already been replaced and that delta is lost.
+        let interruptedHere = interruptedSizing.intersection(incoming)
+        carouselSizing.subtract(interruptedHere)
+        interruptedSizing.subtract(interruptedHere)
         for observation in observations.sorted(by: { $0.record.id < $1.record.id }) {
             let id = observation.record.id
             let old = entries[id]
@@ -287,9 +293,6 @@ final class Workspaces {
                 if observation.record.state == .tiled { newlyTiled.insert(id) }
             }
         }
-        let interruptedHere = interruptedSizing.intersection(incoming)
-        carouselSizing.subtract(interruptedHere)
-        interruptedSizing.subtract(interruptedHere)
         guard status.enabled else { publish(); return }
         if lostCurrent || previousFocus.map({ !available($0) }) == true {
             focusDecision?.cancel()
