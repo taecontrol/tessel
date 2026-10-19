@@ -65,10 +65,10 @@ For building, launching, or verifying tessel, follow [docs/development.md](docs/
 Use the signed development bundle and isolated fixture harness described there;
 keep the local signing identity stable so rebuilds preserve Accessibility.
 
-CI verifies pull requests and nothing else. That verification includes the
-known-bug mutant check: every patch in `Tests/Mutants` must make the
-deterministic policy layer fail. Diagnose, profile, compare variants, and run
-exploratory mutation plans on the local machine. Never dispatch a
+CI verifies pull requests and nothing else, in under ten minutes until every
+check is green. Before adding CI work that would break that limit, bring the
+owner its cost. Diagnose, profile, compare variants, and run exploratory
+mutation plans on the local machine. Never dispatch a
 workflow or push temporary commits to try something on CI: each run adds noise
 to the branch's checks and costs paid runner minutes. When only CI can answer,
 such as recalibrating a resource budget, ask the owner first.

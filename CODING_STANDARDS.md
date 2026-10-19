@@ -14,6 +14,8 @@
   what the simulator does arrives with the evidence of its contract on the
   real system.
 - A change to what a scenario expects names the accepted example it changes.
+- A fixed policy bug keeps a deterministic scenario that fails without its
+  fix. The pull request that fixes it shows that failure.
 - A check on the real system waits for a final state within a generous margin
   stated where the wait is declared. Only the latency measurement judges
   elapsed time, as a percentile over many samples rather than a deadline per
