@@ -399,8 +399,8 @@ final class Harness {
     func motionGiven() throws -> String {
         let status = try status()
         return "effective animation duration \(status.workspaces.map { "\($0.animationDuration) ms" } ?? "unknown")"
-            + " (configured \(status.config.effective.animation.duration) ms), Reduce Motion \(appReduceMotion ? "on" : "off") for tessel"
-            + " by the harness, \(desktopReduceMotion ? "on" : "off") on the desktop"
+            + " (configured \(status.config.effective.animation.duration) ms); Reduce Motion: tessel \(appReduceMotion ? "on" : "off")"
+            + " (set by the harness), desktop \(desktopReduceMotion ? "on" : "off")"
     }
 
     func status() throws -> Status {
