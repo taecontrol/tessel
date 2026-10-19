@@ -241,6 +241,11 @@ private final class AppWindows: @unchecked Sendable {
 
     private func changed(_ notification: AXNotification, element: AXElement) {
         queue.async { [self] in
+            if motionActive && [.focusedWindowChanged, .mainWindowChanged].contains(notification) {
+                if change != .activation { change = .focus }
+                publishSnapshot()
+                return
+            }
             if motionActive && [.resized, .layoutChanged, .valueChanged, .focusedWindowChanged, .mainWindowChanged].contains(notification) {
                 deferredMotionRead = true
                 return
@@ -616,15 +621,19 @@ private final class AppWindows: @unchecked Sendable {
                 guard presentationLock.withLock({ presentation == token }) else { return }
                 // Choose the write order from the old and requested frames;
                 // screen-edge constraints are separate from app width limits.
-                let positionFirst = !write.resize || positionBeforeSize(current: current, target: write.frame, screenRight: write.screenRight)
+                let order = resizeOrder(current: current, target: write.frame, screenRight: write.screenRight)
+                let resize = write.resize && order != nil
+                let positionFirst = !resize || order == true
                 if write.position && positionFirst { try check(ax.set(.position, of: window, to: .point(write.frame.origin))) }
                 guard presentationLock.withLock({ presentation == token }) else { return }
-                if write.resize { try check(ax.set(.size, of: window, to: .size(write.frame.size))) }
+                if resize { try check(ax.set(.size, of: window, to: .size(write.frame.size))) }
                 guard presentationLock.withLock({ presentation == token }) else { return }
                 if write.position && !positionFirst {
                     try check(ax.set(.position, of: window, to: .point(write.frame.origin)))
                 }
-                presentationLock.withLock { displayedMotion[id] = write.frame }
+                var displayed = write.frame
+                if !resize { displayed.size = current.size }
+                presentationLock.withLock { displayedMotion[id] = displayed }
             }
             if final {
                 for id in eligible {
@@ -652,6 +661,13 @@ private final class AppWindows: @unchecked Sendable {
             if motionTimeouts.remove(id) != nil { ax.setMessagingTimeout(window, seconds: 0.05) }
             guard (try? canPresent(window, id: id)) == true,
                   presentationLock.withLock({ presentation == token }) else { return }
+            // A returned sibling can remain the background app's main window.
+            // Select this card within that app without activating it first.
+            if (try? value(application, .frontmost)?.bool) != true {
+                guard ax.set(.main, of: window, to: .bool(true)) == .success,
+                      presentationLock.withLock({ presentation == token }),
+                      (try? canPresent(window, id: id)) == true else { return }
+            }
             _ = ax.perform(.raise, on: window)
         }
     }
@@ -745,10 +761,11 @@ private final class AppWindows: @unchecked Sendable {
                 var current = facts.first { $0.id == id }?.frame ?? target
                 if resize, let point = try value(window, .position)?.point { current.origin = point }
                 guard presentationLock.withLock({ presentation == token }) else { return }
-                let positionFirst = resize && position && positionBeforeSize(current: current, target: target, screenRight: screenRight)
+                let order = resizeOrder(current: current, target: target, screenRight: screenRight)
+                let positionFirst = resize && position && order == true
                 if positionFirst { try check(ax.set(.position, of: window, to: .point(target.origin))) }
                 guard presentationLock.withLock({ presentation == token }) else { return }
-                if resize {
+                if resize && order != nil {
                     let size = target.size
                     try check(ax.set(.size, of: window, to: .size(size)))
                     constrained.remove(id)
@@ -807,11 +824,14 @@ private final class AppWindows: @unchecked Sendable {
         } catch { /* Another app's queue and the CLI remain independent. */ }
     }
 
-    private func positionBeforeSize(current: CGRect, target: CGRect, screenRight: CGFloat) -> Bool {
+    /// A right-clipped window cannot accept its width at either origin. Keep
+    /// its current size until it is shown far enough inside the screen again.
+    private func resizeOrder(current: CGRect, target: CGRect, screenRight: CGFloat) -> Bool? {
         let fitsCurrent = current.minX + target.width <= screenRight && current.minX + target.width >= 1
-        if fitsCurrent { return target.height > current.height && target.minY < current.minY }
-        if target.maxX <= screenRight && target.maxX >= 1 { return true }
-        return target.minX < current.minX
+        let fitsTarget = target.maxX <= screenRight && target.maxX >= 1
+        if fitsCurrent { return fitsTarget && target.height > current.height && target.minY < current.minY }
+        if fitsTarget { return true }
+        return nil
     }
 
     /// Shutdown is synchronous so a terminating process cannot abandon its

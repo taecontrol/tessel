@@ -53,6 +53,7 @@ final class Workspaces {
     private var hotkeys: (any HotkeyRegistration)?
     private var closeted = Set<UInt32>()
     private var expectedFocus: UInt32?
+    private var cardFocusReady: (token: UInt64, id: UInt32, ready: @MainActor () -> Void)?
     private var focusDecision: (any ScheduledWork)?
     private var transition: UInt64 = 0
     private var knownApplications = Set<Int32>()
@@ -169,6 +170,7 @@ final class Workspaces {
     }
 
     func disable(reason: String) {
+        cardFocusReady = nil
         animator?.cancel()
         movingCarousel = false
         catalog?.endMotion()
@@ -385,6 +387,7 @@ final class Workspaces {
             }
         }
         publish()
+        completeCardFocus(pid: pid, frontmost: frontmost)
     }
 
     func remove(pid: Int32) {
@@ -761,6 +764,7 @@ final class Workspaces {
 
     private func interruptCarousel() {
         guard movingCarousel else { return }
+        cardFocusReady = nil
         animator?.cancel()
         movingCarousel = false
         catalog?.cancelPresentations()
@@ -794,6 +798,7 @@ final class Workspaces {
         focusDecision?.cancel()
         transition += 1
         let token = transition
+        cardFocusReady = nil
         catalog?.cancelPresentations(invalidatingFocus: takeFocus)
         catalog?.beginMotion()
         if let selection, available(selection) { remember(selection) } else { focused = nil }
@@ -883,7 +888,7 @@ final class Workspaces {
                                 self.carouselPresentation?.pending.remove(id)
                                 self.carouselSizing.remove(id)
                                 self.carouselSizes[id] = frame.size
-                                self.carousel.accept(id, requested: requested.size, accepted: frame.size, learnWidth: requested.minX >= bounds.minX && requested.maxX <= bounds.maxX)
+                                self.carousel.accept(id, requested: requested.size, accepted: frame.size, learnBounds: requested.minX >= bounds.minX && requested.maxX <= bounds.maxX)
                             }
                         }
                         if final { done() }
@@ -899,24 +904,28 @@ final class Workspaces {
                 guard let self, self.transition == token else { return }
                 self.raiseCarousel(movingCard, excluding: cardFocus, token: token) { [weak self] in
                     guard let self, self.transition == token else { return }
-                    // Raising siblings can change AXMain. Preserve selection
-                    // without another raise or application activation.
-                    if let cardFocus, movingCard.contains(cardFocus), let entry = self.entries[cardFocus] {
-                        self.catalog?.keepMain(pid: entry.pid, id: cardFocus, completion: begin)
-                    } else { begin() }
+                    let preserve: @MainActor @Sendable () -> Void = { [weak self] in
+                        guard let self, self.transition == token else { return }
+                        // Raising siblings can change AXMain. Preserve selection
+                        // without another raise or application activation.
+                        if let cardFocus, movingCard.contains(cardFocus), let entry = self.entries[cardFocus] {
+                            self.catalog?.keepMain(pid: entry.pid, id: cardFocus, completion: begin)
+                        } else { begin() }
+                    }
+                    if vertical && !down, let cardFocus, let entry = self.entries[cardFocus] {
+                        // Closet return can put the active app's old sibling
+                        // above its key. Restore the leaving key last.
+                        self.catalog?.raise(pid: entry.pid, id: cardFocus, completion: preserve)
+                    } else { preserve() }
                 }
             }
-            if vertical && !down, let cardFocus, let entry = self.entries[cardFocus] {
-                // A revealed sibling of the active app can return above its
-                // current key window. Reassert the leaving card's order first.
-                self.catalog?.raise(pid: entry.pid, id: cardFocus, completion: neighbors)
-            } else { neighbors() }
+            neighbors()
         }
         prepareCarousel(Array(preparation).sorted(), starts: starts, token: token) { [weak self] in
             guard let self, self.transition == token else { return }
             // Down activates the incoming focus before raising its background
             // windows. Up retains the leaving activation until it is hidden.
-            if takeFocus && vertical && down { self.focusCarousel(focusID, token: token, completion: ordered) }
+            if takeFocus && vertical && down { self.focusCarousel(focusID, token: token, waitForConfirmation: true, completion: ordered) }
             else { ordered() }
         }
         if focused == nil && activateDesktop && takeFocus { activateFinderDesktop() }
@@ -945,10 +954,11 @@ final class Workspaces {
         guard let id = ids.first, let entry = entries[id], let start = starts[id], let catalog else { completion(); return }
         // Position writes survive the closet. Stage before showing so no old
         // desktop position flashes; every size write happens after the show.
-        catalog.presentRail(pid: entry.pid, id: id, frame: start, position: true, resize: false, focus: false, screenRight: screenRight) { [weak self] _ in
+        catalog.presentRail(pid: entry.pid, id: id, frame: start, position: true, resize: false, focus: false, screenRight: screenRight) { [weak self] frame in
             guard let self, self.transition == token else { return }
             self.closet?.show([id]); self.closeted.remove(id)
-            let accepted = self.carouselSizes[id] ?? entry.observation.frame.size
+            let accepted = frame?.size ?? entry.observation.frame.size
+            self.carouselSizes[id] = accepted
             let resize = abs(accepted.width - start.width) > 1 || abs(accepted.height - start.height) > 1
             let next: @MainActor @Sendable () -> Void = { [weak self] in self?.prepareCarousel(Array(ids.dropFirst()), starts: starts, token: token, completion: completion) }
             guard resize else { next(); return }
@@ -985,13 +995,23 @@ final class Workspaces {
         }
     }
 
-    private func focusCarousel(_ id: UInt32?, token: UInt64, completion: @escaping @MainActor () -> Void) {
+    private func focusCarousel(_ id: UInt32?, token: UInt64, waitForConfirmation: Bool = false, completion: @escaping @MainActor () -> Void) {
         guard let id, let entry = entries[id], let catalog else { completion(); return }
+        if waitForConfirmation { cardFocusReady = (token, id, completion) }
         catalog.presentRail(pid: entry.pid, id: id, frame: nil, position: false, resize: false, focus: true, screenRight: screenRight) { [weak self] _ in
             guard let self, self.transition == token else { return }
-            self.expectedFocus = nil
-            completion()
+            if self.appFocus[entry.pid] == id && self.applications.frontmostPID == entry.pid { self.expectedFocus = nil }
+            if waitForConfirmation { self.completeCardFocus(pid: entry.pid, frontmost: self.applications.frontmostPID == entry.pid) }
+            else { completion() }
         }
+    }
+
+    private func completeCardFocus(pid: Int32, frontmost: Bool) {
+        guard frontmost, let pending = cardFocusReady, pending.token == transition,
+              entries[pending.id]?.pid == pid, available(pending.id), appFocus[pid] == pending.id else { return }
+        cardFocusReady = nil
+        expectedFocus = nil
+        pending.ready()
     }
 
     private func raiseCarousel(_ ids: Set<UInt32>, excluding focus: UInt32?, token: UInt64, completion: @escaping @MainActor () -> Void) {
@@ -1011,6 +1031,7 @@ final class Workspaces {
     }
 
     private func renderCarouselInstant(focusing selection: UInt32?, activateDesktop: Bool, takeFocus: Bool) {
+        cardFocusReady = nil
         animator?.cancel()
         movingCarousel = false
         catalog?.endMotion()
@@ -1071,7 +1092,7 @@ final class Workspaces {
                 if resize, let accepted, let target {
                     self.carouselSizing.remove(id)
                     self.carouselSizes[id] = accepted.size
-                    self.carousel.accept(id, requested: target.size, accepted: accepted.size, learnWidth: target.minX >= bounds.minX && target.maxX <= bounds.maxX)
+                    self.carousel.accept(id, requested: target.size, accepted: accepted.size, learnBounds: target.minX >= bounds.minX && target.maxX <= bounds.maxX)
                     if self.carousel.frames(self.status.active, area: self.area) != frames {
                         self.render(focusing: self.focused, relayout: false, takeFocus: false)
                     }

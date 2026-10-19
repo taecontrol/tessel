@@ -54,6 +54,9 @@ import Testing
             let f = RailFixture(s, widths: [0.25, 1.0]), a = f.ids[0], b = f.ids[1]
             let width = f.frame(a).width
             f.tessel.changeConfig("[experiments]\ncarousel = true\n[gaps]\nouter = 30\n"); s.settle()
+            // A clipped tile defers sizing until its requested width fits on
+            // screen; revealing it must finish the pending gap geometry.
+            f.select(b)
             f.near(f.frame(a).width, width, "the ordinary width is retained")
             f.near(f.frame(b).width, f.area.width - 40, "the oversized width is clamped to the new area")
             for id in [a, b] {

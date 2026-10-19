@@ -95,6 +95,20 @@ extension Acceptance.Contracts {
             let state = try desktop.observe()
             return state.frontmostFixturePID == fixture.pid && state.visibleIDs.filter { [a,sibling].contains($0) }.first == sibling
         }
+        let background = try second.open(key: "backgroundCard"); _ = try window(background, session: second)
+        try desktop.activate(key: "sibling")
+        try native("closetHide", ["ids": [a]]); try native("closetHide", session: second, ["ids": [b]])
+        try native("closetShow", ["ids": [a]]); try native("closetShow", session: second, ["ids": [b]])
+        try #require(try native("write", session: second, ["id": background, "attribute": "AXMain"]).result == 0)
+        try #require(try native("write", session: second, ["id": background, "attribute": "AXRaise"]).result == 0)
+        try #require(try write(sibling, "AXRaise") == 0)
+        try requireFinalState("selecting the background card main window preserves activation and raises the complete mixed-app card") {
+            let state = try desktop.observe(), order = state.visibleIDs.filter { [a,b,sibling,background].contains($0) }
+            guard let firstStatic = order.firstIndex(where: { [a,b].contains($0) }) else { return false }
+            return state.frontmostFixturePID == fixture.pid && [sibling,background].allSatisfy { id in
+                order.firstIndex(of: id).map { $0 < firstStatic } == true
+            }
+        }
     }
 
     @Test("closet-ax-identity: retained AX handles and hidden position writes survive a round trip", contract(.closetAXIdentity))

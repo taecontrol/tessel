@@ -54,7 +54,7 @@ package enum Assumption: String, CaseIterable, Sendable {
         case .pointerPressNotifications: "An NSEvent global mouse-down monitor receives a press delivered to another app before subsequent drag events."
         case .axVerticalClamping: "AXPosition keeps the top below the menu bar and at least 32 points visible at the screen bottom."
         case .axHorizontalSliver: "AXPosition accepts a one-point horizontal sliver, but a wholly off-screen window snaps back to show 40 points."
-        case .axRaiseAcrossApplications: "AXRaise reorders background apps without activation; a frontmost app window may remain above a raised background window, and closet return preserves earlier order."
+        case .axRaiseAcrossApplications: "AXMain selects a background app's card without activation, then AXRaise reorders it; a frontmost app window may remain above a raised background window, and closet return preserves earlier order."
         case .closetAXIdentity: "A retained AX element survives a closet round trip and accepts position writes while closeted."
         case .closetSizeLoss: "An AXSize write while closeted may return a shorter height after the window is shown."
         case .displayFrameDemand: "A display link delivers screen frames while requested and stops delivering after it is stopped."

@@ -6,6 +6,30 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct CarouselMotion {
+    @Test("cross-app card preparation preserves equal nominal widths through repeated reveals")
+    func crossAppCardsPreserveNominalWidths() {
+        for writes in WriteOrder.allCases {
+            requireCarousel(Scenario.run("cross-app nominal widths", writes: writes) { s in
+                s.mac.setScreen(ScreenGeometry(frame: CGRect(x: 0, y: 0, width: 1728, height: 1117),
+                    visibleFrame: CGRect(x: 0, y: 0, width: 1728, height: 1084)))
+                let first = s.mac.launch(), second = s.mac.launch()
+                let spec = WindowSpec(frame: CGRect(x: 100, y: 120, width: 480, height: 328), positionAcceptance: .screenEdges)
+                let a = first.open(spec), c = first.open(spec), b = second.open(spec), d = second.open(spec)
+                first.select(a)
+                let tessel = s.startTessel(); s.settle()
+                tessel.changeConfig(CarouselFixture.config + "[animation]\nduration = 400\n"); s.settle()
+                @MainActor func press(_ key: String) { tessel.pressKey(key); s.settle() }
+                first.select(c); s.settle(); press("alt-shift-j")
+                second.select(d); s.settle(); press("alt-shift-j")
+                first.select(c); s.settle(); press("alt-k")
+                first.select(a); s.settle(); press("alt-h"); press("alt-l")
+                for id in [a,b] {
+                    s.expect("equal initial nominal widths still stretch equally after card preparation: \(id) \(String(describing: s.mac.frame(id)))", abs((s.mac.frame(id)?.width ?? 0) - 849) <= 1)
+                }
+            })
+        }
+    }
+
     @Test("a clipped moving window still receives its exact final write after reaching the screen edge early")
     func clippedMotionAlwaysWritesTheFinalFrame() {
         requireCarousel(Scenario.run("final write after horizontal clamping") { s in

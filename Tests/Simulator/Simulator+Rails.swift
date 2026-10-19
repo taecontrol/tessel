@@ -116,7 +116,10 @@ extension SimulatedMac {
                 // AXRaise. Other background apps can still be reordered.
                 zOrder.insert(id, at: min(index + 1,zOrder.count))
             }
-        } else { focus(id, activating: apps[pid]?.activationPending != true) }
+        } else {
+            if front != pid { assume(.axRaiseAcrossApplications) }
+            focus(id, activating: false)
+        }
         return .success
     }
 

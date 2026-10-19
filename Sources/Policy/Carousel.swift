@@ -96,13 +96,13 @@ struct Carousel {
 
     /// Learn AX's bounds; a rejected nominal preset advances to the next
     /// candidate inside those bounds, including wrap after a rejected maximum.
-    /// Clipped readbacks report height without learning a screen edge as a bound.
-    mutating func accept(_ id: UInt32, requested: CGSize, accepted: CGSize, learnWidth: Bool = true) {
+    /// Clipped readbacks cannot establish intrinsic width or height bounds.
+    mutating func accept(_ id: UInt32, requested: CGSize, accepted: CGSize, learnBounds: Bool = true) {
         guard let p = location(id), var ws = workspaces[p.workspace] else { return }
         var tile = ws.rails[p.rail].tiles[p.slot]
-        tile.size.height = accepted.height
-        if learnWidth && accepted.width > requested.width + 1 { tile.minimum = accepted.width }
-        if learnWidth && accepted.width < requested.width - 1 { tile.maximum = accepted.width }
+        if learnBounds { tile.size.height = accepted.height }
+        if learnBounds && accepted.width > requested.width + 1 { tile.minimum = accepted.width }
+        if learnBounds && accepted.width < requested.width - 1 { tile.maximum = accepted.width }
         if let preset = tile.preset, !fits(tile, preset) {
             let candidates = Self.presets.filter { fits(tile, $0) }
             tile.preset = candidates.first { $0 > preset + 1e-6 } ?? candidates.first
