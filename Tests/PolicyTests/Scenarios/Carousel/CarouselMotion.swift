@@ -83,7 +83,7 @@ import Testing
             s.expect("the new spring starts from the native intermediate width", first > 849 && first < interrupted)
             f.pair(a,b,focused:b)
         })
-        requireCarousel(Scenario.run("mutation reachability: failed current-frame read") { s in
+        requireCarousel(Scenario.run("same-direction retarget after an unanswered frame read") { s in
             let f = CarouselFixture(s, presets:[0.5,0.5],duration:400), a=f.ids[0]
             f.press("alt-l"); f.press("alt-h")
             f.tessel.pressKey("alt-h")
@@ -416,6 +416,23 @@ import Testing
             f.near(f.frame(a).width, f.area.width * 0.4, "the interrupted mouse width wins")
             f.press("alt-l")
             f.near(f.frame(a).width, f.area.width * 0.4, "the next command preserves the adopted mouse width")
+        })
+        requireCarousel(Scenario.run("width motion begins at the user's moved position") { s in
+            let f = CarouselFixture(s), b = f.ids[1]
+            f.press("alt-l")
+            var dragged = f.frame(b).origin
+            dragged.x += 100
+            f.app.drag(b, to: dragged); s.settle()
+            f.mac.clearMotionHistory()
+            let started = Double(f.mac.scheduler.now) / 1_000
+            f.press("alt-r")
+            let first = f.mac.geometryWrites.first { $0.window == b && $0.attribute == .position && $0.frame > 0 }
+            s.expect("the width command produces a moving frame", first != nil)
+            if let first, f.mac.displaySamples.indices.contains(first.frame - 1), let point = first.requested.point {
+                let p = (f.mac.displaySamples[first.frame - 1].time - started) / 0.08
+                let target = f.area.maxX - f.width(2.0 / 3)
+                f.near(point.x, dragged.x + (target - dragged.x) * carouselSpring(p), "the spring starts at the observed mouse position")
+            }
         })
     }
 
