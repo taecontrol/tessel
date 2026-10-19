@@ -3,6 +3,19 @@ import Simulator
 import Testing
 
 @Suite @MainActor struct CarouselWidths {
+    @Test("accepted subpoint width differences do not turn focus-only commands into resizes")
+    func acceptedSizesRemainStable() {
+        requireCarousel(Scenario.run("stable AX width readback") { s in
+            let f = CarouselFixture(s), b = f.ids[1]
+            f.press("alt-l")
+            let id = f.open(maximum: f.width(0.5) - 0.5)
+            f.mac.clearMotionHistory()
+            f.press("alt-h"); f.focus(b)
+            f.press("alt-l"); f.focus(id)
+            s.expect("focus-only commands do not repeat an accepted size within the one-point tolerance", f.mac.geometryWrites.isEmpty)
+        })
+    }
+
     @Test("#26 E7: width cycling uses gap-aware presets, anchors the left edge and exits expansion")
     func presetCycleAnchorsAndMinimallyReveals() {
         requireCarousel(Scenario.run("cycle expanded nominal thirds") { s in

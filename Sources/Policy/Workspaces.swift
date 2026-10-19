@@ -747,7 +747,12 @@ final class Workspaces {
         closet.show(newlyShown.filter { entries[$0]?.observation.parent == nil })
         closeted.formUnion(hide); closeted.subtract(show)
         for id in show.sorted() {
-            if let frame = frames[id], carouselSizes[id] != frame.size { carouselSizing.insert(id) }
+            guard let frame = frames[id] else { continue }
+            // Use the same one-point tolerance as width-limit learning. A
+            // fractional accepted size must stay stable on focus-only input.
+            if let accepted = carouselSizes[id], abs(accepted.width - frame.width) <= 1,
+               abs(accepted.height - frame.height) <= 1 { continue }
+            carouselSizing.insert(id)
         }
         let rail = carousel.current(status.active)?.identity
         let redraw = carouselPresentation?.workspace != status.active || carouselPresentation?.rail != rail || carouselPresentation?.frames != frames
