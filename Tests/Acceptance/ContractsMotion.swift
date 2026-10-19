@@ -121,6 +121,24 @@ extension Acceptance.Contracts {
         try expectFocus(sibling)
     }
 
+    @Test("ax-frontmost-activation: AX activation orders every window of the app above other apps", contract(.axFrontmostActivation))
+    func axFrontmostActivationOrdersAppWindows() throws {
+        let a = try fixture.open(key: "a"), b = try fixture.open(key: "b")
+        try desktop.activate(key: "b")
+        let target = try other(), cover = try target.open()
+        try desktop.activate(target)
+        try requireFinalState("both of the first app's windows are below the other app's window") {
+            let order = try desktop.observe().visibleIDs.filter { [a, b, cover].contains($0) }
+            return order.first == cover
+        }
+        try #require(try native("activateAX").result == 0)
+        try requireFinalState("AX activation brings the background sibling above the other app's window") {
+            let observation = try desktop.observe()
+            let order = observation.visibleIDs.filter { [a, b, cover].contains($0) }
+            return observation.frontmostFixturePID == fixture.pid && order.last == cover
+        }
+    }
+
     @Test("closet-ax-identity: retained AX handles and hidden position writes survive a round trip", contract(.closetAXIdentity))
     func closetAXIdentityAndPosition() throws {
         let id = try fixture.open(); let original = try window(id)

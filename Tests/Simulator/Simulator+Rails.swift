@@ -26,6 +26,11 @@ extension SimulatedApp {
         mac.apps[pid]?.deferredActivations += 1
         mac.apps[pid]?.activationCompletion = completion
     }
+    @MainActor package func delayNextActivationOrder(milliseconds: Int) {
+        mac.assume(.axFrontmostActivation)
+        mac.action("\(alias) delay its next AX activation window order by \(milliseconds) ms")
+        mac.apps[pid]?.activationOrderDelay = milliseconds
+    }
     @MainActor package func limitSize(_ window: UInt32, maximum: CGSize) {
         mac.assume(.sizeLimitChanges)
         mac.action("\(alias) limit window \(window) to \(maximum.width)x\(maximum.height)")
@@ -85,7 +90,25 @@ extension SimulatedMac {
         guard apps[pid]?.terminated == false else { return }
         apps[pid]?.activationPending = false
         front = pid
+        orderActivatedWindows(pid)
         post(.activated, pid: pid)
+    }
+    /// AXFrontmost activation brings every window of the app forward, keeping
+    /// their relative order. CG may apply it after AX already answers.
+    private func orderActivatedWindows(_ pid: Int32) {
+        assume(.axFrontmostActivation)
+        let delay = apps[pid]?.activationOrderDelay ?? 0
+        apps[pid]?.activationOrderDelay = 0
+        let order: @Sendable () -> Void = { [self] in
+            guard apps[pid]?.terminated == false else { return }
+            let owned = zOrder.filter { windows[$0]?.pid == pid }
+            zOrder.removeAll { windows[$0]?.pid == pid }
+            zOrder.insert(contentsOf: owned, at: 0)
+        }
+        if delay > 0 {
+            scheduler.note("native \(apps[pid]!.alias) activation order reaches CG after \(delay) ms")
+            _ = scheduler.main.after(milliseconds: delay) { order() }
+        } else { order() }
     }
     func selectFromAX(_ id: UInt32, raising: Bool = false) -> AXStatus {
         if windows[id]?.minimized == true {

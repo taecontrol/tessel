@@ -949,7 +949,13 @@ final class Workspaces {
             guard let self, self.transition == token else { return }
             // Down activates the incoming focus before raising its background
             // windows. Up retains the leaving activation until it is hidden.
-            if takeFocus && vertical && down { self.focusCarousel(focusID, token: token, waitForConfirmation: true, completion: ordered) }
+            if takeFocus && vertical && down {
+                let deadline = startedAt + Double(duration) / 1_000
+                self.focusCarousel(focusID, token: token, waitForConfirmation: true) { [weak self] in
+                    guard let self, let focusID, let pid = self.entries[focusID]?.pid else { ordered(); return }
+                    self.awaitActivationOrder(pid: pid, among: participants, token: token, until: deadline, completion: ordered)
+                }
+            }
             else { ordered() }
         }
         if focused == nil && activateDesktop && takeFocus { activateFinderDesktop() }
@@ -1077,6 +1083,24 @@ final class Workspaces {
             catalog.refreshFocus(pid: entry.pid) { [weak self] in
                 self?.retryCardFocus(token: token, remaining: remaining - 1)
             }
+        }
+    }
+
+    /// AX confirms an activation before CG necessarily shows it, and an
+    /// AXFrontmost activation brings every window of the app forward. A
+    /// background card window raised before that order lands would end below
+    /// the incoming app's other windows for the whole card, so its single
+    /// raise waits, at most until the motion's own deadline.
+    private func awaitActivationOrder(pid: Int32, among ids: Set<UInt32>, token: UInt64, until deadline: TimeInterval,
+                                      completion: @escaping @MainActor @Sendable () -> Void) {
+        guard transition == token else { return }
+        let order = windowOrder.onScreenOrder().filter(ids.contains)
+        let owned = order.filter { entries[$0]?.pid == pid }.count
+        guard !order.prefix(owned).allSatisfy({ entries[$0]?.pid == pid }), let animator, animator.now < deadline else {
+            completion(); return
+        }
+        scheduler.main.after(milliseconds: 8) { [weak self] in
+            self?.awaitActivationOrder(pid: pid, among: ids, token: token, until: deadline, completion: completion)
         }
     }
 

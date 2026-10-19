@@ -401,6 +401,10 @@ is observed; notification delivery alone is not an atomic fullscreen guard.
 Downward cards focus the incoming selection before raising its other windows.
 Preparation confirms native focus and CG order before moving frames; bounded
 focus readback retries never repeat activation or AXRaise.
+AXFrontmost activation brings every window of the incoming app forward, and CG
+can show that order after AX has confirmed the focus. The card's background-app
+windows are raised only once CG shows it, or at the motion's deadline;
+otherwise the activation would cover them with the incoming app's other windows.
 If focus confirmation exhausts those retries, preparation is cancelled and the
 ordinary instant presenter lands the selected rail with its bounded AX retries.
 Upward cards retain the leaving selection until it has moved down and hidden.

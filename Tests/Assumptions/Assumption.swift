@@ -37,6 +37,7 @@ package enum Assumption: String, CaseIterable, Sendable {
     case nativeTabPublication = "native-tab-publication"
     case deferredAXActivation = "deferred-ax-activation"
     case minimizeFocusInterruption = "minimize-focus-interruption"
+    case axFrontmostActivation = "ax-frontmost-activation"
 
     case axVerticalClamping = "ax-vertical-clamping"
     case axHorizontalSliver = "ax-horizontal-sliver"
@@ -60,7 +61,7 @@ package enum Assumption: String, CaseIterable, Sendable {
         case .displayFrameDemand: "A display link delivers screen frames while requested and stops delivering after it is stopped."
         case .reduceMotionNotifications: "NSWorkspace exposes Reduce Motion and posts accessibilityDisplayOptionsDidChangeNotification when it changes."
         case .applicationLifecycle: "Application metadata describes activation policy and liveness; regular apps notify launch and termination, while prohibited apps may omit either notification."
-        case .applicationActivation: "Activation changes the frontmost app without ordering all its windows, and notification delivery may lag."
+        case .applicationActivation: "Plain activation changes the frontmost app without ordering all its windows, and notification delivery may lag."
         case .applicationVisibility: "App hide changes AXHidden and CG visibility, while AXWindows may omit hidden windows."
         case .axApplicationWindows: "AXWindows lists ordinary roots in app order, including minimized windows but excluding attached sheets."
         case .axWindowAttributes: "AX publishes subrole, frame, children and size settability; ordinary windows expose minimized/fullscreen flags while attached sheets report attributeUnsupported."
@@ -97,6 +98,7 @@ package enum Assumption: String, CaseIterable, Sendable {
         case .nativeTabPublication: "A native tab's bar can identify its successor while AXWindows still lists the former root and AXFocusedWindow is temporarily unpublished."
         case .deferredAXActivation: "AX can accept activation before the app becomes active; pending activation may complete asynchronously, on a main or raise write, or on another activation request."
         case .minimizeFocusInterruption: "AX main or raise can cancel pending minimization; after completion main leaves it minimized, while raise restores it and may return cannotComplete before the restore finishes."
+        case .axFrontmostActivation: "AXFrontmost activation orders every window of the app above other apps' windows; CG can apply that order after AX already reports the app frontmost and its focused window."
         }
     }
 }

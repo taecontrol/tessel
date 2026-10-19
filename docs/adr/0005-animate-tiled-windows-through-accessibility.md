@@ -89,6 +89,8 @@ native behavior used by the simulator and presenter:
   writes, and the need to size after showing.
 - `ax-raise-across-applications`: active-app restriction, background AXMain,
   sibling closet return and active-key ordering without stray activation.
+- `ax-frontmost-activation`: AX activation brings every window of the app above
+  other apps, unlike plain activation; card raises wait for that order.
 - `ax-resize-anchoring`: move left before growing to avoid a false maximum.
 - `display-frame-demand`, `reduce-motion-notifications` and
   `pointer-press-notifications`: demand lifecycle and native input notifications.

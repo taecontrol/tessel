@@ -160,6 +160,42 @@ import Testing
         }
     }
 
+    @Test("a downward mixed-app card raises its background window after the incoming activation reaches CG")
+    func downwardCardWaitsForTheActivationOrder() {
+        for writes in WriteOrder.allCases {
+            requireCarousel(Scenario.run("late activation order", writes: writes) { s in
+                s.mac.setScreen(ScreenGeometry(frame: CGRect(x: 0, y: 0, width: 1728, height: 1117),
+                    visibleFrame: CGRect(x: 0, y: 0, width: 1728, height: 1084)))
+                let first = s.mac.launch(), second = s.mac.launch()
+                let spec = WindowSpec(frame: CGRect(x: 100, y: 120, width: 480, height: 328), positionAcceptance: .screenEdges)
+                let a = first.open(spec), c = first.open(spec), b = second.open(spec), d = second.open(spec)
+                first.select(a)
+                let tessel = s.startTessel(); s.settle()
+                tessel.changeConfig(CarouselFixture.config + "[animation]\nduration = 400\n"); s.settle()
+                @MainActor func press(_ key: String) { tessel.pressKey(key); s.settle() }
+                first.select(c); s.settle(); press("alt-shift-j")
+                second.select(d); s.settle(); press("alt-shift-j")
+                first.select(c); s.settle(); press("alt-k")
+                second.select(b); s.settle()
+                s.expect("the other app's top window is focused before the card", s.mac.focusedWindow == b && tessel.status.rail == 1)
+                s.mac.clearMotionHistory()
+                // AX confirms the incoming app before CG shows its activation,
+                // which brings every window of that app forward.
+                first.delayNextActivationOrder(milliseconds: 30)
+                press("alt-j")
+                let moving = s.mac.displaySamples.filter { sample in
+                    [c, d].contains { id in sample.frames[id].map { $0.minY > 44 && $0.minY < 1117 - 33 } == true }
+                }
+                s.expect("the incoming card moves on display frames, got \(moving.count) samples", moving.count >= 2)
+                for sample in moving {
+                    let card = [c, d].compactMap { sample.visible.firstIndex(of: $0) }, other = [a, b].compactMap { sample.visible.firstIndex(of: $0) }
+                    s.expect("every card window is above every other window: \(sample.visible)", card.count == 2 && other.allSatisfy { $0 > card.max()! })
+                }
+                s.expect("the incoming selection is focused in rail two", tessel.status.rail == 2 && s.mac.focusedWindow == c)
+            })
+        }
+    }
+
     @Test("a clipped moving window still receives its exact final write after reaching the screen edge early")
     func clippedMotionAlwaysWritesTheFinalFrame() {
         requireCarousel(Scenario.run("final write after horizontal clamping") { s in
