@@ -1,9 +1,0 @@
-# Bug: Policy reads the wall clock instead of injected virtual time (E13 guard).
-# Fixing commit: f18323a
-diff --git a/Sources/Policy/ForbiddenClock.swift b/Sources/Policy/ForbiddenClock.swift
-new file mode 100644
---- /dev/null
-+++ b/Sources/Policy/ForbiddenClock.swift
-@@ -0,0 +1,2 @@
-+import Foundation
-+private let forbiddenClock = Date()

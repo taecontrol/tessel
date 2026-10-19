@@ -145,3 +145,12 @@ unknown IDs, and rejects declared assumptions with no simulator behavior.
 A simulator change needs contract evidence under the project's review rules.
 An unmodeled port/operation/attribute must stop the run, never return a plausible
 successful value.
+
+## Known gap
+
+No scenario covers the closed-window settling fixed for #1 in 1a3b9c5:
+destruction settling and bounded retries after a failed read. Reverting that
+fix still passes #1 E8, because no scenario makes the first read after a close
+time out and then lets the app recover without another notification. The real
+system has not shown that sequence: closed handles were invalid on the first
+sample in every probe. Add the scenario once a contract shows the behavior.

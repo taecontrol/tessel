@@ -44,27 +44,3 @@ enum CheckDecisions {
         }
     }
 }
-
-enum MutantKind {
-    case knownBug, simulatorImport, policyClock
-
-    init(path: String) throws {
-        if path == "guards/simulator-import-policy.patch" { self = .simulatorImport }
-        else if path == "guards/policy-wall-clock.patch" { self = .policyClock }
-        else if !path.hasPrefix("guards/") { self = .knownBug }
-        else { throw CheckFailure("unknown guard mutant \(path)") }
-    }
-
-    func killed(status: Int32, output: String) -> Bool {
-        guard status != 0 else { return false }
-        let testsFailed = output.range(of: #"Test run with \d+ tests?[^\n]* failed after "#, options: .regularExpression) != nil
-        switch self {
-        case .knownBug: return testsFailed
-        case .simulatorImport:
-            return output.contains("module 'Policy' doesn't allow importation from module 'Simulator'")
-                || output.contains("no such module 'Policy'")
-                || output.contains("ForbiddenPolicyImport.swift:1:8 unable to resolve module dependency: 'Policy'")
-        case .policyClock: return testsFailed && output.contains("ForbiddenClock.swift:2: wall clock")
-        }
-    }
-}

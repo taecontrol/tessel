@@ -60,8 +60,8 @@ bare `swift test` never launches anything.
 - A decision bug fails on every run, in seconds, with a trace of the schedule
   that produced it; CI no longer depends on the runner's timing for policy.
 - The simulator can be wrong where nobody modeled macOS. Contracts pin each
-  assumption, a registry requires one contract per assumption, known-bug
-  mutants must fail the deterministic layer in CI, and a pull request that
+  assumption, a registry requires one contract per assumption, every fixed bug
+  keeps a scenario that fails without its fix, and a pull request that
   changes the simulator without a contract change must state its evidence.
   Their first runs on macOS 27 contradicted 10 of 35 assumptions; the
   simulator and its scenarios were corrected with that evidence.

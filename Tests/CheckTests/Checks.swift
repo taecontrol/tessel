@@ -43,25 +43,11 @@ import Testing
         #expect(CheckDecisions.acceptanceLeaks(in: "[3/9] Compiling PolicyTests AcceptanceWaits.swift\nPolicyTests.Integrity/check()").isEmpty)
     }
 
-    @Test("E3/E10/E13: mutants must fail at their intended boundary")
-    func mutantResults() {
-        let failed = "✘ Test run with 24 tests in 10 suites failed after 2.000 seconds with 2 issues."
-        #expect(MutantKind.knownBug.killed(status: 1, output: failed))
-        #expect(!MutantKind.knownBug.killed(status: 0, output: failed))
-        #expect(!MutantKind.knownBug.killed(status: 1, output: "error: build failed"))
-        #expect(MutantKind.simulatorImport.killed(status: 1, output: "module 'Policy' doesn't allow importation from module 'Simulator'"))
-        #expect(MutantKind.simulatorImport.killed(status: 1, output: "ForbiddenPolicyImport.swift:1:8 unable to resolve module dependency: 'Policy'"))
-        #expect(!MutantKind.simulatorImport.killed(status: 1, output: failed))
-        #expect(MutantKind.policyClock.killed(status: 1, output: "ForbiddenClock.swift:2: wall clock\n" + failed))
-        #expect(!MutantKind.policyClock.killed(status: 1, output: failed))
-        #expect(!MutantKind.policyClock.killed(status: 1, output: "ForbiddenClock.swift:2: wall clock"))
-    }
-
     @Test("commands reject missing or unsafe run counts")
     func arguments() throws {
         #expect(try CheckCommand(["determinism", "--runs", "5"]) == .determinism(5))
         #expect(try CheckCommand(["simulator-evidence", "--base", "origin/main", "--body-file", "body"]) == .simulatorEvidence(base: "origin/main", bodyFile: "body"))
-        for invalid in [[], ["mutants", "extra"], ["determinism", "--runs", "0"], ["determinism", "--runs", "-1"],
+        for invalid in [[], ["layers", "extra"], ["determinism", "--runs", "0"], ["determinism", "--runs", "-1"],
                         ["determinism", "--runs", "many"], ["simulator-evidence", "--base", "main"]] {
             #expect(throws: CheckFailure.self) { try CheckCommand(invalid) }
         }

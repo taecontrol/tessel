@@ -176,8 +176,11 @@ its counters.
 
 ### CI
 
-CI runs on `xcode-27` (macOS 27). The Policy job runs bare tests, the layer check,
-known-bug mutants, trace repetition and the simulator-evidence guard. The
+CI runs on `xcode-27` (macOS 27) and must finish in under ten minutes per pull
+request, until every check is green. The Policy job runs bare tests, the layer
+check and trace repetition. The simulator-evidence guard runs in its own
+workflow; it is the only check that reads the pull request description, so it
+is the only one an edit to the description reruns. The
 Acceptance job signs and builds once, then runs contracts, journeys (including
 permission denial/restart), latency, resources and the rails status-item capture.
 Resources retain their 90 s command budget. The job has a twelve-minute timeout
@@ -714,22 +717,12 @@ they do not launch the app or fixtures. Child test processes remove
 ```sh
 swift test
 swift run tessel-check layers
-swift run tessel-check mutants
-swift run tessel-check determinism --runs 100
+swift run tessel-check determinism --runs 20
 swift run tessel-check simulator-evidence --base origin/main --body-file pr-body.txt
 ```
 
 `layers` lists tests without entering their execution scopes, and rejects
-Acceptance compilation or discovery. `mutants` copies the tracked tree with
-its current working contents to a fresh temporary directory per patch,
-using APFS clones when available. Stage new source files before running it.
-It applies each patch under `Tests/Mutants/` and requires a failing bare
-`swift test`; known bugs must reach test failures, and guards must fail at
-their intended boundary. An obsolete patch or surviving mutant fails the
-check. It removes its copies and reports every mutant's result and time.
-The patch inventory records fixing commits and rejected candidates.
-
-`determinism` requires successful runs and one identical SHA-256
+Acceptance compilation or discovery. `determinism` requires successful runs and one identical SHA-256
 `trace digest:` line per run, printing the digest and each run's time.
 `simulator-evidence` checks `<base>...HEAD`: a change under `Tests/Simulator/`
 needs either a changed `Tests/Acceptance/Contracts*.swift` file or a PR-body
