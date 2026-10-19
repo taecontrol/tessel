@@ -4,7 +4,7 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct RailReload {
-    @Test("#17 E2; #17 E16: a layout/gap reload preserves unpublished dialog focus and its send intent", arguments: [false, true], ["layout", "gaps", "both"])
+    @Test("a layout/gap reload preserves unpublished dialog focus and its send intent", arguments: [false, true], ["layout", "gaps", "both"])
     func delayedDialog(rails: Bool, change: String) {
         for crossApp in [false, true] {
             requireScenario(Scenario.run("reload rails=\(rails) change=\(change) crossApp=\(crossApp)") { s in
@@ -35,7 +35,7 @@ import Testing
         }
     }
 
-    @Test("#17 E2: reloading stack into rails retains workspace membership and caps filled widths")
+    @Test("reloading stack into rails retains workspace membership and caps filled widths")
     func stackMembership() {
         requireScenario(Scenario.run("stack to rails membership") { s in
             let f = RailFixture(s, widths: [0.3, 0.3]), a = f.ids[0], b = f.ids[1]
@@ -48,7 +48,7 @@ import Testing
         })
     }
 
-    @Test("#17 E2; #17 E18: a gap reload sizes unconstrained windows and clamps only oversized widths")
+    @Test("a gap reload sizes unconstrained windows and clamps only oversized widths")
     func gapGeometry() {
         requireScenario(Scenario.run("rail gap geometry") { s in
             let f = RailFixture(s, widths: [0.25, 1.0]), a = f.ids[0], b = f.ids[1]
@@ -63,7 +63,7 @@ import Testing
         })
     }
 
-    @Test("#17 E16: reloading an empty workspace never reactivates Finder over delayed external activation", arguments: [false, true])
+    @Test("reloading an empty workspace never reactivates Finder over delayed external activation", arguments: [false, true])
     func emptyWorkspace(rails: Bool) {
         requireScenario(Scenario.run("empty workspace reload rails=\(rails)") { s in
             let f = RailFixture(s, widths: [0.25])

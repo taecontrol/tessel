@@ -65,7 +65,7 @@ extension Acceptance.Journeys {
             try requireFinalState("the orphan catalogued after AX resumes") { try harness.row(b) != nil }
             try desktop.expectInside([a, b])
         }
-        try step("#17 E3 rail disable, quit, crash and failed hide return managed windows") {
+        try step("rail disable, quit, crash and failed hide return managed windows") {
             for operation in ["disable", "quit", "stack-disable", "stack-quit", "crash-off", "crash-on", "failed-hide"] {
                 print("Rail cleanup: \(operation)")
                 try desktop.clear()

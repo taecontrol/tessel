@@ -38,8 +38,23 @@ package enum Assumption: String, CaseIterable, Sendable {
     case deferredAXActivation = "deferred-ax-activation"
     case minimizeFocusInterruption = "minimize-focus-interruption"
 
+    case axVerticalClamping = "ax-vertical-clamping"
+    case axHorizontalSliver = "ax-horizontal-sliver"
+    case axRaiseAcrossApplications = "ax-raise-across-applications"
+    case closetAXIdentity = "closet-ax-identity"
+    case closetSizeLoss = "closet-size-loss"
+    case displayFrameDemand = "display-frame-demand"
+    case reduceMotionNotifications = "reduce-motion-notifications"
+
     package var statement: String {
         switch self {
+        case .axVerticalClamping: "AXPosition keeps the top below the menu bar and at least 32 points visible at the screen bottom."
+        case .axHorizontalSliver: "AXPosition accepts a one-point horizontal sliver, but a wholly off-screen window snaps back to show 40 points."
+        case .axRaiseAcrossApplications: "AXRaise reorders background apps without activation; a frontmost app window may remain above a raised background window, and closet return preserves earlier order."
+        case .closetAXIdentity: "A retained AX element survives a closet round trip and accepts position writes while closeted."
+        case .closetSizeLoss: "An AXSize write while closeted may return a shorter height after the window is shown."
+        case .displayFrameDemand: "A display link delivers screen frames while requested and stops delivering after it is stopped."
+        case .reduceMotionNotifications: "NSWorkspace exposes Reduce Motion and posts accessibilityDisplayOptionsDidChangeNotification when it changes."
         case .applicationLifecycle: "Application metadata describes activation policy and liveness; regular apps notify launch and termination, while prohibited apps may omit either notification."
         case .applicationActivation: "Activation changes the frontmost app without ordering all its windows, and notification delivery may lag."
         case .applicationVisibility: "App hide changes AXHidden and CG visibility, while AXWindows may omit hidden windows."

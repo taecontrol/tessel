@@ -45,7 +45,7 @@ extension Acceptance {
             try harness.startApp()
         }
 
-        @Test("#17 E26: rails status item capture")
+        @Test("rails status item capture")
         func captureRailsStatusItem() throws {
             let ids = try desktop.railSetup([0.3, 0.3, 0.3])
             try desktop.post(38, shift: true)

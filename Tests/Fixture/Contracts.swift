@@ -11,6 +11,7 @@ struct FixtureContractError: Error, CustomStringConvertible {
 /// or the app's adapters, and revalidates each target before touching AX.
 @MainActor
 final class FixtureContracts: NSObject {
+    private let motionProbe = FixtureMotionProbe()
     private var handles: [UInt32: AXUIElement] = [:]
     private var bars: [AXUIElement] = []
     private var captured: [String: CFTypeRef] = [:]
@@ -28,6 +29,7 @@ final class FixtureContracts: NSObject {
         let operation = command["operation"] as? String ?? "snapshot"
         switch operation {
         case "reset":
+            motionProbe.reset()
             stopObserving()
             NSWorkspace.shared.notificationCenter.removeObserver(self)
             spaces?.stop(returning: liveMovedWindows())
@@ -73,6 +75,13 @@ final class FixtureContracts: NSObject {
         case "activate":
             NSRunningApplication(processIdentifier: pid)?.activate()
             return [:]
+        case "motionStart": try motionProbe.start(command); return motionProbe.facts()
+        case "motionStop": motionProbe.stop(); return motionProbe.facts()
+        case "motionSamples": return motionProbe.facts()
+        case "motionSetPreference":
+            guard let value = command["enabled"] as? Bool else { throw FixtureContractError("Reduce Motion needs a boolean") }
+            try motionProbe.setReduceMotion(value); return motionProbe.preferences()
+        case "motionPreferences": return motionProbe.preferences()
         case "snapshot": return snapshot(application, pid: pid)
         case "barOwner":
             guard let index = command["bar"] as? Int, bars.indices.contains(index) else { throw FixtureContractError("retain a native bar before reading its owner") }

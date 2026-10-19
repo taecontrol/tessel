@@ -5,7 +5,7 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct RailNativeWindows {
-    @Test("#17 E11: native activation before termination cannot replace the adjacent-rail landing", arguments: [false, true], WriteOrder.allCases)
+    @Test("native activation before termination cannot replace the adjacent-rail landing", arguments: [false, true], WriteOrder.allCases)
     func termination(crash: Bool, order: WriteOrder) {
         for exitOrder in TerminationExitOrder.allCases {
             for earlyNotice in [false, true] {
@@ -31,7 +31,7 @@ import Testing
         }
     }
 
-    @Test("#17 E18: changed size limits stay tiled, align at the top and reposition the right neighbor", arguments: [false, true])
+    @Test("changed size limits stay tiled, align at the top and reposition the right neighbor", arguments: [false, true])
     func constraints(width: Bool) {
         requireScenario(Scenario.run("changed \(width ? "width" : "height") limit") { s in
             let f = RailFixture(s, widths: [0.5, 0.25]), a = f.ids[0], b = f.ids[1]
@@ -58,7 +58,7 @@ import Testing
         })
     }
 
-    @Test("#17 E4; #17 E18: visible focus never redraws a manually moved height-constrained window")
+    @Test("visible focus never redraws a manually moved height-constrained window")
     func constrainedFocus() {
         requireScenario(Scenario.run("visible constrained window") { s in
             let f = RailFixture(s, widths: [0.25, 0.25]), a = f.ids[0]
@@ -73,7 +73,7 @@ import Testing
         })
     }
 
-    @Test("#17 E19: dialogs retain their frames, sheets follow parents, and native fullscreen never enters a rail")
+    @Test("dialogs retain their frames, sheets follow parents, and native fullscreen never enters a rail")
     func specialWindows() {
         requireScenario(Scenario.run("dialogs sheets fullscreen") { s in
             let f = RailFixture(s, widths: [0.3]), parent = f.ids[0]
@@ -102,7 +102,7 @@ import Testing
         })
     }
 
-    @Test("#17 E19: a mixed workspace restores its remembered dialog, including when a dialog closes while away", arguments: [false, true])
+    @Test("a mixed workspace restores its remembered dialog, including when a dialog closes while away", arguments: [false, true])
     func mixedWorkspace(closedWhileAway: Bool) {
         requireScenario(Scenario.run("mixed workspace dialog closed=\(closedWhileAway)") { s in
             let f = RailFixture(s, widths: [0.25, 0.25]), a = f.ids[0]
@@ -119,7 +119,7 @@ import Testing
         })
     }
 
-    @Test("#17 E19: native tab replacement keeps rail, slot, width and remembered focus", arguments: ["ordinary", "background", "suspended-neighbor", "suspended-root", "detached"])
+    @Test("native tab replacement keeps rail, slot, width and remembered focus", arguments: ["ordinary", "background", "suspended-neighbor", "suspended-root", "detached"])
     func nativeTabs(mode: String) {
         requireScenario(Scenario.run("native tab replacement \(mode)") { s in
             let f = RailFixture(s, widths: [0.25, 0.25]), a = f.ids[0], b = f.ids[1]
@@ -166,7 +166,7 @@ import Testing
         })
     }
 
-    @Test("#17 E19: an unpublished native successor finishes only the still-current presentation", arguments: [false, true])
+    @Test("an unpublished native successor finishes only the still-current presentation", arguments: [false, true])
     func unpublishedSuccessor(external: Bool) {
         requireScenario(Scenario.run("unpublished tab successor external=\(external)") { s in
             let f = RailFixture(s, widths: [0.25, 0.25]), a = f.ids[0]

@@ -140,7 +140,7 @@ that child QoS changes cannot lift. Interrupting verification removes the job.
 ### Resources
 
 `Resources.swift` keeps foundation E22's twenty default-config windows, workspace
-E36's twenty windows across ten workspaces, and rails E29's twenty windows
+E36's twenty windows across ten workspaces, and carousel E24's twenty windows
 across five workspaces and multiple rails. Each retains its setup and one-second
 settle, then observes one 20-second idle window from outside the app with
 `proc_pid_rusage` (`rusage_info_v0`). Interrupt wakeups must be at most 11;
@@ -417,16 +417,17 @@ deterministic policy layer and are not tagged in these files:
 
 | Journey | Journey example IDs |
 | --- | --- |
-| Enable | #1 E9; #2 E1; #17 E1 |
+| Enable | #1 E9; #2 E1 |
 | Switch | #2 E31, E32 |
 | Send | #2 E35 |
-| Rail scroll and elevator | #17 E24, E25 |
+| Rail scroll and elevator | Wiring regression (no policy example IDs) |
+| Carousel cards | #26 E15 |
 | Reload | File watcher wiring for save, atomic replace, chmod and delete |
-| Crash, quit and disable | #2 E28, E29, E34; #17 E3 |
+| Crash, quit and disable | #2 E28, E29, E34 |
 | CLI and config files | #1 E10, E12; #1 U-cli-args, U-private-transport, U-read-only-transport, U-stalled-clients, U-observer-identity, U-cpu-oracle, U-notification-retries |
 | Signing and permission | #1 E13, E15, E16 |
 
-Latency owns #2 U-switch-budget and #17 E28 in `Tests/Acceptance/Latency.swift`.
+Latency owns #2 U-switch-budget in `Tests/Acceptance/Latency.swift`.
 It records 100 workspace switches and 100 rail moves (50 scrolls and 50 elevator
 trips between apps). Each sample starts at the trusted fixture's real key
 `postedAt` and ends at the independent observer's `sampledAt` when destination frames, focus and CG
@@ -439,7 +440,7 @@ failed sample index. No window listings or titles reach the artifact.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2 and #17.
+This table is the maintained example-to-layer map for issues #1, #2 and #26.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -525,35 +526,46 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #2 E36 | R |
 | #2 E37 | X |
 | #2 U-switch-budget | L |
-| #17 E1 | J |
-| #17 E2 | P |
-| #17 E3 | J |
-| #17 E4 | P |
-| #17 E5 | P |
-| #17 E6 | P |
-| #17 E7 | P |
-| #17 E8 | P |
-| #17 E9 | P |
-| #17 E10 | P |
-| #17 E11 | P |
-| #17 E12 | P |
-| #17 E13 | P |
-| #17 E14 | P |
-| #17 E15 | P |
-| #17 E16 | P |
-| #17 E17 | P |
-| #17 E18 | P |
-| #17 E19 | P |
-| #17 E20 | P |
-| #17 E21 | P |
-| #17 E22 | P |
-| #17 E23 | P |
-| #17 E24 | J |
-| #17 E25 | J |
-| #17 E26 | X |
-| #17 E27 | P |
-| #17 E28 | L |
-| #17 E29 | R |
+| #26 E1 | P |
+| #26 E2 | P |
+| #26 E3 | P |
+| #26 E4 | P |
+| #26 E5 | P |
+| #26 E6 | P |
+| #26 E7 | P |
+| #26 E8 | P |
+| #26 E9 | P |
+| #26 E10 | P |
+| #26 E11 | P |
+| #26 E12 | P |
+| #26 E13 | P |
+| #26 E14 | P |
+| #26 E15 | J |
+| #26 E16 | P |
+| #26 E17 | P |
+| #26 E18 | P |
+| #26 E19 | P |
+| #26 E20 | P |
+| #26 E21 | X |
+| #26 E22 | P |
+| #26 E23 | P |
+| #26 E24 | R |
+| #26 E25 | P |
+
+<!-- Pending capture: #26 E21 -->
+
+E21 is registered for the motion capture phase; it deliberately has no executable
+capture yet. Only an explicit `Pending capture` marker can defer a mapped X row;
+P, J, L and R rows always require executable coverage. E15 owns J: the native
+cross-app stacking assertion takes precedence over the overlapping P range in
+the accepted spec. E14 and E16 own P; their untagged journey steps check wiring.
+
+During acceptance-first delivery, carousel policy assertions use `withKnownIssue`.
+Run `TESSEL_CAROUSEL_RED=1 swift test --filter Carousel` to expose every red
+assertion. The predecessor rails configuration bootstraps scenarios only until
+the carousel parser lands; it supplies no carousel decisions. E22 tests the new
+configuration directly. Remove expected-issue scopes as each example turns green.
+
 
 ## Deterministic checks (#24)
 

@@ -56,7 +56,7 @@ extension Acceptance {
                          Double(summary.p95Nanoseconds ?? 0) / 1e6, Double(summary.maxNanoseconds ?? 0) / 1e6))
         }
 
-        @Test("#2 U-switch-budget; #17 E28: 100 workspace switches and 100 rail moves")
+        @Test("#2 U-switch-budget: 100 workspace switches and 100 rail moves")
         func workspaceSwitchesAndRailMoves() throws {
             struct Artifact: Encodable {
                 let schemaVersion: Int

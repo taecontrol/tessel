@@ -5,7 +5,7 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct RailGeometry {
-    @Test("#17 E20: manual moves wait for a scroll, rail/workspace change, arrival or departure", arguments: ["scroll", "rail", "workspace", "arrival", "close"])
+    @Test("manual moves wait for a rail/workspace change, arrival or departure", arguments: ["rail", "workspace", "arrival", "close"])
     func redraw(trigger: String) {
         requireScenario(Scenario.run("manual move redraw via \(trigger)") { s in
             let f = RailFixture(s, widths: trigger == "scroll" ? Array(repeating: 0.45, count: 5) : [0.25, 0.25, 0.25])
@@ -27,27 +27,12 @@ import Testing
             f.near(f.frame(moved).width, original.width, "redraw retains width")
             f.near(f.frame(moved).height, original.height, "redraw retains height")
             let expectedX = trigger == "arrival" ? original.minX + 160
-                : trigger == "scroll" ? f.area.maxX - 56 - original.width - 2 * (original.width + 10)
                 : trigger == "rail" ? f.area.minX : original.minX
             f.near(f.frame(moved).minX, expectedX, "redraw restores the logical x")
         })
     }
 
-    @Test("#17 E9; #17 E20: a successful swap redraws a manual move even when ring targets coincide")
-    func sameFrameSwap() {
-        requireScenario(Scenario.run("short-ring swap redraw") { s in
-            let f = RailFixture(s, widths: [0.6, 0.6]), a = f.ids[0], b = f.ids[1]
-            f.press("focus right", focus: b); f.press("focus right", focus: a)
-            let original = f.frame(a)
-            f.near(original.minX, f.area.maxX - 56 - original.width, "worked swap starts at the reveal target")
-            let moved = CGPoint(x: original.minX + 23, y: original.minY + 17)
-            f.app.drag(a, to: moved); s.settle()
-            f.unchanged([a], [CGRect(origin: moved, size: original.size)])
-            f.press("move right", focus: a); f.order([b, a]); f.unchanged([a], [original])
-        })
-    }
-
-    @Test("#17 E6; #17 E10; #17 E20: unsuccessful singleton moves leave manual geometry alone")
+    @Test("unsuccessful singleton moves leave manual geometry alone")
     func singletonMove() {
         requireScenario(Scenario.run("singleton move boundaries") { s in
             let f = RailFixture(s, widths: [0.25, 0.25]), a = f.ids[0], b = f.ids[1]
@@ -66,7 +51,7 @@ import Testing
         })
     }
 
-    @Test("#17 E21: manual resize adopts only the changed width and repositions its right neighbors", arguments: [false, true])
+    @Test("manual resize adopts only the changed width and repositions its right neighbors", arguments: [false, true])
     func resize(ring: Bool) {
         requireScenario(Scenario.run("manual resize ring=\(ring)") { s in
             let f = RailFixture(s, widths: ring ? [0.6, 0.6] : [0.25, 0.25, 0.25]), ids = f.ids

@@ -3,7 +3,7 @@ import CoreGraphics
 import Ports
 import Assumptions
 
-package enum PositionAcceptance: String, CaseIterable, Sendable { case requested, rightEdgeStrip }
+package enum PositionAcceptance: String, CaseIterable, Sendable { case requested, rightEdgeStrip, screenEdges }
 package enum OffDisplayMembership: String, CaseIterable, Sendable { case included, omitted }
 package enum MinimizedRaiseReply: String, CaseIterable, Sendable { case success, cannotComplete }
 
@@ -16,6 +16,7 @@ package struct WindowSpec: Sendable {
     package var parent: UInt32?
     package var positionAcceptance: PositionAcceptance
     package var offDisplayMembership: OffDisplayMembership
+    package var closetHeightLoss: Double = 0
     package var minimizedRaiseReply: MinimizedRaiseReply
     package init(frame: CGRect = CGRect(x: 40, y: 60, width: 451, height: 400), subrole: String = "AXStandardWindow",
                  resizable: Bool = true, minimumSize: CGSize = CGSize(width: 1, height: 1),
@@ -96,6 +97,7 @@ package final class SimulatedMac: @unchecked Sendable {
                                   visibleFrame: CGRect(x: 0, y: 0, width: 1024, height: 737))
     var usedAssumptions: Set<Assumption> = []
     var foundation = FoundationState()
+    var motion = MotionState()
 
     struct AppState {
         let pid: Int32, alias: String, bundleID: String

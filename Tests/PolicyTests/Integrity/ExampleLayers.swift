@@ -21,9 +21,10 @@ enum ExampleLayers {
     struct Map {
         var layers: [String: Layer] = [:]
         var errors: [String] = []
+        var pendingCaptures: Set<String> = []
     }
     static let heading = "## Acceptance example layers (#24)"
-    private static let idPattern = #"#(?:1|2|17) (?:E[1-9][0-9]*|U-[a-z0-9]+(?:-[a-z0-9]+)*)(?![A-Za-z0-9_-])"#
+    private static let idPattern = #"#(?:1|2|26) (?:E[1-9][0-9]*|U-[a-z0-9]+(?:-[a-z0-9]+)*)(?![A-Za-z0-9_-])"#
 
     static func parse(_ document: String) -> Map {
         var result = Map()
@@ -33,6 +34,9 @@ enum ExampleLayers {
         var table = false
         for line in section.components(separatedBy: .newlines) {
             if line.hasPrefix("## ") { break }
+            if line.hasPrefix("<!-- Pending capture: "), line.hasSuffix(" -->") {
+                result.pendingCaptures.insert(String(line.dropFirst("<!-- Pending capture: ".count).dropLast(4)))
+            }
             if line == "| Example | Layer |" { table = true; continue }
             guard table, line.hasPrefix("|") else { continue }
             let cells = line.split(separator: "|", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
@@ -43,6 +47,7 @@ enum ExampleLayers {
             }
             if result.layers.updateValue(layer, forKey: cells[1]) != nil { result.errors.append("Duplicate mapped ID: \(cells[1])") }
         }
+        for id in result.pendingCaptures where result.layers[id] != .capture { result.errors.append("Only a mapped X example may defer its capture: \(id)") }
         if result.layers.isEmpty { result.errors.append("The example map is empty") }
         return result
     }
@@ -92,8 +97,8 @@ enum ExampleLayers {
         return nil
     }
 
-    static func missing(in map: [String: Layer], tags: [Tag]) -> [String] {
-        map.keys.filter { id in !tags.contains { $0.id == id && $0.layer == map[id] } }.sorted()
+    static func missing(in map: [String: Layer], tags: [Tag], pendingCaptures: Set<String> = []) -> [String] {
+        map.keys.filter { id in !(map[id] == .capture && pendingCaptures.contains(id)) && !tags.contains { $0.id == id && $0.layer == map[id] } }.sorted()
     }
     static func stray(in map: [String: Layer], tags: [Tag]) -> [String] {
         tags.compactMap { tag in
@@ -113,6 +118,12 @@ enum ExampleLayers {
         #expect(!ExampleLayers.parse(table + "| #2 E8 | J |\n").errors.isEmpty)
         #expect(!ExampleLayers.parse(table + "| #2 E9 | Q |\n").errors.isEmpty)
         #expect(!ExampleLayers.parse("No map").errors.isEmpty)
+        let pending = table + "| #26 E21 | X |\n<!-- Pending capture: #26 E21 -->\n"
+        let capture = ExampleLayers.parse(pending)
+        #expect(capture.errors.isEmpty && capture.pendingCaptures == ["#26 E21"])
+        #expect(ExampleLayers.missing(in: capture.layers, tags: []).contains("#26 E21"))
+        #expect(ExampleLayers.missing(in: capture.layers, tags: [], pendingCaptures: capture.pendingCaptures) == ["#2 E8"])
+        #expect(!ExampleLayers.parse(table + "<!-- Pending capture: #2 E8 -->\n").errors.isEmpty)
         let source = "// 🧶 @Test(\"#2 E99\")\n@Test(\"#2 E8; #2 E999: send\") func send() {}"
         let tags = ExampleLayers.tags(in: source, path: "Tests/PolicyTests/Scenarios/Send.swift")
         #expect(tags.map(\.id) == ["#2 E8", "#2 E999"])
@@ -143,7 +154,7 @@ enum ExampleLayers {
         let tags = try IntegritySources.files(in: "Tests").flatMap { ExampleLayers.tags(in: $0.source, path: $0.path) }
         let stray = ExampleLayers.stray(in: map.layers, tags: tags)
         #expect(stray.isEmpty, "\(stray.joined(separator: "\n"))")
-        let missing = ExampleLayers.missing(in: map.layers, tags: tags)
+        let missing = ExampleLayers.missing(in: map.layers, tags: tags, pendingCaptures: map.pendingCaptures)
         #expect(missing.isEmpty, "Mapped IDs without tests: \(missing.joined(separator: ", "))")
     }
 }

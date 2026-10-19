@@ -74,7 +74,7 @@ extension Acceptance {
                 let status = try #require(try harness.status().workspaces)
                 try #require(!status.enabled && status.reason == "experiment off")
             }
-            try step("#17 E1 rails off leaves rail hotkeys unregistered") {
+            try step("rails off leaves rail hotkeys unregistered") {
                 for enabled in [false, true] {
                     if enabled {
                         try desktop.configure(desktop.stack, layout: "stack")
@@ -224,7 +224,7 @@ extension Acceptance {
         @Test("rail scroll and elevator journey")
         func railScrollAndElevator() throws {
             let ids = try desktop.railSetup()
-            try step("#17 E24 CLI reports rail, slot, layout and nulls outside a rail") {
+            try step("CLI reports rail, slot, layout and nulls outside a rail") {
                 try desktop.post(kVK_ANSI_J, shift: true)
                 try desktop.expectFocus(ids[0])
                 try requireFinalState("the moved fixture rail and slot fields") {
@@ -248,30 +248,30 @@ extension Acceptance {
                 try fixture.command("close", ["key": "dialog"])
                 try desktop.expectFocus(ids[0])
             }
-            try step("real scroll hotkeys move the ring and focus its destination") {
+            try step("real scroll hotkeys reveal the next destination") {
                 try desktop.post(kVK_ANSI_K)
-                try desktop.expectFocus(ids[4])
-                let before = try #require(try desktop.window(ids[2])).frame
-                try desktop.post(kVK_ANSI_L)
-                try desktop.expectFocus(ids[1])
+                try desktop.activate(key: "w1")
+                let before = try #require(try desktop.window(ids[3])).frame
                 try desktop.post(kVK_ANSI_L)
                 try desktop.expectFocus(ids[2])
+                try desktop.post(kVK_ANSI_L)
+                try desktop.expectFocus(ids[3])
                 try requireFinalState("the scrolled destination fully visible at a changed position") {
                     let observation = try desktop.observe()
                     return observation.windows.contains {
-                        $0.id == ids[2] && !desktop.near($0.frame, before)
+                        $0.id == ids[3] && !desktop.near($0.frame, before)
                             && $0.frame[0] >= observation.area[0] + 9
                             && $0.frame[0] + $0.frame[2] <= observation.area[0] + observation.area[2] - 9
                     }
                 }
             }
-            try step("#17 E25 status item AX label tracks real elevator trips") {
+            try step("status item AX label tracks real elevator trips") {
                 try desktop.expectMenu("Workspace 1, rail 1 of 2")
                 try desktop.post(kVK_ANSI_J)
                 try desktop.expectFocus(ids[0])
                 try desktop.expectMenu("Workspace 1, rail 2 of 2")
                 try desktop.post(kVK_ANSI_K)
-                try desktop.expectFocus(ids[2])
+                try desktop.expectFocus(ids[3])
                 try desktop.expectMenu("Workspace 1, rail 1 of 2")
             }
         }

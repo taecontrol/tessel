@@ -3,7 +3,7 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct RailOrderingRegressions {
-    @Test("#2 E25; #17 E17: a queued raise never restores a window minimized while AXMain returns", arguments: [Layout.stack, .rails], MinimizedRaiseReply.allCases)
+    @Test("#2 E25: a queued raise never restores a window minimized while AXMain returns", arguments: [Layout.stack, .rails], MinimizedRaiseReply.allCases)
     func minimizeBetweenFocusWrites(_ layout: Layout, _ reply: MinimizedRaiseReply) {
         for writes in WriteOrder.allCases {
             requireScenario(Scenario.run("minimize between focus writes in \(layout), reply=\(reply)", writes: writes) { s in
@@ -30,7 +30,7 @@ import Testing
         }
     }
 
-    @Test("#17 E16: a gap redraw cannot discard a pending cross-app native selection")
+    @Test("a gap redraw cannot discard a pending cross-app native selection")
     func ownerReadSurvivesGapReload() {
         requireScenario(Scenario.run("owner revalidation across gap redraw", writes: .readsFirst) { s in
             let f = RailFixture(s, widths: [0.25]), a = f.ids[0]
@@ -49,7 +49,7 @@ import Testing
         })
     }
 
-    @Test("#2 E2; #17 E2: background discovery preserves an outstanding keyboard selection", arguments: [Layout.stack, .rails])
+    @Test("#2 E2: background discovery preserves an outstanding keyboard selection", arguments: [Layout.stack, .rails])
     func initialBackgroundReadPreservesKeyboardFocus(layout: Layout) {
         requireScenario(Scenario.run("initial background read across keyboard focus in \(layout)", writes: .readsFirst) { s in
             let f = RailFixture(s, widths: [0.25, 0.25]), a = f.ids[0], b = f.ids[1]

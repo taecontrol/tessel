@@ -105,7 +105,18 @@ extension SimulatedMac {
             restoreWindow(id, activating: apps[pid]?.activationPending != true)
             return windows[id]?.spec.minimizedRaiseReply == .cannotComplete ? .cannotComplete : .success
         }
-        focus(id, activating: apps[pid]?.activationPending != true)
+        if raising {
+            assume(.axRaiseAcrossApplications)
+            let activeWindow = front.flatMap { apps[$0]?.key }
+            focus(id, activating: false)
+            if front != pid, let activeWindow, zOrder.contains(activeWindow) {
+                zOrder.removeAll { $0 == id }
+                let index = zOrder.firstIndex(of: activeWindow)!
+                // The regular frontmost app keeps its window above a background
+                // AXRaise. Other background apps can still be reordered.
+                zOrder.insert(id, at: min(index + 1,zOrder.count))
+            }
+        } else { focus(id, activating: apps[pid]?.activationPending != true) }
         return .success
     }
 

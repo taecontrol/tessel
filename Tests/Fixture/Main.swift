@@ -3,6 +3,7 @@ import ApplicationServices
 import Darwin
 import Security
 import SwiftUI
+import WebKit
 
 @_silgen_name("_AXUIElementGetWindow")
 func fixtureWindowID(_ element: AXUIElement, _ id: UnsafeMutablePointer<CGWindowID>) -> AXError
@@ -89,6 +90,10 @@ final class Fixture: NSObject, NSApplicationDelegate {
         source.setEventHandler { [weak self] in self?.receive() }
         source.resume()
         self.source = source
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        _ = try? contracts.perform(["operation":"reset"])
     }
 
     func receive() {
@@ -453,6 +458,22 @@ final class Fixture: NSObject, NSApplicationDelegate {
         let label = NSTextField(labelWithString: "Generic fixture window")
         label.frame = NSRect(x: 30, y: 100, width: 350, height: 30)
         window.contentView?.addSubview(label)
+        if kind == "heavyText" {
+            let scroll = NSScrollView(frame: window.contentView!.bounds)
+            scroll.autoresizingMask = [.width,.height]
+            let text = NSTextView(frame: scroll.bounds)
+            text.isEditable = false
+            text.string = (1...4_000).map { "Invented fixture paragraph \($0): window movement redraws this text." }.joined(separator: "\n")
+            text.autoresizingMask = [.width]
+            scroll.documentView = text
+            window.contentView = scroll
+        }
+        if kind == "web" {
+            let web = WKWebView(frame: window.contentView!.bounds)
+            web.autoresizingMask = [.width,.height]
+            web.loadHTMLString("<html><body style='font:16px system-ui'>" + (1...300).map { "<p>Invented fixture row \($0)</p>" }.joined() + "</body></html>",baseURL:nil)
+            window.contentView = web
+        }
         if ["contentTabs", "emptyContentTabs", "manyContentTabs"].contains(kind) {
             let tabs = NSTabView(frame: NSRect(x: 20, y: 20, width: 420, height: 220))
             for index in 1...(kind == "manyContentTabs" ? 5 : 3) {

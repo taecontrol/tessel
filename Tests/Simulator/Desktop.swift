@@ -82,11 +82,21 @@ extension SimulatedMac {
         func hide(_ windows: [UInt32]) {
             mac.assume(.closetMoves)
             mac.scheduler.call("ClosetPort.hide windows=\(windows)")
+            mac.recordVisibility(windows, showing: false)
             move(windows, to: space)
         }
         func show(_ windows: [UInt32]) {
             mac.assume(.closetMoves)
             mac.scheduler.call("ClosetPort.show windows=\(windows)")
+            mac.assume(.closetAXIdentity)
+            mac.assume(.axRaiseAcrossApplications)
+            for id in windows where mac.motion.shortSizes.remove(id) != nil {
+                mac.assume(.closetSizeLoss)
+                if let height = mac.windows[id]?.spec.frame.height, let loss = mac.windows[id]?.spec.closetHeightLoss {
+                    mac.windows[id]?.spec.frame.size.height = max(1, height - loss)
+                }
+            }
+            mac.recordVisibility(windows, showing: true)
             move(windows, to: mac.active)
         }
         func stop(returning windows: [UInt32]) {

@@ -18,7 +18,7 @@ extension Acceptance {
             let footprintBytes: UInt64
         }
 
-        private func verifyIdleResources(_ example: String) throws {
+        private func verifyIdleResources(_ example: String, displayFramesBefore: UInt64? = nil) throws {
             let budget = try JSONDecoder().decode(Budget.self, from: Data(contentsOf: root.appending(path: "Tests/Acceptance/resource-budget.json")))
             let before = try resources(harness.appPID)
             print(String(format: "%@: start footprint %.2f MB (limit < %.2f MB)", example,
@@ -37,6 +37,18 @@ extension Acceptance {
             try #require(wakeups <= budget.interruptWakeups, "Interrupt wakeups exceeded the wakeup limit")
             try #require(cpu <= budget.cpuNanoseconds, "CPU time exceeded the CPU limit")
             try #require(after.footprintBytes < budget.footprintBytes, "End footprint must be below the footprint limit")
+            if let displayFramesBefore {
+                try #require(try developmentDisplayFrames() == displayFramesBefore, "The app must receive zero display frames while idle")
+            }
+        }
+
+        /// Fixture-only status instrumentation. This counter observes the app's
+        /// real display-link adapter, not the observer's sampling display link.
+        private func developmentDisplayFrames() throws -> UInt64 {
+            let reply = try harness.invoke("status", "--json")
+            let object = try JSONSerialization.jsonObject(with: reply.outputData) as? [String: Any]
+            let motion = try #require(object?["testMotion"] as? [String: Any], "Fixture-only status must expose testMotion display frame instrumentation")
+            return try #require((motion["displayFrames"] as? NSNumber)?.uint64Value)
         }
 
         @Test("#1 E22: idle resource budget") func e22TwentyIdleWindowsStayWithinWakeupCPUAndFootprintLimits() throws {
@@ -67,11 +79,12 @@ extension Acceptance {
             sleep(seconds: 1)
             try verifyIdleResources("E36")
         }
-        @Test("#17 E29: rails idle resource budget") func e29RailsAcrossWorkspacesKeepTheIdleResourceBudget() throws {
+        @Test("#26 E24: carousel receives zero idle display frames and keeps the resource budget") func carouselAcrossWorkspacesKeepsTheIdleResourceBudget() throws {
             try harness.reset()
-            try desktop.configure(desktop.rails, layout: "rails")
+            try desktop.configure("[experiments]\ncarousel = true\n", layout: "carousel")
+            let setupFramesStart = try developmentDisplayFrames()
             for index in 0..<20 {
-                let id = try fixture.open(key: "idle\(index)", ["widthFraction": 0.4])
+                let id = try fixture.open(kind: index.isMultiple(of: 2) ? "heavyText" : "web", key: "idle\(index)", ["widthFraction": 0.4])
                 try desktop.activate(key: "idle\(index)")
                 try desktop.expectFocus(id)
                 // Native focus can precede the catalog's new-window arrival.
@@ -99,7 +112,9 @@ extension Acceptance {
                 return rows.count == 20 && Set(rows.compactMap(\.workspace)).count == 5 && rows.contains { ($0.rail ?? 0) > 1 }
             }
             sleep(seconds: 1)
-            try verifyIdleResources("Rails E29")
+            let frames = try developmentDisplayFrames()
+            try #require(frames > setupFramesStart, "The display counter must increase during setup motion before it can prove idle zero frames")
+            try verifyIdleResources("Carousel E24", displayFramesBefore: frames)
         }
     }
 }
