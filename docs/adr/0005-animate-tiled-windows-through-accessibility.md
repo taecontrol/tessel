@@ -65,12 +65,13 @@ commands instant.
   compositor-only spring is unavailable under the measured process boundary.
 - Geometry, selection and CG ordering need distinct confirmation. Preparation
   can consume part of the configured motion duration; final AX completion is
-  measured independently of display delivery by native latency. Its former
-  instant-layout 200 ms allowance is retained for workspaces; carousel's total
-  is 280 ms including the intentional 80 ms motion. The same native journey
-  measured p95 145.595 ms at duration zero and 257.302 ms at duration 80.
-  Percentiles still cover 100 commands per kind, from key post to final visible
-  geometry, AX main/focus and CG visibility; animation time is not subtracted.
+  measured independently of display delivery by native latency. Both workspace
+  and carousel retain the 200 ms p95 allowance. The latency suite configures
+  carousel duration zero; E16/E17 prove animation timing deterministically.
+  A proposed 280 ms animated total based only on local measurements was
+  withdrawn during review because recalibration needs the spread on CI's
+  runner. Percentiles still cover 100 commands per kind, from key post to final
+  visible geometry, AX main/focus and CG visibility; no time is subtracted.
 - The private closet dependency remains isolated as in ADR-0002. Demand-driven
   animation adds no periodic idle work. Supported macOS changes must continue
   to satisfy the native contracts below.

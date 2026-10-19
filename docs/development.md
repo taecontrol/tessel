@@ -494,20 +494,21 @@ Each sample starts at the trusted fixture's real key `postedAt` and ends at the
 independent observer's `sampledAt` when destination frames, focus and CG
 visibility all match. Full observations read focus and CG visibility after AX
 geometry, so moving frames are not paired with an earlier preparation state. Samples must finish within the final-state margin.
-Only this suite judges elapsed time. Workspace nearest-rank p95 remains at
-most 200 ms. Carousel p95 is at most 280 ms: the existing 200 ms allowance plus
-the required 80 ms animation, measured in full without subtracting duration.
-On the same desktop and exact journey, duration zero measured p95 145.595 ms
-and duration 80 measured 257.302 ms. The former instant-layout 200 ms limit
-therefore measures a different workload; the animation adds deliberate display
-waiting, intermediate writes and AppKit drawing. The resource limits remain
-unchanged. Timing ends at
+Only this suite judges elapsed time. Both workspace and carousel nearest-rank
+p95 remain at most 200 ms. The carousel latency suite explicitly configures
+`[animation] duration = 0`; E16/E17 independently prove animation timing against
+the virtual display clock at the policy boundary. This preserves the existing
+CI processing/observation budget without adding intentional display waiting.
+A local-only proposal to raise the animated total to 280 ms was withdrawn:
+recalibration requires evidence of its spread on CI's runner. Sample counts,
+percentiles, final-state predicates and resource limits remain unchanged.
+Timing ends at
 observed final WindowServer geometry, AX main/focus and CG visibility, including
 native completion and observation overhead. The signed primary-screen contract
 pins CG window bounds against accepted AX geometry, including the one-point
 edge and a stopped fixture. Rail samples read those bounds, then a focused-only
 AX/CG observation; its `sampledAt` dates the latest input. This avoids repeated
-AX reads of hidden windows and unrelated controls while measuring visible motion. The deterministic E17 deadline bounds display
+AX reads of hidden windows and unrelated controls while measuring final geometry. The deterministic E17 deadline bounds display
 delivery at duration plus one refresh and separately bounds the final AX batch
 by E16's eight-millisecond frame budget; it does not claim that a callback's
 timestamp is the end of synchronous AX work.

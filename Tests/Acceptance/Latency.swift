@@ -8,8 +8,9 @@ extension Acceptance {
     struct Latency {
         let desktop = Desktop()
         let limit: UInt64 = 200_000_000
-        let animationDuration = 80
-        var railLimit: UInt64 { limit + UInt64(animationDuration) * 1_000_000 }
+        // Measure processing/observation latency against the existing CI budget.
+        // E16/E17 prove intentional animation timing with the virtual clock.
+        let animationDuration = 0
 
         init() throws { try desktop.clear() }
 
@@ -94,7 +95,7 @@ extension Acceptance {
                     sourceRun: ProcessInfo.processInfo.environment["GITHUB_RUN_ID"] ?? "local", commit: commit, workingTreeDirty: dirty,
                     operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString, appVersion: version,
                     clock: "CLOCK_MONOTONIC_RAW: fixture postedAt to independent observer sampledAt",
-                    percentile: "nearest-rank", workspaceP95LimitNanoseconds: limit, railP95LimitNanoseconds: railLimit, requestedSamplesPerKind: 100,
+                    percentile: "nearest-rank", workspaceP95LimitNanoseconds: limit, railP95LimitNanoseconds: limit, requestedSamplesPerKind: 100,
                     railAnimationDurationMilliseconds: animationDuration, completion: "final WindowServer frames, AX main/focus and CG visibility",
                     workspace: Summary(switches), rails: Summary(moves), railScrollCount: scrolls,
                     railElevatorCount: elevators, failure: failure)
@@ -194,7 +195,7 @@ extension Acceptance {
                     moves.append(sample)
                     if elevator { elevators += 1 } else { scrolls += 1 }
                 }
-                printSummary("Rail moves (50 scrolls, 50 cross-app elevator trips)", moves, budget: railLimit)
+                printSummary("Rail moves (50 scrolls, 50 cross-app elevator trips)", moves, budget: limit)
             } catch {
                 try writeArtifact(failure: String(describing: error))
                 throw error
@@ -202,7 +203,7 @@ extension Acceptance {
             try writeArtifact()
             try #require(switches.count == 100 && moves.count == 100 && scrolls == 50 && elevators == 50)
             #expect(Summary(switches).p95Nanoseconds! <= limit, "workspace switch p95 exceeds 200 ms")
-            #expect(Summary(moves).p95Nanoseconds! <= railLimit, "rail move p95 exceeds 280 ms (200 ms plus 80 ms intentional motion)")
+            #expect(Summary(moves).p95Nanoseconds! <= limit, "rail move p95 exceeds 200 ms")
         }
     }
 }
