@@ -240,7 +240,9 @@ struct Carousel {
         let j = p.slot + direction
         guard rail.tiles.indices.contains(j) else { return false }
         let x = geometry(rail)[p.slot].minX, other = rail.tiles[j].id
-        rail.expanded = nil; rail.tiles.swapAt(p.slot, j)
+        rail.expanded = nil
+        rail.acceptsInitialExpansion = false
+        rail.tiles.swapAt(p.slot, j)
         anchor(&rail, id: other, x: x); reveal(&rail)
         ws.rails[p.rail] = rail; workspaces[p.workspace] = ws
         return true

@@ -49,6 +49,25 @@ import Testing
         })
     }
 
+    @Test("late initial enumeration cannot re-expand after a reorder")
+    func lateInitialEnumerationAfterMove() {
+        requireScenario(Scenario.run("initial background read across keyboard reorder", writes: .readsFirst) { s in
+            let f = RailFixture(s, widths: [0.5, 0.5]), a = f.ids[0], b = f.ids[1]
+            f.tessel.configure(.off); s.settle()
+            let background = f.mac.launch()
+            let c = background.open(WindowSpec(), background: true)
+            f.tessel.configure(.carousel)
+            f.tessel.press("move right")
+            let held = f.mac.pause(after: .call("AccessibilityPort.copy AXHidden \(f.app.alias) pid=\(f.app.pid)"))
+            if case .paused = held {} else { s.expect("the keyboard presentation is outstanding: \(held)", false) }
+            let independent = f.mac.scheduler.run()
+            if case .paused = independent {} else { s.expect("the background snapshot runs while keyboard AX is held: \(independent)", false) }
+            s.expect("the background application's initial window is published", f.tessel.windows.contains { $0.id == c })
+            s.settle(); f.focus(a); f.order([b, a, c])
+            f.near(f.frame(a).maxX, f.area.maxX, "keyboard reorder retains its complete target")
+        })
+    }
+
     @Test("#2 E2: background discovery preserves an outstanding keyboard selection", arguments: [Layout.stack, .carousel])
     func initialBackgroundReadPreservesKeyboardFocus(layout: Layout) {
         requireScenario(Scenario.run("initial background read across keyboard focus in \(layout)", writes: .readsFirst) { s in
