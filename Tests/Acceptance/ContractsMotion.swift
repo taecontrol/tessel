@@ -27,10 +27,17 @@ extension Acceptance.Contracts {
         try desktop.activate()
         try native("pointerStart")
         try native("pointerPress", ["id": id])
-        try requireFinalState("the independent mouse-down monitor receives the fixture press") {
+        var observed: NativeContractReply?
+        let delivered = try finalState {
             let facts = try native("pointerSamples")
-            return facts.pointerPresses == 1 && facts.pointerEvents == ["press", "drag"]
+            observed = facts
+            guard let events = facts.pointerEvents, let firstDrag = events.firstIndex(of: "drag"), firstDrag > 0 else { return false }
+            // The native contract promises a press before dragging, not an
+            // exclusive callback count. macOS can report two press callbacks.
+            return facts.pointerPresses == firstDrag && events.prefix(firstDrag).allSatisfy { $0 == "press" }
+                && events.dropFirst(firstDrag).allSatisfy { $0 == "drag" }
         }
+        try #require(delivered, "every press must precede dragging; events=\(observed?.pointerEvents ?? []), presses=\(observed?.pointerPresses ?? -1)")
     }
     @Test("ax-vertical-clamping: AX keeps the top below the menu bar and 32 points visible at the bottom", contract(.axVerticalClamping))
     func axVerticalClamping() throws {

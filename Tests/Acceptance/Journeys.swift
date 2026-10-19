@@ -226,7 +226,7 @@ extension Acceptance {
             let ids = try desktop.railSetup()
             try step("CLI reports rail, slot, layout and nulls outside a rail") {
                 try desktop.post(kVK_ANSI_J, shift: true)
-                try desktop.expectFocus(ids[0])
+                try desktop.expectShown(ids[0])
                 try requireFinalState("the moved fixture rail and slot fields") {
                     let rows = try harness.rows()
                     let rail = try harness.status().workspaces?.rail
@@ -246,10 +246,17 @@ extension Acceptance {
                 let leaked = result.output.contains("\"title\"") || result.output.contains("Fixture dialog")
                 try #require(hasNulls && !leaked, "floating fixtures expose null rail/slot and no titles")
                 try fixture.command("close", ["key": "dialog"])
-                try desktop.expectFocus(ids[0])
+                try desktop.expectShown(ids[0])
             }
             try step("real scroll hotkeys reveal the next destination") {
                 try desktop.post(kVK_ANSI_K)
+                try requireFinalState("the upper rail has landed and the singleton has hidden before external selection") {
+                    let observation = try desktop.observe()
+                    return !observation.visibleIDs.contains(ids[0]) && desktop.focused(ids[1], in: observation)
+                        && observation.windows.filter { observation.visibleIDs.contains($0.id) }.allSatisfy {
+                            abs($0.frame[1] - observation.area[1] - 10) <= 1
+                        }
+                }
                 try desktop.activate(key: "w1")
                 let before = try #require(try desktop.window(ids[3])).frame
                 try desktop.post(kVK_ANSI_L)
