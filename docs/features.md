@@ -45,7 +45,7 @@ parked in a strip. TileMyMac uses Paneru's engine and exposes numbered rows.
 | Nested groups, step in and out | Nesting by hand | Nested spaces with a camera | Stacked rows (experimental, Paneru) | — | Feasible | #5 |
 | Zoom into one window | Full screen | Frame window | Fill the screen | Tiled full screen | Feasible | #4 |
 | Directional focus, move, swap | Yes | — (mouse) | Left and right | Yes | Feasible | #3 |
-| Resize from the keyboard | Smart resize | — | Cycle ½, ⅔, full | Three step sizes | Feasible | Idea |
+| Resize from the keyboard | Smart resize | — | Cycle ½, ⅔, full | Three step sizes | Feasible | Carousel: cycle ⅓, ½, ⅔, full (#26) |
 | Balance sizes | Yes | — | — | — | Feasible | Idea |
 | Numbered workspaces | Yes, emulated | Nested spaces | Native Spaces plus virtual rows parked in a strip | 1–10 | Hidden Space or off-screen parking | Hidden Space (#2) |
 | Send window to workspace | Yes | — | Native Spaces and virtual rows | With or without following | Feasible | #2 |
@@ -59,7 +59,7 @@ parked in a strip. TileMyMac uses Paneru's engine and exposes numbered rows.
 | Per-app rules (workspace, floating) | Yes | Exclude an app | Yes (Paneru) | Yes | Feasible | Idea |
 | Gaps | Yes | — | — | Yes, with a toggle | Feasible | #2 |
 | Active window border | — | — | — | Gradient border | Needs its own overlay | Idea |
-| Layout animations | — | 460 ms, drawn from snapshots | — | Bezier curves | Hard: moving windows through Accessibility is slow | Idea |
+| Layout animations | — | 460 ms, drawn from snapshots | — | Bezier curves | AX geometry stepped on demand-driven display frames | Carousel: 80 ms spring, configurable; vertical cards (#26, ADR 0005) |
 | Overview of everything | — | Yes | — | — | Needs Screen Recording | Idea |
 | Saved views | — | Nine | — | Saved window width | Feasible | Idea |
 | Layout survives restarts | — | Yes | Yes (Paneru) | Per workspace | Feasible | Idea |
@@ -68,7 +68,7 @@ parked in a strip. TileMyMac uses Paneru's engine and exposes numbered rows.
 | Modifier plus drag to move or resize | — | Plain dragging | Swipe to slide the strip | Yes | Event tap | No: keyboard only |
 | Binding modes | Yes | — | — | — | Feasible | Idea |
 | CLI, socket, events | Yes | URL commands | — | hyprctl | Feasible | CLI (#1); events: Idea |
-| Layout chosen per workspace | — | — | — | Yes | Feasible | #3, #17 |
+| Layout chosen per workspace | — | — | — | Yes | Feasible | #3 |
 | Center a window | — | — | Yes | — | Feasible | Idea |
 | Copy a rule for the focused window | — | — | Yes (Paneru) | — | Feasible | Idea |
 | Native macOS tabs as one window | — | — | Yes (Paneru) | — | Feasible | #2 |

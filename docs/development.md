@@ -85,7 +85,8 @@ With no arguments, `scripts/verify` runs every real-system suite except the
 disposable-runner permission steps. `--journeys` includes those steps on CI;
 `--permission` selects just those steps. The signing-and-permission journey has
 separate signing and permission tests so the default can skip only the latter. Captures
-run only with `TESSEL_CAPTURE_WORKSPACES=1`. Select a suite as above or pass a test
+run only with their opt-in flag: `TESSEL_CAPTURE_WORKSPACES=1` for AppKit views
+or `TESSEL_CAPTURE_CAROUSEL=1` for E21 geometry recordings. Select a suite or pass a test
 name fragment, such as `scripts/verify switchWorkspaces`. Empty selections fail
 before a GUI session starts. The script sets `TESSEL_ACCEPTANCE=1`; a direct
 `TESSEL_ACCEPTANCE=1 swift build --build-tests` compiles these suites without
@@ -378,8 +379,9 @@ The status item shows the workspace number and one bar per rail.
 Local layout changes use a demand-driven NSScreen display link and the
 prototype's critically damped spring. Retargeting starts from geometry confirmed
 by each AX worker, reading back interrupted writes once their lane drains.
-An unanswered read skips that tile's intermediate guesses. Slow apps retain at most one intermediate frame; the final
-frame is always written, read back and retried. Resize ordering accounts for
+An unanswered read skips that tile's intermediate guesses. Slow apps retain at
+most one intermediate frame; the final frame is always written, read back and
+retried. Resize ordering accounts for
 the window's current screen position; clipped geometry never becomes an
 intrinsic app width limit. Returning tiles are sized on screen before motion.
 Workspace switches and sends stay instant.
@@ -390,7 +392,9 @@ Downward cards focus the incoming selection before raising its other windows.
 Preparation confirms native focus and CG order before moving frames; bounded
 focus readback retries never repeat activation or AXRaise.
 Upward cards retain the leaving selection until it has moved down and hidden.
-A sibling raise restores AXMain without another raise or app activation.
+The active key is raised last; sibling raises restore AXMain without another
+raise or app activation. An active app can keep its window above a raised
+background window, so activation and ordering are confirmed separately.
 Horizontally entering and leaving tiles keep at least one point on screen;
 leaving tiles hide after motion. Size writes happen after showing a tile.
 
@@ -405,9 +409,47 @@ Completely off-screen tiles live in the closet; they are shown before sizing.
 Disabling the experiment or quitting returns managed windows inside the desktop.
 Crash recovery uses the same closet boundary without persisted membership.
 
+### Native motion contracts and E21 capture
+
+[ADR 0005](adr/0005-animate-tiled-windows-through-accessibility.md) records why
+live geometry uses AX and vertical motion uses cards. The signed contracts in
+`ContractsMotion.swift` pin vertical menu-bar/32-point clamps, horizontal
+one-point edges/40-point snapback, AXMain/AXRaise across apps, retained closet
+handles and lossy hidden size writes, resize anchoring at the current x,
+display-frame demand, Reduce Motion notifications and pointer-down delivery.
+The timeout contract also proves that configuring AX messaging timeouts is local
+client state, even while the target app is stopped; it consumes no simulated
+remote-delivery time. The simulator declares the corresponding assumption IDs;
+these native facts must be verified before changing its behavior.
+
+Record the E1, E3, E7, E10 and E14 journeys at both 80 and 400 ms with:
+
+```sh
+TESSEL_CAPTURE_CAROUSEL=1 scripts/verify captureCarouselMotionForOwnerReview
+```
+
+The independent signed observer samples each fixture's WindowServer rectangle
+and CG order on delivered display callbacks, plus answered AX focus. It validates
+fixture identities and discovers the E10 arrival through fixture-owned CG IDs.
+The primary-screen contract pins CG bounds against accepted AX geometry, even
+while the fixture is stopped. Missing CG descriptions use short AX reads. No Screen
+Recording, screenshots, real titles or app contents are captured. Every sample
+carries its display timestamp and raw-clock start/end around the reads;
+callback gaps and read spans remain visible. Batches drain within the bounded
+socket buffer and the capture requires a complete callback sequence.
+
+Outputs are ignored `.build/captures/carousel/carousel-motion.json` and
+`.build/captures/carousel/index.html`. The self-contained HTML replays measured
+rectangles with invented numbered titles, provides frame stepping, a geometry
+timeline and filmstrips, and holds samples without interpolation. The fixed
+recording window includes bounce and a settled tail; final states use the usual
+5 s margin. Only latency judges speed. Copy the HTML and JSON to the owner's
+review destination when requested. E21 remains pending until the owner compares
+it with the accepted prototype; generating the recording does not accept it.
+
 ## Journeys and latency (#24)
 
-`scripts/verify --journeys` runs eight journeys. The signing-and-permission
+`scripts/verify --journeys` runs nine journeys. The signing-and-permission
 journey includes the disposable-runner-only permission steps under the guard
 described above. Foundation E11 (CLI failure) and E14 (permission restart) prove
 their timing decisions in the deterministic layer. The same journey wiring
@@ -439,13 +481,35 @@ deterministic policy layer and are not tagged in these files:
 
 Latency owns #2 U-switch-budget in `Tests/Acceptance/Latency.swift`.
 It records 100 workspace switches and 100 rail moves (50 scrolls and 50 elevator
-trips between apps). Each sample starts at the trusted fixture's real key
-`postedAt` and ends at the independent observer's `sampledAt` when destination frames, focus and CG
-visibility all match. Samples must finish within the final-state margin.
-Only this suite judges elapsed time: each kind's nearest-rank p95 must be at
-most 200 ms. It prints p50, p95 and maximum, and writes `.work/latency.json` with
-the samples, counts, percentiles and nonpersonal run metadata. CI uploads that
-artifact even on failure; incomplete runs retain their partial counts and the
+trips between apps). Four half-width windows traverse the complete pairs
+[1|2] → [2|3] → [3|4], then back, without wrapping. Crossing an already complete
+pair to select its outward tile is setup outside the measured scroll. The
+second rail contains a full-area singleton in another app. Every measured
+scroll advances a stop; every elevator changes apps.
+Each sample starts at the trusted fixture's real key `postedAt` and ends at the
+independent observer's `sampledAt` when destination frames, focus and CG
+visibility all match. Full observations read focus and CG visibility after AX
+geometry, so moving frames are not paired with an earlier preparation state. Samples must finish within the final-state margin.
+Only this suite judges elapsed time. Workspace nearest-rank p95 remains at
+most 200 ms. Carousel p95 is at most 280 ms: the existing 200 ms allowance plus
+the required 80 ms animation, measured in full without subtracting duration.
+On the same desktop and exact journey, duration zero measured p95 145.595 ms
+and duration 80 measured 257.302 ms. The former instant-layout 200 ms limit
+therefore measures a different workload; the animation adds deliberate display
+waiting, intermediate writes and AppKit drawing. The resource limits remain
+unchanged. Timing ends at
+observed final WindowServer geometry, AX main/focus and CG visibility, including
+native completion and observation overhead. The signed primary-screen contract
+pins CG window bounds against accepted AX geometry, including the one-point
+edge and a stopped fixture. Rail samples read those bounds, then a focused-only
+AX/CG observation; its `sampledAt` dates the latest input. This avoids repeated
+AX reads of hidden windows and unrelated controls while measuring visible motion. The deterministic E17 deadline bounds display
+delivery at duration plus one refresh and separately bounds the final AX batch
+by E16's eight-millisecond frame budget; it does not claim that a callback's
+timestamp is the end of synchronous AX work.
+It prints p50, p95 and maximum, and writes `.work/latency.json` (schema 2) with
+the samples, counts, percentiles, configured animation duration, completion
+definition and nonpersonal run metadata. CI uploads that artifact even on failure; incomplete runs retain their partial counts and the
 failed sample index. No window listings or titles reach the artifact.
 
 ## Acceptance example layers (#24)
@@ -562,17 +626,14 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #26 E24 | R |
 | #26 E25 | P |
 
-<!-- Pending capture: #26 E21 -->
-
-E21 is registered for the motion capture phase; it deliberately has no executable
-capture yet. Only an explicit `Pending capture` marker can defer a mapped X row;
-P, J, L and R rows always require executable coverage. E15 owns J: the native
-cross-app stacking assertion takes precedence over the overlapping P range in
+E21 has an opt-in executable capture in `CapturesCarousel.swift`; its visual
+review is pending for the owner. All mapped rows now have executable coverage.
+E15 owns J: the native cross-app stacking assertion takes precedence over the overlapping P range in
 the accepted spec. E14 and E16 own P; their untagged journey steps check wiring.
 
 All deterministic carousel examples run directly, including cards, spring
-frames, interrupts, Reduce Motion, edge safety and bounce. E21 remains the
-explicit pending owner-reviewed capture. Retained membership and AX-retry
+frames, interrupts, Reduce Motion, edge safety and bounce. E21's recording is
+owner-reviewed visual evidence. Retained membership and AX-retry
 scenarios use duration zero; CarouselMotion proves the animated path. E4's
 command matrix checks settled invariants at duration zero, while E16 checks
 intermediate frames at 80 and 400 ms.

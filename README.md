@@ -25,7 +25,9 @@ Option+K/J moves between rows. Add Shift to move the window instead.
 Option+R cycles widths through one third, one half, two thirds and full.
 Short rows stretch to fill the area, and an end window can expand without
 changing its nominal width. Fully off-screen windows use the same hidden Space.
-Carousel enables workspaces by itself.
+Carousel enables workspaces by itself. Layout changes use an 80 ms spring through
+Accessibility; `[animation] duration` accepts 0–1000 ms, and macOS Reduce Motion
+makes them instant. Workspace switches and sends remain instant.
 
 Build from source with Xcode 27 using [the development guide](docs/development.md).
 
