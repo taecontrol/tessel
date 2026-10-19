@@ -121,8 +121,10 @@ extension Acceptance {
                 desktop.harness.otherFixtures.append(elevatorApp)
                 let area = try desktop.observe().area
                 let width = (area[2] - 30) / 2
+                // Settle the default motion before changing to the measured
+                // duration below; that write must be a real config revision.
                 let ids = try desktop.railSetup(Array(repeating: width / (area[2] - 20), count: 5),
-                    firstIn: elevatorApp, duration: 0)
+                    firstIn: elevatorApp)
                 let top = Array(ids.dropFirst())
                 func landed(pair: Int?, focus: UInt32, in observation: Observation, frames: [UInt32: [Double]]? = nil) -> Bool {
                     guard desktop.focused(focus, in: observation) else { return false }
