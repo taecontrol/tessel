@@ -274,5 +274,22 @@ extension Acceptance.Contracts {
         try #require(desktop.near(state.frame, [frame[0], full[1] + full[3] - frame[1] - frame[3], frame[2], frame[3]]))
         try #require(desktop.near(axVisible, [visible[0], full[1] + full[3] - visible[1] - visible[3], visible[2], visible[3]]))
         try #require(desktop.near(try desktop.observe().area, axVisible))
+        // This is the capture's independent frame source, including a busy
+        // app: WindowServer metadata must match accepted AX geometry.
+        for x in [10.0, full[2] - 1] {
+            try #require(try write(id, "AXPosition", [x, axVisible[1] + 10]) == 0)
+            let accepted = try window(id).frame
+            try requireFinalState("CG window bounds match accepted AX top-origin geometry") {
+                try native("cgFrames").cgFrames?[String(id)].map { desktop.near($0, accepted) } == true
+            }
+        }
+        let accepted = try window(id).frame
+        kill(fixture.pid, SIGSTOP)
+        do {
+            defer { kill(fixture.pid, SIGCONT) }
+            let cgFrame = try #require(try native("cgFrames").cgFrames?[String(id)])
+            try #require(desktop.near(cgFrame, accepted), "WindowServer geometry remains observable while the fixture cannot answer AX")
+        }
+
     }
 }

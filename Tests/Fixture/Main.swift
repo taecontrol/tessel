@@ -515,17 +515,18 @@ final class Fixture: NSObject, NSApplicationDelegate {
         // busy app is asked again rather than allowed to consume that deadline.
         // Setup and one-shot reads wait for a briefly busy app to answer.
         let timeout: Float = focusedOnly ? 0.02 : FixtureProbe.observationTimeout
-        let front = FixtureProbe.frontmostPID(timeout: timeout)
-        let listed = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
-        let visible = Set(listed.compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
-        let visibleIDs = listed.compactMap { item -> UInt32? in
+        var front = FixtureProbe.frontmostPID(timeout: timeout)
+        var listed = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
+        var visible = Set(listed.compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
+        var visibleIDs = listed.compactMap { item -> UInt32? in
             guard let owner = item[kCGWindowOwnerPID as String] as? NSNumber, pids.contains(owner.int32Value) else { return nil }
             return (item[kCGWindowNumber as String] as? NSNumber)?.uint32Value
         }
-        let order = Dictionary(uniqueKeysWithValues: listed.enumerated().compactMap { index, item -> (UInt32, Int)? in
+        var order = Dictionary(uniqueKeysWithValues: listed.enumerated().compactMap { index, item -> (UInt32, Int)? in
             (item[kCGWindowNumber as String] as? NSNumber).map { ($0.uint32Value, index) }
         })
         var result: [[String: Any]] = []
+        var owners: [UInt32: pid_t] = [:], mains: [UInt32: Bool] = [:]
         for pid in pids {
             // A command can change frontmost apps after that early snapshot.
             // Never block a destination check on the now-hidden source's AX.
@@ -561,6 +562,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
                     _ = AXValueGetValue(fields[1] as! AXValue, .cgSize, &size)
                 }
                 let main = fields[2] as? Bool ?? false
+                owners[id] = pid; mains[id] = main
                 result.append(["id": id, "frame": [position.x, position.y, size.width, size.height],
                                "visible": visible.contains(id), "main": main && front == pid,
                                "focused": focusedID == id && front == pid,
@@ -616,6 +618,38 @@ final class Fixture: NSObject, NSApplicationDelegate {
                FixtureProbe.hasSignature(finder.processIdentifier, identifier: "com.apple.finder"),
                let focused = FixtureProbe.value(application, kAXFocusedWindowAttribute), CFGetTypeID(focused) == AXUIElementGetTypeID() {
                 desktop = FixtureProbe.value(focused as! AXUIElement, kAXSubroleAttribute) == nil
+            }
+        }
+        if !focusedOnly {
+            // A multi-window AX read spans several display frames. Pair its
+            // geometry with live focus and CG membership taken afterwards,
+            // just like the motion probe, rather than an earlier preparation
+            // snapshot which would force another full observation.
+            front = FixtureProbe.frontmostPID(timeout: timeout)
+            var focusedID: UInt32 = 0
+            if let front, pids.contains(front), FixtureProbe.isFixture(front) {
+                let application = AXUIElementCreateApplication(front)
+                AXUIElementSetMessagingTimeout(application, timeout)
+                if let focused = FixtureProbe.value(application, kAXFocusedWindowAttribute),
+                   CFGetTypeID(focused) == AXUIElementGetTypeID() {
+                    _ = fixtureWindowID(focused as! AXUIElement, &focusedID)
+                }
+            }
+            listed = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
+            visible = Set(listed.compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
+            visibleIDs = listed.compactMap { item -> UInt32? in
+                guard let owner = item[kCGWindowOwnerPID as String] as? NSNumber, pids.contains(owner.int32Value) else { return nil }
+                return (item[kCGWindowNumber as String] as? NSNumber)?.uint32Value
+            }
+            order = Dictionary(uniqueKeysWithValues: listed.enumerated().compactMap { index, item -> (UInt32, Int)? in
+                (item[kCGWindowNumber as String] as? NSNumber).map { ($0.uint32Value, index) }
+            })
+            for index in result.indices {
+                guard let id = result[index]["id"] as? UInt32 else { continue }
+                result[index]["visible"] = visible.contains(id)
+                result[index]["order"] = order[id] ?? Int.max
+                result[index]["main"] = mains[id] == true && owners[id] == front
+                result[index]["focused"] = id == focusedID && owners[id] == front
             }
         }
         let frontmostFixture = front.map { pids.contains($0) } ?? false

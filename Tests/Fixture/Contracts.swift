@@ -75,9 +75,11 @@ final class FixtureContracts: NSObject {
         case "activate":
             NSRunningApplication(processIdentifier: pid)?.activate()
             return [:]
+        case "cgFrames":
+            return ["cgFrames": Dictionary(uniqueKeysWithValues: fixtureCGFrames([pid]).map { (String($0.key), $0.value.frame) })]
         case "motionStart": try motionProbe.start(command); return motionProbe.facts()
         case "motionStop": motionProbe.stop(); return motionProbe.facts()
-        case "motionSamples": return motionProbe.facts()
+        case "motionSamples": return motionProbe.facts(draining: command["drain"] as? Bool == true)
         case "motionSetPreference":
             guard let value = command["enabled"] as? Bool else { throw FixtureContractError("Reduce Motion needs a boolean") }
             try motionProbe.setReduceMotion(value); return motionProbe.preferences()

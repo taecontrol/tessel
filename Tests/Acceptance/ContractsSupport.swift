@@ -10,12 +10,17 @@ func contract(_ assumption: Assumption) -> MacAssumption { MacAssumption(assumpt
 
 struct NativeContractReply: Codable {
     struct MotionSample: Codable {
-        struct Window: Codable { let id: UInt32; let valid: Bool; let frame: [Double]; let visible: Bool }
+        struct Window: Codable { let id: UInt32; let valid: Bool; let frame: [Double]; let visible: Bool; let source: String? }
         let at: Double
+        let frame: Int?
+        let startedAt: Double?
+        let sampledAt: Double?
+        let focused: UInt32?
         let windows: [Window]
         let order: [UInt32]
         let frontmost: Int32
     }
+    let cgFrames: [String: [Double]]?
     let motionSamples: [MotionSample]?
     let motionFrameCount: Int?
     let pointerPresses: Int?
