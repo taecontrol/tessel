@@ -54,7 +54,7 @@ final class FixtureMotionProbe: NSObject {
                 throw FixtureContractError("motion sampling accepts signed fixture targets only")
             }
             let application = AXUIElementCreateApplication(pid)
-            AXUIElementSetMessagingTimeout(application, 0.05)
+            AXUIElementSetMessagingTimeout(application, FixtureProbe.observationTimeout)
             var value: CFTypeRef?
             guard AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &value) == .success,
                   let windows = value as? [AXUIElement] else { throw FixtureContractError("motion targets have no AX window list") }
@@ -62,7 +62,7 @@ final class FixtureMotionProbe: NSObject {
                 guard let element = windows.first(where: { var number: UInt32 = 0; return fixtureWindowID($0, &number) == .success && number == id }) else {
                     throw FixtureContractError("motion target was not a signed fixture AX window")
                 }
-                AXUIElementSetMessagingTimeout(element, 0.01)
+                AXUIElementSetMessagingTimeout(element, FixtureProbe.observationTimeout)
                 targets.append((id,pid,element))
             }
         }
