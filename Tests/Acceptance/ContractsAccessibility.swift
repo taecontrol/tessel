@@ -116,16 +116,24 @@ extension Acceptance.Contracts {
         let id = try fixture.open(kind: "maxWidth")
         _ = try window(id)
         try #require(try write(id, "AXSize", [650, 400]) == 0)
-        try requireFinalState("the maximum width clamps an otherwise successful AXSize write") {
+        // A timeout names the last observed AX frame so a CI-only failure is diagnosable.
+        var last = "no observation"
+        func observe() throws -> NativeContractReply.Window? {
             let state = try native().roots.first { $0.id == id }
-            return state.map { $0.frame.count == 4 && abs($0.frame[2] - 480) <= 1 && abs($0.frame[3] - 400) <= 1 } == true
+            last = state.map { "AX frame \($0.frame), frame error \($0.frameError)" } ?? "window \(id) absent from AXWindows"
+            return state
+        }
+        func requireObserved(_ expectation: String, _ predicate: () throws -> Bool) throws {
+            do { try requireFinalState(expectation, predicate) } catch { throw HarnessError("\(error); last observation: \(last)") }
+        }
+        try requireObserved("the maximum width clamps an otherwise successful AXSize write") {
+            try observe().map { $0.frame.count == 4 && abs($0.frame[2] - 480) <= 1 && abs($0.frame[3] - 400) <= 1 } == true
         }
         try fixture.command("limits", ["key": "window", "minimum": [300.0, 200.0]])
         let initial = try #require(try fixture.command("ping").frames?["window"])
         try #require(try write(id, "AXSize", [100, 100]) == 0)
-        try requireFinalState("the minimum content size clamps the AXSize write") {
-            let state = try native().roots.first { $0.id == id }
-            return state.map { $0.frame.count == 4 && $0.frame[2] >= 300 && $0.frame[3] >= 200
+        try requireObserved("the minimum content size clamps the AXSize write") {
+            try observe().map { $0.frame.count == 4 && $0.frame[2] >= 300 && $0.frame[3] >= 200
                 && $0.frame[2] <= initial[2] && $0.frame[3] <= initial[3] } == true
         }
     }
