@@ -14,6 +14,15 @@ import Testing
             f.press("alt-l"); f.focus(id)
             s.expect("focus-only commands do not repeat an accepted size within the one-point tolerance", f.mac.geometryWrites.isEmpty)
         })
+        requireCarousel(Scenario.run("stable subpoint AX minimum readback") { s in
+            let f = CarouselFixture(s), b = f.ids[1]
+            f.press("alt-l")
+            let id = f.open(minimum: f.width(0.5) + 0.5)
+            f.mac.clearMotionHistory()
+            f.press("alt-h"); f.focus(b)
+            f.press("alt-l"); f.focus(id)
+            s.expect("focus-only commands do not rewrite an accepted half-point minimum", f.mac.geometryWrites.isEmpty)
+        })
     }
 
     @Test("#26 E7: width cycling uses gap-aware presets, anchors the left edge and exits expansion")
@@ -67,6 +76,17 @@ import Testing
             }
             f.focus(id)
         })
+        if !maximum {
+            requireCarousel(Scenario.run("learned minimum survives a smaller area") { s in
+                let f = CarouselFixture(s, duration: 0)
+                f.press("alt-l")
+                let minimum = f.area.width * 0.62, id = f.open(minimum: minimum)
+                f.mac.clearMotionHistory()
+                f.tessel.changeConfig(CarouselFixture.config + "[animation]\nduration = 0\n[gaps]\nouter = 300\n"); s.settle()
+                let sizes = f.mac.geometryWrites.filter { $0.window == id && $0.attribute == .size }.compactMap { $0.requested.size?.width }
+                s.expect("gap reload never requests a previously rejected small width", !sizes.isEmpty && sizes.allSatisfy { $0 >= minimum - 1 })
+            })
+        }
         if maximum {
             requireCarousel(Scenario.run("a constrained edge bounces without trying rejected expansion") { s in
                 let f = CarouselFixture(s, presets: [0.5, 0.5], duration: 0), b = f.ids[1]

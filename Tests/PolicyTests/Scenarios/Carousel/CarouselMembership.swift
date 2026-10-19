@@ -1,3 +1,4 @@
+import CoreGraphics
 import Simulator
 import Testing
 @testable import Policy
@@ -90,6 +91,16 @@ import Testing
             s.expect("floating windows receive no carousel geometry writes", !f.mac.geometryWrites.contains { $0.window == dialog })
             f.near(f.frame(dialog).width, original.width, "floating width stays")
             f.near(f.frame(dialog).minX, original.minX, "floating position stays")
+        })
+        requireCarousel(Scenario.run("workspace send retains a custom nominal width") { s in
+            let f = CarouselFixture(s, duration: 0), b = f.ids[1]
+            f.press("alt-l")
+            let mouse = f.area.width * 0.4
+            f.app.resize(b, to: CGSize(width: mouse, height: f.area.height)); s.settle()
+            f.press("alt-shift-2")
+            _ = f.open()
+            let expected = (f.area.width - 10) * mouse / (mouse + f.width(0.5))
+            f.near(f.frame(b).width, expected, "sent nominal width survives temporary singleton stretch")
         })
         requireCarousel(Scenario.run("floating windows stay outside a wall bounce") { s in
             let f = CarouselFixture(s), a = f.ids[0]
