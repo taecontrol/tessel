@@ -211,9 +211,16 @@ extension Acceptance.Contracts {
             try requireFinalState("the notification fixture enters native fullscreen") {
                 try native().focused?.fullscreen == true
             }
-            sleep(seconds: 0.1)
-            let fullscreen = try #require(try native("events").events)
-            try #require(fullscreen.contains { $0.name == "AXWindowResized" && $0.id == id }, "fullscreen must reach the resize-state revalidation path")
+            // Production revalidates the notified element by AX equality with
+            // its retained handle; a window ID lookup can fail mid-transition.
+            var fullscreen: [NativeContractReply.Event] = []
+            let resized = try finalState {
+                fullscreen = try native("events").events ?? []
+                return fullscreen.contains { $0.name == "AXWindowResized" && $0.registered == true && $0.mainThread }
+            }
+            let described = fullscreen.map { "\($0.name) id=\($0.id ?? 0) idError=\($0.idError ?? 0) registered=\($0.registered.map(String.init) ?? "nil")" }
+            try #require(resized, "fullscreen must reach the resize-state revalidation path for the registered window: \(described)")
+            try #require(fullscreen.allSatisfy { $0.idError != 0 || $0.id == id }, "a resolved window ID must name the registered window: \(described)")
             try fixture.command("fullscreen", ["key": kind])
             entered = false
         }

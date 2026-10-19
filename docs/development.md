@@ -436,6 +436,10 @@ live geometry uses AX and vertical motion uses cards. The signed contracts in
 one-point edges/40-point snapback, AXMain/AXRaise across apps, retained closet
 handles and lossy hidden size writes, resize anchoring at the current x,
 display-frame demand, Reduce Motion notifications and pointer-down delivery.
+`ax-notifications` attributes each notification by AX equality with the handle
+it registered, as the catalog does during motion; a window ID lookup on the
+notified element can fail mid-fullscreen with cannotComplete, so the observer
+records that error rather than an ID.
 The timeout contract also proves that configuring AX messaging timeouts is local
 client state, even while the target app is stopped; it consumes no simulated
 remote-delivery time. The simulator declares the corresponding assumption IDs;

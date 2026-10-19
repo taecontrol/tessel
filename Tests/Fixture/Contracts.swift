@@ -17,6 +17,8 @@ final class FixtureContracts: NSObject {
     private var captured: [String: CFTypeRef] = [:]
     private var observer: AXObserver?
     private var observedPID: pid_t = 0
+    /// The window handle a `watch` registered, compared with each notified element.
+    private var watched: AXUIElement?
     private var events: [[String: Any]] = []
     private var lifecycle: [[String: Any]] = []
     private var knownProcesses = Set<pid_t>()
@@ -158,6 +160,7 @@ final class FixtureContracts: NSObject {
         case "watch":
             stopObserving()
             observedPID = pid
+            watched = command["id"] == nil ? nil : try retained(command, pid: pid)
             var created: AXObserver?
             let status = AXObserverCreate(pid, { _, element, name, context in
                 guard let context else { return }
@@ -215,7 +218,12 @@ final class FixtureContracts: NSObject {
         let application = AXUIElementCreateApplication(observedPID)
         AXUIElementSetMessagingTimeout(application, FixtureProbe.observationTimeout)
         let focused = read(application, kAXFocusedWindowAttribute), focus = self.element(focused.value)
-        events.append(["name": name, "id": id(element), "mainThread": Thread.isMainThread,
+        // A window ID lookup can fail on the notified element mid-transition;
+        // record the error and the element's identity separately from the ID.
+        var number: UInt32 = 0
+        let idError = fixtureWindowID(element, &number)
+        events.append(["name": name, "id": number, "idError": idError.rawValue,
+                       "registered": watched.map { CFEqual($0, element) } as Any? ?? NSNull(), "mainThread": Thread.isMainThread,
                        "focusedID": focus.map(id) as Any? ?? NSNull(), "focusedError": focused.error.rawValue,
                        "minimized": read(element, kAXMinimizedAttribute).value as? Bool as Any? ?? NSNull()])
     }
@@ -251,6 +259,7 @@ final class FixtureContracts: NSObject {
         if let observer { CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes) }
         observer = nil
         observedPID = 0
+        watched = nil
     }
 
     private func liveMovedWindows() -> [UInt32] {

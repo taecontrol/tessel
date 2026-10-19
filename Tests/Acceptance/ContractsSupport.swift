@@ -52,6 +52,9 @@ struct NativeContractReply: Codable {
     struct Event: Codable {
         let name: String
         let id: UInt32?
+        let idError: Int32?
+        /// Whether the notified element equals the handle `watch` registered.
+        let registered: Bool?
         let pid: Int32?
         let knownPID: Int32?
         let mainThread: Bool
