@@ -686,13 +686,15 @@ private struct FixedWidthFixture: SwiftUI.App {
     }
 }
 
-// The independent oracle reads only this repository's fixture. It never reads titles.
-enum FixtureProbe {
-    @MainActor private static var processCodes: [pid_t: SecCode] = [:]
+/// Signature validation for the code objects one thread owns. The main actor
+/// and the motion sampler thread each keep their own cache.
+struct FixtureCodes {
+    static let fixture = "com.taecontrol.tessel.fixture"
+    private var processCodes: [pid_t: SecCode] = [:]
 
     /// LaunchServices can temporarily omit live processes during activation.
     /// Validate the running code's signature instead of trusting that cache.
-    @MainActor static func hasSignature(_ pid: pid_t, identifier: String) -> Bool {
+    mutating func hasSignature(_ pid: pid_t, identifier: String) -> Bool {
         guard let code = runningCode(pid) else { return false }
         var requirement: SecRequirement?
         guard SecRequirementCreateWithString(("identifier \"" + identifier + "\"") as CFString, [], &requirement) == errSecSuccess,
@@ -704,9 +706,9 @@ enum FixtureProbe {
         return valid
     }
 
-    @MainActor private static func runningCode(_ pid: pid_t) -> SecCode? {
+    private mutating func runningCode(_ pid: pid_t) -> SecCode? {
         if let code = processCodes[pid] { return code }
-        if let code = auditBoundCode(pid) {
+        if let code = Self.auditBoundCode(pid) {
             processCodes = processCodes.filter { kill($0.key, 0) == 0 }
             if processCodes.count >= 32 { processCodes.removeAll() }
             processCodes[pid] = code
@@ -736,8 +738,17 @@ enum FixtureProbe {
         guard SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributeAudit: audit as CFData] as CFDictionary, [], &code) == errSecSuccess else { return nil }
         return code
     }
+}
 
-    @MainActor static func isFixture(_ pid: pid_t) -> Bool { hasSignature(pid, identifier: "com.taecontrol.tessel.fixture") }
+// The independent oracle reads only this repository's fixture. It never reads titles.
+enum FixtureProbe {
+    @MainActor private static var codes = FixtureCodes()
+
+    @MainActor static func hasSignature(_ pid: pid_t, identifier: String) -> Bool {
+        codes.hasSignature(pid, identifier: identifier)
+    }
+
+    @MainActor static func isFixture(_ pid: pid_t) -> Bool { hasSignature(pid, identifier: FixtureCodes.fixture) }
 
     /// A timed-out AX read means the app did not answer, not that a window is
     /// absent or unfocused. The system-wide focused-application read is also

@@ -78,16 +78,28 @@ extension Acceptance.Journeys {
                 }
                 _ = started
                 defer { _ = try? harness.observer.command("contract",["operation":"motionStop","pid":fixture.pid]) }
+                // The observer samples on its own display-link thread. Drain
+                // it while waiting so every frame fits the bounded reply.
+                var samples: [NativeContractReply.MotionSample] = []
+                @MainActor func drain(_ operation: String = "motionSamples") throws -> NativeContractReply {
+                    let reply = try #require(try harness.observer.command("contract",["operation":operation,"pid":fixture.pid,"drain":true]).contract)
+                    samples += reply.motionSamples ?? []
+                    return reply
+                }
                 try desktop.post(key)
-                try desktop.expectFocus(destination)
+                try requireFinalState("fixture \(destination) visible, main and focused") {
+                    _ = try drain()
+                    return try desktop.focused(destination, in: desktop.observe(focusedOnly: true))
+                }
                 try requireFinalState("the card lands at the area top and its old rail is hidden") {
+                    _ = try drain()
                     let observation = try desktop.observe(), area = observation.area
                     let shown = key == kVK_ANSI_J ? bottom : top, hidden = key == kVK_ANSI_J ? top : bottom
                     return shown.allSatisfy { id in observation.windows.contains { $0.id == id && $0.visible && abs($0.frame[1] - area[1] - 10) <= 1 } }
                         && hidden.allSatisfy { !observation.visibleIDs.contains($0) }
                 }
-                let reply = try #require(try harness.observer.command("contract",["operation":"motionStop","pid":fixture.pid]).contract)
-                let samples = try #require(reply.motionSamples)
+                let reply = try drain("motionStop")
+                try #require(reply.motionFrameCount == samples.count,"the observer must retain every delivered display frame; frames=\(reply.motionFrameCount ?? -1), samples=\(samples.count)")
                 let area = try desktop.observe().area
                 let overlap = samples.filter { sample in
                     top.contains { sample.order.contains($0) } && bottom.contains { sample.order.contains($0) }

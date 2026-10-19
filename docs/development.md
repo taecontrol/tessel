@@ -441,6 +441,12 @@ focus is read before geometry and CG order afterward, so a slow focus answer
 cannot pair earlier frames with later stacking. Missing CG metadata still
 falls back to AX; an unanswered read remains invalid.
 
+The display link runs on the observer's own sampler thread, never on the main
+thread that serves observation commands. A full observation waits on AX replies
+from fixtures that are busy with tessel's motion writes, and such commands have
+held the main thread for over 300 ms in the middle of a card. E15 drains the
+samples while it waits and requires one sample per delivered display callback.
+
 Record the E1, E3, E7, E10 and E14 journeys at both 80 and 400 ms with:
 
 ```sh
