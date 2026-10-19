@@ -246,6 +246,11 @@ extension Acceptance {
                 let leaked = result.output.contains("\"title\"") || result.output.contains("Fixture dialog")
                 try #require(hasNulls && !leaked, "floating fixtures expose null rail/slot and no titles")
                 try fixture.command("close", ["key": "dialog"])
+                // AppKit focuses the singleton within close, so native focus
+                // proves nothing about tessel. Until tessel retires the dialog,
+                // the next key still applies to it: Up from a floating window
+                // is previous in arrival order, the last upper-rail tile.
+                try requireFinalState("tessel retired the closed dialog") { try harness.row(dialog) == nil }
                 try desktop.expectShown(ids[0])
             }
             try step("real scroll hotkeys reveal the next destination") {
