@@ -82,7 +82,10 @@ extension SimulatedMac {
             guard let handle = handle(element, operation: "setMessagingTimeout \(seconds)s") else { return .cannotComplete }
             guard mac.scheduler.isActive else { return .cannotComplete }
             handle.timeout = seconds
-            finish(handle, operation: "setMessagingTimeout", status: .success)
+            // The signed hung-app contract proves this is client-side state,
+            // not a request/reply to the target app. Only remote calls below
+            // consume the model's AX delivery cost.
+            mac.scheduler.reply("AccessibilityPort.setMessagingTimeout reply \(handle.name) success", cost: 0)
             return .success
         }
         func copy(_ attribute: AXAttribute, of element: AXElement) -> AXResult<AXValue> {

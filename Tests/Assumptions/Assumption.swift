@@ -68,7 +68,7 @@ package enum Assumption: String, CaseIterable, Sendable {
         case .axFocus: "AXFocusedWindow identifies key focus and AXMain the main root; sheets report attributeUnsupported for AXMain, and making a root main or raising it may select it."
         case .axNotifications: "AX notifications arrive on the main lane after the native operation, with focus/main notification order allowed to vary."
         case .axSubscriptions: "Observers register per-element notifications, retain equal element identity, and stop delivering after removal."
-        case .axMessagingTimeout: "AX calls to a hung app fail with cannotComplete after the handle's messaging timeout."
+        case .axMessagingTimeout: "Timeout configuration is client-side and succeeds while the target app is stopped; remote AX calls to a hung app fail with cannotComplete after the handle's messaging timeout."
         case .axReadDelivery: "An AX reply describes state captured by that call, even when delivery happens later."
         case .transientWindowLists: "AXWindows may omit handles, expose zero IDs, fail or change during transitions, including a temporary nonresizable display-sized AXUnknown root with AXFullScreen false and creation/destruction notifications during native fullscreen."
         case .closedWindowHandles: "On macOS 27, a closed AppKit window's retained AX handle returns illegalArgument with CG ID 0, while attribute reads return invalidUIElement, even when the NSWindow is retained."

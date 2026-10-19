@@ -189,15 +189,18 @@ extension Acceptance.Contracts {
         try #require(try native("events").events?.contains { $0.name == "AXWindowMoved" } == false)
     }
 
-    @Test("ax-messaging-timeout: hung fixture reads report cannotComplete", contract(.axMessagingTimeout))
+    @Test("ax-messaging-timeout: timeout configuration is local and hung reads report cannotComplete", contract(.axMessagingTimeout))
     func axMessagingTimeout() throws {
         let id = try fixture.open()
         _ = try window(id)
         kill(fixture.pid, SIGSTOP)
         do {
             defer { kill(fixture.pid, SIGCONT) }
-            let result = try native("timeout", ["id": id, "seconds": 0.05])
-            try #require(result.result == 0 && result.readError == -25204)
+            for seconds in [0.002, 0.05] {
+                let result = try native("timeout", ["id": id, "seconds": seconds])
+                try #require(result.result == 0, "timeout configuration succeeds without a reply from the stopped app")
+                try #require(result.readError == -25204, "the subsequent remote AX read needs the app to answer")
+            }
         }
         try requireFinalState("the resumed fixture answers AX again") { try native("retained", ["id": id]).window?.roleError == 0 }
     }

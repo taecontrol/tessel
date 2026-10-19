@@ -164,20 +164,23 @@ struct Desktop {
         return (a, b)
     }
 
-    func railSetup(_ widths: [Double] = Array(repeating: 0.45, count: 5), firstIn firstSession: FixtureSession? = nil) throws -> [UInt32] {
+    func railSetup(_ widths: [Double] = Array(repeating: 0.45, count: 5), firstIn firstSession: FixtureSession? = nil, duration: Int = 80) throws -> [UInt32] {
         let ids = try widths.enumerated().map { index, width in
             let session = index == 0 ? firstSession ?? fixture : fixture
             return try session.open(key: "w\(index)", ["widthFraction": width])
         }
         try activate(firstSession, key: "w0")
         try requireFinalState("every rail setup window listed") { Set(try harness.rows().map(\.id)) == Set(ids) }
-        try configure(carousel, layout: "carousel")
-        try expectFocus(ids[0])
+        try configure(carousel + "[animation]\nduration = \(duration)\n", layout: "carousel")
+        try expectShown(ids[0])
         try requireFinalState("initial rail sizing and membership") {
             let observation = try observe(), rows = try harness.rows()
             return ids.enumerated().allSatisfy { index, id in
                 rows.contains { $0.id == id && $0.rail == 1 && $0.slot == index + 1 }
-                    && observation.windows.contains { $0.id == id && abs($0.frame[3] - (observation.area[3] - 20)) <= 1 }
+                    // Hidden tiles defer sizing until their next on-screen reveal.
+                    && (!observation.visibleIDs.contains(id) || observation.windows.contains {
+                        $0.id == id && abs($0.frame[3] - (observation.area[3] - 20)) <= 1
+                    })
             }
         }
         return ids

@@ -70,6 +70,8 @@ extension Acceptance {
                 let percentile: String
                 let p95LimitNanoseconds: UInt64
                 let requestedSamplesPerKind: Int
+                let animationDurationMilliseconds: Int
+                let completion: String
                 let workspace: Summary
                 let rails: Summary
                 let railScrollCount: Int
@@ -83,11 +85,12 @@ extension Acceptance {
             var switches: [UInt64] = [], moves: [UInt64] = []
             var scrolls = 0, elevators = 0
             func writeArtifact(failure: String? = nil) throws {
-                let artifact = Artifact(schemaVersion: 1, measuredAt: measuredAt,
+                let artifact = Artifact(schemaVersion: 2, measuredAt: measuredAt,
                     sourceRun: ProcessInfo.processInfo.environment["GITHUB_RUN_ID"] ?? "local", commit: commit, workingTreeDirty: dirty,
                     operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString, appVersion: version,
                     clock: "CLOCK_MONOTONIC_RAW: fixture postedAt to independent observer sampledAt",
                     percentile: "nearest-rank", p95LimitNanoseconds: limit, requestedSamplesPerKind: 100,
+                    animationDurationMilliseconds: 80, completion: "final AX frames, focus and CG visibility",
                     workspace: Summary(switches), rails: Summary(moves), railScrollCount: scrolls,
                     railElevatorCount: elevators, failure: failure)
                 let path = root.appending(path: ".work/latency.json")
@@ -110,46 +113,66 @@ extension Acceptance {
                 try desktop.clear()
                 let elevatorApp = try FixtureSession(directory: desktop.harness.directory, number: 1)
                 desktop.harness.otherFixtures.append(elevatorApp)
-                let ids = try desktop.railSetup(firstIn: elevatorApp)
-                try desktop.post(kVK_ANSI_J, shift: true)
-                try desktop.expectFocus(ids[0])
-                try requireFinalState("the latency setup's second rail") { try desktop.harness.row(ids[0])?.rail == 2 }
-                try desktop.post(kVK_ANSI_K)
-                try desktop.expectFocus(ids[4])
-                try desktop.post(kVK_ANSI_L)
-                try desktop.expectFocus(ids[1])
-                try desktop.post(kVK_ANSI_L)
-                try desktop.expectFocus(ids[2])
-                try desktop.post(kVK_ANSI_J)
-                try desktop.expectFocus(ids[0])
                 let area = try desktop.observe().area
-                let width = try #require(try desktop.window(ids[0])).frame[2]
-                let step = width + 10, right = area[0] + area[2] - 10 - 56 - width
+                let width = (area[2] - 30) / 2
+                let ids = try desktop.railSetup(Array(repeating: width / (area[2] - 20), count: 5),
+                    firstIn: elevatorApp, duration: 0)
+                let top = Array(ids.dropFirst())
+                func landed(pair: Int?, focus: UInt32, in observation: Observation) -> Bool {
+                    guard desktop.focused(focus, in: observation) else { return false }
+                    let shown = pair.map { [top[$0], top[$0 + 1]] } ?? [ids[0]]
+                    return ids.allSatisfy { id in
+                        guard let slot = shown.firstIndex(of: id) else { return !observation.visibleIDs.contains(id) }
+                        let frame = [area[0] + 10 + Double(slot) * (width + 10), area[1] + 10,
+                                     pair == nil ? area[2] - 20 : width, area[3] - 20]
+                        return observation.visibleIDs.contains(id) && observation.windows.contains {
+                            $0.id == id && $0.visible && desktop.near($0.frame, frame)
+                        }
+                    }
+                }
+                try desktop.post(kVK_ANSI_J, shift: true)
+                try requireFinalState("the latency setup's settled singleton second rail") {
+                    try desktop.harness.row(ids[0])?.rail == 2
+                        && landed(pair: nil, focus: ids[0], in: desktop.observe())
+                }
+                try desktop.post(kVK_ANSI_K)
+                try desktop.activate(key: "w1")
+                try desktop.post(kVK_ANSI_L)
+                try requireFinalState("the latency setup's first complete half-width pair") {
+                    try landed(pair: 0, focus: top[1], in: desktop.observe())
+                }
+                try desktop.post(kVK_ANSI_J)
+                try requireFinalState("the latency setup returns to its second rail") {
+                    try landed(pair: nil, focus: ids[0], in: desktop.observe())
+                }
+                try desktop.configure(desktop.carousel + "[animation]\nduration = 80\n", layout: "carousel")
+                var pair = 0
+                var topFocus = top[1]
                 for index in 0..<100 {
                     let phase = index % 4
+                    let direction = (index / 4).isMultiple(of: 2) ? 1 : -1
                     let elevator = phase == 0 || phase == 3
-                    let slot = (1 + (index / 4) * 2 + (elevator ? 0 : phase)) % 4
-                    let target = phase == 3 ? ids[0] : ids[slot + 1]
-                    let sample = try measure(elevator ? "Rail elevator" : "Rail scroll", index: index,
-                        post: { try desktop.post(phase == 0 ? kVK_ANSI_K : phase == 3 ? kVK_ANSI_J : kVK_ANSI_L) }) { observation in
-                            guard desktop.focused(target, in: observation) else { return false }
-                            if phase == 3 {
-                                return observation.windows.contains {
-                                    $0.id == ids[0] && desktop.near($0.frame, [area[0] + 10, area[1] + 10, width, area[3] - 20])
-                                } && Set(ids.dropFirst()).isDisjoint(with: observation.visibleIDs)
+                    let horizontal = direction > 0 ? kVK_ANSI_L : kVK_ANSI_H
+                    if phase == 1 {
+                        // Cross the already complete pair outside measurement.
+                        // Both measured horizontal commands then advance a stop.
+                        topFocus = top[pair + (direction > 0 ? 1 : 0)]
+                        if try !desktop.focused(topFocus, in: desktop.observe()) {
+                            try desktop.post(horizontal)
+                            try requireFinalState("the outward complete tile selected without scrolling") {
+                                try landed(pair: pair, focus: topFocus, in: desktop.observe())
                             }
-                            // Worked four-window ring: focus at the reveal edge, then its
-                            // next, opposite and previous neighbors.
-                            let offsets = [0.0, step, -2 * step, -step]
-                            return ids.dropFirst().enumerated().allSatisfy { position, id in
-                                let x = right + offsets[(position - slot + 4) % 4]
-                                let visible = x + width > area[0] && x < area[0] + area[2]
-                                guard observation.visibleIDs.contains(id) == visible else { return false }
-                                guard visible else { return true }
-                                return observation.windows.contains {
-                                    $0.id == id && desktop.near($0.frame, [x, area[1] + 10, width, area[3] - 20])
-                                }
-                            } && !observation.visibleIDs.contains(ids[0])
+                        }
+                    }
+                    if !elevator {
+                        pair += direction
+                        topFocus = top[pair + (direction > 0 ? 1 : 0)]
+                    }
+                    let target = phase == 3 ? ids[0] : topFocus
+                    let expectedPair: Int? = phase == 3 ? nil : pair
+                    let sample = try measure(elevator ? "Carousel elevator" : "Carousel scroll", index: index,
+                        post: { try desktop.post(phase == 0 ? kVK_ANSI_K : phase == 3 ? kVK_ANSI_J : horizontal) }) {
+                            landed(pair: expectedPair, focus: target, in: $0)
                         }
                     moves.append(sample)
                     if elevator { elevators += 1 } else { scrolls += 1 }

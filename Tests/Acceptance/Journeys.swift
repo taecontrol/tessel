@@ -287,7 +287,6 @@ extension Acceptance {
             }
             try step("atomic replacement reloads the file watcher and rail layout") {
                 let revision = try harness.status().config.revision
-                let width = try #require(try desktop.window(window)).frame[2]
                 let replacement = harness.configFile.appendingPathExtension("new")
                 try Data((desktop.carousel + "[gaps]\nouter = 11\n").utf8).write(to: replacement)
                 try #require(rename(replacement.path, harness.configFile.path) == 0)
@@ -296,7 +295,7 @@ extension Acceptance {
                     return status.config.revision > revision && status.workspaces?.layout == "carousel"
                         && status.workspaces?.gaps.outer == 11 && observation.windows.contains {
                             $0.id == window && desktop.near($0.frame, [observation.area[0] + 11, observation.area[1] + 11,
-                                width, observation.area[3] - 22])
+                                observation.area[2] - 22, observation.area[3] - 22])
                         }
                 }
             }

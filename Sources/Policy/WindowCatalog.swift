@@ -623,7 +623,8 @@ private final class AppWindows: @unchecked Sendable {
     }
 
     /// Geometry-only frames have a short timeout and no retry queue. Mouse
-    /// presses invalidate their token; the final batch reads back and retries.
+    /// presses invalidate their token. The final batch uses the normal timeout
+    /// for its writes/readback; brief native work must not become a 100 ms retry.
     func writeMotion(_ writes: [UInt32: CarouselAnimator.Write], final: Bool,
                      completion: @escaping @MainActor @Sendable ([UInt32: CGRect]) -> Void) {
         let token = presentationLock.withLock { presentation }
@@ -660,12 +661,12 @@ private final class AppWindows: @unchecked Sendable {
             for id in ids {
                 guard let window = elementsByID[id], let fact = facts.first(where: { $0.id == id }),
                       !hidden, !fact.minimized, !fact.fullscreen else { continue }
-                if !motionTimeouts.contains(id) || failures > 0 {
-                    ax.setMessagingTimeout(window, seconds: failures > 0 ? 0.05 : 0.002)
-                    if failures > 0 { motionTimeouts.remove(id) }
+                if !motionTimeouts.contains(id) || final {
+                    ax.setMessagingTimeout(window, seconds: final ? 0.05 : 0.002)
+                    if final { motionTimeouts.remove(id) }
                     else { motionTimeouts.insert(id) }
                 }
-                guard isNativeFront(window, id: id, timeout: failures > 0 ? 0.05 : 0.002) else { continue }
+                guard isNativeFront(window, id: id, timeout: final ? 0.05 : 0.002) else { continue }
                 eligible.append(id)
             }
             for id in eligible {
