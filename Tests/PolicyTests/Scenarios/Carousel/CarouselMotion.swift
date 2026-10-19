@@ -151,6 +151,19 @@ import Testing
             s.expect("ordinary native-tab notifications are observed after motion is disabled", f.tessel.windows.contains { $0.id == a && $0.tabs == 2 })
             s.expect("disabled motion requests no more display frames", f.mac.displaySamples.count == count)
         })
+        requireCarousel(Scenario.run("stack replaces an active carousel") { s in
+            let f = CarouselFixture(s, duration: 400)
+            f.press("alt-l"); f.mac.clearMotionHistory()
+            f.tessel.pressKey("alt-l")
+            var deliveredAtSwitch = 0
+            s.after(milliseconds: 30, "switch to stack during motion") {
+                f.tessel.configure(.stack)
+                deliveredAtSwitch = f.mac.displaySamples.count
+            }
+            s.settle()
+            s.expect("the new layout is stack", f.tessel.status.layout == "stack")
+            s.expect("no stale display callback survives the layout switch", f.mac.displaySamples.count == deliveredAtSwitch)
+        })
     }
 
     @Test("retargeting before the first tick uses the frame staged by a prior card reveal")
@@ -208,7 +221,7 @@ import Testing
             let f = CarouselFixture(s), b = f.ids[1], c = f.ids[2]
             f.press("alt-l")
             let other = f.mac.launch()
-            _ = other.open(WindowSpec(frame: CGRect(x: 40, y: 60, width: 849, height: 1064), positionAcceptance: .screenEdges))
+            let d = other.open(WindowSpec(frame: CGRect(x: 40, y: 60, width: 849, height: 1064), positionAcceptance: .screenEdges))
             s.settle(); f.select(b)
             other.busy(forMilliseconds: 300)
             f.mac.clearMotionHistory()
@@ -219,6 +232,27 @@ import Testing
             }
             s.settle()
             f.focus(c)
+            f.pair(d, c, focused: c)
+        })
+        requireCarousel(Scenario.run("hung final motion retries stop") { s in
+            let f = CarouselFixture(s), b = f.ids[1], c = f.ids[2]
+            f.press("alt-l")
+            let other = f.mac.launch()
+            let d = other.open(WindowSpec(frame: CGRect(x: 40, y: 60, width: 849, height: 1064), positionAcceptance: .screenEdges))
+            s.settle(); f.select(b)
+            other.hang()
+            let traceMark = f.mac.scheduler.trace.count, start = f.mac.scheduler.now
+            f.tessel.pressKey("alt-l"); f.tessel.pressKey("alt-l")
+            s.settle(); f.focus(c)
+            let writes = f.mac.scheduler.trace.dropFirst(traceMark).filter {
+                $0.contains("AccessibilityPort.set AXPosition=") && $0.contains("window \(d) \(other.alias)")
+            }.compactMap { Int($0.dropFirst().prefix { $0.isNumber }) }.filter { $0 >= start + 80 }
+            s.expect("one final attempt and four bounded retries, actual \(writes)", writes.count == 5)
+            let stopped = f.mac.scheduler.trace.count
+            f.mac.scheduler.main.after(milliseconds: 5_000) {}; s.settle()
+            s.expect("a permanently hung tile gets no later geometry attempts", !f.mac.scheduler.trace.dropFirst(stopped).contains {
+                $0.contains("AccessibilityPort.set AXPosition=") && $0.contains("window \(d) \(other.alias)")
+            })
         })
     }
 
@@ -320,6 +354,7 @@ import Testing
             s.expect("only the focused tile changes size", sizes.count >= 2 && sizes.allSatisfy { $0.window == a && !$0.hidden })
             for frame in Set(sizes.map(\.frame)) {
                 s.expect("one size write per changing tile per frame", sizes.filter { $0.frame == frame }.count == 1)
+                s.expect("a width-changing tile receives one position in frame \(frame)", writes.filter { $0.window == a && $0.attribute == .position && $0.frame == frame }.count == 1)
                 let work = writes.filter { $0.frame == frame }.map(\.at)
                 s.expect("width frame AX budget fits the screen refresh", (work.max() ?? 0) - (work.min() ?? 0) + 1 <= 8)
             }
@@ -416,6 +451,18 @@ import Testing
             f.near(f.frame(a).width, f.area.width * 0.4, "the interrupted mouse width wins")
             f.press("alt-l")
             f.near(f.frame(a).width, f.area.width * 0.4, "the next command preserves the adopted mouse width")
+        })
+        requireCarousel(Scenario.run("mouse takes an outstanding width batch") { s in
+            let f = CarouselFixture(s), b = f.ids[1]
+            f.press("alt-l")
+            f.tessel.pressKey("alt-r")
+            let held = f.mac.pause(after: .call("AccessibilityPort.copy AXPosition window \(b) \(f.app.alias)"))
+            if case .paused = held {} else { s.expect("the width read is outstanding: \(held)", false) }
+            var dragged = f.frame(b).origin
+            dragged.x += 23; dragged.y += 17
+            f.app.drag(b, to: dragged)
+            s.settle()
+            s.expect("an abandoned width call cannot overwrite the mouse position", f.frame(b).origin == dragged)
         })
         requireCarousel(Scenario.run("width motion begins at the user's moved position") { s in
             let f = CarouselFixture(s), b = f.ids[1]

@@ -7,6 +7,24 @@ import Testing
 /// The animator owns these resource lifetimes even if a requested frame never
 /// arrives. This checks that boundary directly, independently of AX completion.
 @Suite @MainActor struct CarouselAnimatorLifetime {
+    @Test("readiness defers frames without restarting the motion deadline")
+    func readinessDefersIntermediateFrames() {
+        let p = Probe()
+        p.ready = false
+        p.start(duration: 80)
+        p.display.deliver(at: 0.04)
+        #expect(p.batches.isEmpty)
+        #expect(p.main.outstanding == 1 && p.display.outstanding == 1)
+        p.ready = true
+        p.display.deliver(at: 0.06)
+        #expect(p.batches.count == 1 && !p.batches[0].final)
+        p.display.deliver(at: 0.08)
+        p.expectLanded()
+        let count = p.batches.count
+        p.main.advance(to: 2)
+        #expect(p.batches.count == count && p.completions == 1)
+    }
+
     @Test("ordinary landing releases its deadline and all display demand")
     func ordinaryLandingReleasesResources() {
         let p = Probe()
@@ -93,6 +111,7 @@ import Testing
         var batches: [(writes: [UInt32: CarouselAnimator.Write], final: Bool)] = []
         var completions = 0
         var holdFinal = false
+        var ready = true
         var acknowledgeFinal: (@MainActor @Sendable () -> Void)?
         init() {
             display = ManualDisplay(main: main)
@@ -102,6 +121,7 @@ import Testing
             animator.start(from: from ?? [1: CGRect(x: 10, y: 43, width: 849, height: 1_064)],
                            to: [1: to ?? target], duration: duration,
                            bounds: CGRect(x: 0, y: 0, width: 1_728, height: 1_117), menuBottom: 33,
+                           ready: { [self] in ready },
                            apply: { [self] writes, final, done in
                                batches.append((writes, final))
                                if final && holdFinal { acknowledgeFinal = done }
