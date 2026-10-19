@@ -38,17 +38,8 @@ extension Acceptance {
             try #require(cpu <= budget.cpuNanoseconds, "CPU time exceeded the CPU limit")
             try #require(after.footprintBytes < budget.footprintBytes, "End footprint must be below the footprint limit")
             if let displayFramesBefore {
-                try #require(try developmentDisplayFrames() == displayFramesBefore, "The app must receive zero display frames while idle")
+                try #require(try harness.displayFrames() == displayFramesBefore, "The app must receive zero display frames while idle")
             }
-        }
-
-        /// Fixture-only status instrumentation. This counter observes the app's
-        /// real display-link adapter, not the observer's sampling display link.
-        private func developmentDisplayFrames() throws -> UInt64 {
-            let reply = try harness.invoke("status", "--json")
-            let object = try JSONSerialization.jsonObject(with: reply.outputData) as? [String: Any]
-            let motion = try #require(object?["testMotion"] as? [String: Any], "Fixture-only status must expose testMotion display frame instrumentation")
-            return try #require((motion["displayFrames"] as? NSNumber)?.uint64Value)
         }
 
         @Test("#1 E22: idle resource budget") func e22TwentyIdleWindowsStayWithinWakeupCPUAndFootprintLimits() throws {
@@ -82,7 +73,7 @@ extension Acceptance {
         @Test("#26 E24: carousel receives zero idle display frames and keeps the resource budget") func carouselAcrossWorkspacesKeepsTheIdleResourceBudget() throws {
             try harness.reset()
             try desktop.configure("[experiments]\ncarousel = true\n", layout: "carousel")
-            let setupFramesStart = try developmentDisplayFrames()
+            let setupFramesStart = try harness.displayFrames()
             for index in 0..<20 {
                 let id = try fixture.open(kind: index.isMultiple(of: 2) ? "heavyText" : "web", key: "idle\(index)", ["widthFraction": 0.4])
                 try desktop.activate(key: "idle\(index)")
@@ -112,8 +103,9 @@ extension Acceptance {
                 return rows.count == 20 && Set(rows.compactMap(\.workspace)).count == 5 && rows.contains { ($0.rail ?? 0) > 1 }
             }
             sleep(seconds: 1)
-            let frames = try developmentDisplayFrames()
-            try #require(frames > setupFramesStart, "The display counter must increase during setup motion before it can prove idle zero frames")
+            let frames = try harness.displayFrames()
+            let given = try harness.motionGiven()
+            try #require(frames > setupFramesStart, "The display counter must increase during setup motion before it can prove idle zero frames; \(given)")
             try verifyIdleResources("Carousel E24", displayFramesBefore: frames)
         }
     }

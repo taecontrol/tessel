@@ -3,6 +3,26 @@ import Foundation
 import Testing
 
 extension Acceptance.Journeys {
+    @Test("Reduce Motion journey")
+    func reduceMotionMakesCarouselMovesInstant() throws {
+        try step("Reduce Motion makes a configured carousel move instant (wiring)") {
+            harness.stopApp()
+            // The harness verifies that tessel reports a zero effective duration.
+            try harness.startApp(reduceMotion: true)
+            defer { harness.stopApp(); try? harness.startApp() }
+            let ids = try desktop.railSetup([0.6, 0.6], duration: 400)
+            let frames = try harness.displayFrames()
+            try desktop.post(kVK_ANSI_L)
+            try desktop.expectFocus(ids[1])
+            try requireFinalState("the scrolled rail shows its second tile complete") {
+                let observation = try desktop.observe(focusedOnly: true), area = observation.area
+                return observation.windows.contains { $0.id == ids[1] && $0.frame[0] + $0.frame[2] <= area[0] + area[2] - 9 }
+            }
+            let given = try harness.motionGiven()
+            try #require(try harness.displayFrames() == frames, "a move under Reduce Motion requests no display frames; \(given)")
+        }
+    }
+
     @Test("#26 E15: mixed-app cards keep the moving rail above the other without stray activation")
     func carouselCardsKeepCrossAppOrderAndFocus() throws {
         let other = try FixtureSession(directory:harness.directory,number:harness.otherFixtures.count+1)
@@ -109,7 +129,8 @@ extension Acceptance.Journeys {
                         && sample.windows.contains { moving.contains($0.id) && $0.valid && $0.frame.count == 4
                             && $0.frame[1] > area[1]+11 && $0.frame[1] < area[1]+area[3]-33 }
                 }
-                try #require(overlap.count >= 2,"the independent observer must see overlapping cards, not just their final state; samples=\(samples.count), movingY=\(samples.map { sample in sample.windows.filter { moving.contains($0.id) }.map { "\($0.id):\($0.valid):\($0.frame.count > 1 ? $0.frame[1] : -1)" } })")
+                let given = try harness.motionGiven()
+                try #require(overlap.count >= 2,"the independent observer must see overlapping cards, not just their final state; \(given); samples=\(samples.count), movingY=\(samples.map { sample in sample.windows.filter { moving.contains($0.id) }.map { "\($0.id):\($0.valid):\($0.frame.count > 1 ? $0.frame[1] : -1)" } })")
                 let intermediates = overlap.flatMap(\.windows).filter { moving.contains($0.id) && $0.valid && $0.frame.count == 4 && $0.frame[1] > area[1]+11 && $0.frame[1] < area[1]+area[3]-33 }
                 try #require(!intermediates.isEmpty,"real AX samples must include an intermediate moving-card position")
                 for sample in overlap {

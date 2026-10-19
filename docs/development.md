@@ -111,6 +111,21 @@ processes and data. It always passes `--test-fixture-only`, so only fixture
 processes are observed or managed, including crash recovery. The daily build
 rejects that argument. Another tessel instance can contaminate these fixtures.
 
+The harness owns the Reduce Motion Given rather than inheriting the desktop's
+setting; GitHub's macOS images turn Reduce Motion on, which made every carousel
+move instant on CI. Each launch passes tessel `-reduceMotion NO`, or `YES` where
+a journey asks for it. That argument domain precedes the user's preference in
+tessel's process only. macOS protects the persistent preference, and the private
+setter the Reduce Motion contract uses changes only the observer's own process,
+so nothing desktop-wide changes and neither cleanup nor an interrupted run has
+anything to restore. A launch waits until `status --json` reports the matching
+effective duration. Each suite that launches the app prints a `Motion:` line
+with the effective and configured durations and both Reduce Motion values, read
+in a fresh signed observer when the suite starts; E15 and E24 failures repeat
+it. The Reduce Motion journey checks the other value natively: a configured
+400 ms carousel move requests no display frames.
+
+
 The observer validates the running fixture's signed identifier before reading a
 window or posting a key, revalidating on every operation. Audit-bound Security
 code objects avoid repeated construction during latency sampling; exec and PID
@@ -436,6 +451,9 @@ live geometry uses AX and vertical motion uses cards. The signed contracts in
 one-point edges/40-point snapback, AXMain/AXRaise across apps, retained closet
 handles and lossy hidden size writes, resize anchoring at the current x,
 display-frame demand, Reduce Motion notifications and pointer-down delivery.
+The Reduce Motion contract changes the preference through HIServices' private
+setter, which affects only the observer's own process: it pins how NSWorkspace
+reads and announces the interface preference, not a desktop-wide change.
 `ax-notifications` attributes each notification by AX equality with the handle
 it registered, as the catalog does during motion; a window ID lookup on the
 notified element can fail mid-fullscreen with cannotComplete, so the observer
@@ -512,6 +530,7 @@ deterministic policy layer and are not tagged in these files:
 | Send | #2 E35 |
 | Rail scroll and elevator | Wiring regression (no policy example IDs) |
 | Carousel cards | #26 E15 |
+| Reduce Motion | Wiring check that Reduce Motion makes a carousel move instant (E18 belongs to P) |
 | Reload | File watcher wiring for save, atomic replace, chmod and delete |
 | Crash, quit and disable | #2 E28, E29, E34 |
 | CLI and config files | #1 E10, E12; #1 U-cli-args, U-private-transport, U-read-only-transport, U-stalled-clients, U-observer-identity, U-cpu-oracle, U-notification-retries |

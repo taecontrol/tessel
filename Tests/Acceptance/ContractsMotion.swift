@@ -191,8 +191,9 @@ extension Acceptance.Contracts {
     @Test("reduce-motion-notifications: NSWorkspace reads the preference and publishes a native change", contract(.reduceMotionNotifications))
     func reduceMotionNotifies() throws {
         let original = try #require(try native("motionPreferences").reduceMotion)
-        // Change the native setting through the signed test driver; macOS
-        // protects this preference against a direct defaults write.
+        // The signed driver's private setter changes what NSWorkspace reports
+        // in the observer's process only; macOS protects the persistent
+        // preference against a direct defaults write.
         defer { _ = try? native("motionSetPreference",["enabled":original]) }
         try native("motionSetPreference",["enabled":!original])
         var lastValue: Bool?, changes: [Bool] = []
