@@ -284,11 +284,22 @@ extension Acceptance.Contracts {
             }
         }
         let accepted = try window(id).frame
+        try native("motionStart", ["targets": [["pid": fixture.pid, "ids": [id]]]])
+        defer { _ = try? native("motionStop") }
         kill(fixture.pid, SIGSTOP)
+        let stoppedAt = monotonicSeconds()
         do {
             defer { kill(fixture.pid, SIGCONT) }
             let cgFrame = try #require(try native("cgFrames").cgFrames?[String(id)])
             try #require(desktop.near(cgFrame, accepted), "WindowServer geometry remains observable while the fixture cannot answer AX")
+            var samples: [NativeContractReply.MotionSample] = []
+            try requireFinalState("the independent motion observer samples the stopped fixture") {
+                samples = try native("motionSamples").motionSamples?.filter { ($0.startedAt ?? 0) >= stoppedAt } ?? []
+                return samples.count >= 2
+            }
+            try #require(samples.allSatisfy { sample in
+                sample.windows.contains { $0.id == id && $0.valid && desktop.near($0.frame, accepted) }
+            }, "motion geometry remains valid without a reply from the fixture")
         }
 
     }

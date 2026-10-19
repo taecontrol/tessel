@@ -434,6 +434,13 @@ client state, even while the target app is stopped; it consumes no simulated
 remote-delivery time. The simulator declares the corresponding assumption IDs;
 these native facts must be verified before changing its behavior.
 
+E15's motion observer uses fixture-owned WindowServer bounds, as the capture
+does. The primary-screen contract exercises that display sampler while its
+fixture is stopped: geometry must remain valid without an AX reply. Native
+focus is read before geometry and CG order afterward, so a slow focus answer
+cannot pair earlier frames with later stacking. Missing CG metadata still
+falls back to AX; an unanswered read remains invalid.
+
 Record the E1, E3, E7, E10 and E14 journeys at both 80 and 400 ms with:
 
 ```sh

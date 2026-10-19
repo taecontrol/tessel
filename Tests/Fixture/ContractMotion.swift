@@ -134,18 +134,21 @@ final class FixtureMotionProbe: NSObject {
         let started = Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1e9
         frameCount += 1
         guard samples.count < 64 else { return }
-        let cg = capturesFocus ? fixtureCGFrames(Set(targets.map(\.pid))) : [:]
-        // E10 discovery uses fixture-owned WindowServer IDs, so the first
-        // published frame does not wait for the new window's AX enumeration.
-        for (id, value) in cg.sorted(by: { $0.key < $1.key }) where discoveryPIDs.contains(value.pid) && !targets.contains(where: { $0.id == id }) {
-            targets.append((id, value.pid, nil))
-        }
         var appValue: CFTypeRef?, frontmost: pid_t = 0
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, capturesFocus ? 0.002 : FixtureProbe.observationTimeout)
         if AXUIElementCopyAttributeValue(system, kAXFocusedApplicationAttribute as CFString, &appValue) == .success,
            let value = appValue, CFGetTypeID(value) == AXUIElementGetTypeID() {
             AXUIElementGetPid(unsafeBitCast(value, to: AXUIElement.self), &frontmost)
+        }
+        // Geometry remains observable when a busy app cannot service AX.
+        // Read it after focus so a slow focus answer cannot age the frames
+        // before their matching WindowServer order is sampled below.
+        let cg = targets.isEmpty ? [:] : fixtureCGFrames(Set(targets.map(\.pid)))
+        // E10 discovery uses fixture-owned WindowServer IDs, so the first
+        // published frame does not wait for the new window's AX enumeration.
+        for (id, value) in cg.sorted(by: { $0.key < $1.key }) where discoveryPIDs.contains(value.pid) && !targets.contains(where: { $0.id == id }) {
+            targets.append((id, value.pid, nil))
         }
         let windows: [[String: Any]] = targets.map { target in
             guard FixtureProbe.isFixture(target.pid) else { return ["id": target.id, "valid": false, "frame": [], "visible": false] }
