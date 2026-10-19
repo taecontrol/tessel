@@ -514,7 +514,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
         // Timed checks poll focused-only observations against a deadline, so a
         // busy app is asked again rather than allowed to consume that deadline.
         // Setup and one-shot reads wait for a briefly busy app to answer.
-        let timeout: Float = focusedOnly ? 0.02 : FixtureProbe.observationTimeout
+        let timeout: Float = focusedOnly ? FixtureProbe.focusedObservationTimeout : FixtureProbe.observationTimeout
         var front = FixtureProbe.frontmostPID(timeout: timeout)
         var listed = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
         var visible = Set(listed.compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value })
@@ -755,6 +755,9 @@ enum FixtureProbe {
     /// answered by the frontmost app. A briefly busy main thread can miss
     /// 20 ms; a stopped app still costs one bounded wait per read.
     static let observationTimeout: Float = 0.1
+    /// Focused-only observations and the motion sampler's focus read use a
+    /// shorter bound, so a busy app cannot stall the next sample.
+    static let focusedObservationTimeout: Float = 0.02
 
     static func frontmostPID(timeout: Float = observationTimeout) -> pid_t? {
         let system = AXUIElementCreateSystemWide()

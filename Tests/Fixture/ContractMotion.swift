@@ -202,9 +202,12 @@ final class FixtureMotionSampler: NSObject, @unchecked Sendable {
             return (frameCount, samples.count >= 64)
         }
         guard !full else { return }
+        // The frontmost app answers this read. During a card it is busy with
+        // tessel's writes, and a 100 ms wait per frame left whole motions with
+        // a handful of samples; an unanswered read stays frontmost zero.
         var appValue: CFTypeRef?, frontmost: pid_t = 0
         let system = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(system, capturesFocus ? 0.002 : FixtureProbe.observationTimeout)
+        AXUIElementSetMessagingTimeout(system, capturesFocus ? 0.002 : FixtureProbe.focusedObservationTimeout)
         if AXUIElementCopyAttributeValue(system, kAXFocusedApplicationAttribute as CFString, &appValue) == .success,
            let value = appValue, CFGetTypeID(value) == AXUIElementGetTypeID() {
             AXUIElementGetPid(unsafeBitCast(value, to: AXUIElement.self), &frontmost)

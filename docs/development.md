@@ -453,6 +453,8 @@ thread that serves observation commands. A full observation waits on AX replies
 from fixtures that are busy with tessel's motion writes, and such commands have
 held the main thread for over 300 ms in the middle of a card. E15 drains the
 samples while it waits and requires one sample per delivered display callback.
+The busy frontmost app answers the sampler's focused-application read, so that
+read uses the 20 ms focused-only bound; an unanswered read reports zero.
 
 Record the E1, E3, E7, E10 and E14 journeys at both 80 and 400 ms with:
 
