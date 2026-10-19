@@ -126,6 +126,40 @@ import Testing
         }
     }
 
+    @Test("an external selection in another rail moves the leaving card above the revealed rail except the active key")
+    func externalSelectionKeepsTheLeavingCardOnTop() {
+        for writes in WriteOrder.allCases {
+            requireCarousel(Scenario.run("external selection card", writes: writes) { s in
+                s.mac.setScreen(ScreenGeometry(frame: CGRect(x: 0, y: 0, width: 1728, height: 1117),
+                    visibleFrame: CGRect(x: 0, y: 0, width: 1728, height: 1084)))
+                let first = s.mac.launch(), second = s.mac.launch()
+                let spec = WindowSpec(frame: CGRect(x: 100, y: 120, width: 480, height: 328), positionAcceptance: .screenEdges)
+                let a = first.open(spec), c = first.open(spec), b = second.open(spec)
+                first.select(a)
+                let tessel = s.startTessel(); s.settle()
+                tessel.changeConfig(CarouselFixture.config + "[animation]\nduration = 400\n"); s.settle()
+                first.select(c); s.settle(); tessel.pressKey("alt-shift-j"); s.settle()
+                s.expect("the leaving card is alone in rail two", tessel.windows.first { $0.id == c }?.rail == 2 && tessel.status.rail == 2)
+                s.mac.clearMotionHistory()
+                // The user activates the other app's window in rail one. Its
+                // app keeps that key window above a background AXRaise, so it
+                // alone may stay above the leaving card.
+                second.select(b); s.settle()
+                let moving = s.mac.displaySamples.filter { sample in
+                    sample.frames[c].map { $0.minY > 44 && $0.minY < 1117 - 33 } == true && sample.visible.contains(c)
+                }
+                s.expect("the leaving card moves on display frames, got \(moving.count) samples", moving.count >= 2)
+                for sample in moving {
+                    let card = sample.visible.firstIndex(of: c) ?? .max
+                    s.expect("the moving card is above the other revealed window: \(sample.visible)", sample.visible.firstIndex(of: a).map { $0 > card } == true)
+                    s.expect("the active selection stays frontmost: \(String(describing: sample.frontmost))", sample.frontmost == second.pid)
+                }
+                s.expect("rail one is current and the selection keeps focus", tessel.status.rail == 1 && s.mac.focusedWindow == b)
+                s.expect("the leaving card is hidden after landing", !s.mac.isVisible(c))
+            })
+        }
+    }
+
     @Test("a clipped moving window still receives its exact final write after reaching the screen edge early")
     func clippedMotionAlwaysWritesTheFinalFrame() {
         requireCarousel(Scenario.run("final write after horizontal clamping") { s in

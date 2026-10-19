@@ -407,6 +407,9 @@ Upward cards retain the leaving selection until it has moved down and hidden.
 The active key is raised last; sibling raises restore AXMain without another
 raise or app activation. An active app can keep its window above a raised
 background window, so activation and ordering are confirmed separately.
+When an external selection makes a revealed window the active key, the card
+moves without waiting to be above that one window; it must still be above every
+other window of the rail it covers.
 Horizontally entering and leaving tiles keep at least one point on screen;
 leaving tiles hide after motion. Size writes happen after showing a tile.
 

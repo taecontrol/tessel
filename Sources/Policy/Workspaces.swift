@@ -858,6 +858,12 @@ final class Workspaces {
         expectedFocus = takeFocus ? focused : nil
         let focusID = focused
         let starts = from, ends = to
+        let movingCard = vertical ? (down ? tiles : Set(source)) : []
+        let cardFocus = down ? focusID : leavingFocus
+        // An external selection can make a revealed window the active key.
+        // Its app keeps it above a background AXRaise, so the card does not
+        // wait for an order macOS never shows.
+        let activeAbove = Set([cardFocus].compactMap { $0 }).subtracting(movingCard)
         let finish: @MainActor @Sendable () -> Void = { [weak self] in
             guard let self, self.transition == token else { return }
             closet.hide(hide.subtracting(self.closeted).filter { self.entries[$0]?.observation.parent == nil })
@@ -889,7 +895,7 @@ final class Workspaces {
                     ready: { [weak self] in
                         guard let self, self.transition == token else { return false }
                         guard vertical else { return true }
-                        let card = down ? tiles : Set(source), other = participants.subtracting(card)
+                        let card = movingCard, other = participants.subtracting(card).subtracting(activeAbove)
                         guard !card.isEmpty else { return true }
                         let order = self.windowOrder.onScreenOrder()
                         let moving = card.compactMap { order.firstIndex(of: $0) }
@@ -918,8 +924,6 @@ final class Workspaces {
 
         let ordered: @MainActor @Sendable () -> Void = { [weak self] in
             guard let self, self.transition == token else { return }
-            let movingCard = vertical ? (down ? tiles : Set(source)) : []
-            let cardFocus = down ? focusID : leavingFocus
             let neighbors: @MainActor @Sendable () -> Void = { [weak self] in
                 guard let self, self.transition == token else { return }
                 self.raiseCarousel(movingCard, excluding: cardFocus, token: token) { [weak self] in
