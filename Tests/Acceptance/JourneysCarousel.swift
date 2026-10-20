@@ -106,16 +106,29 @@ extension Acceptance.Journeys {
                     return reply
                 }
                 try desktop.post(key)
-                try requireFinalState("fixture \(destination) visible, main and focused") {
-                    _ = try drain()
-                    return try desktop.focused(destination, in: desktop.observe(focusedOnly: true))
-                }
+                // A timeout names the last observation so a CI-only failure is diagnosable.
+                var last = "no observation"
+                do {
+                    try requireFinalState("fixture \(destination) visible, main and focused") {
+                        _ = try drain()
+                        let observation = try desktop.observe(focusedOnly: true)
+                        last = "front \(observation.frontmostFixturePID), active \(observation.activeFixturePID), "
+                            + observation.windows.map { "\($0.id): visible \($0.visible) main \($0.main) focused \($0.focused)" }.joined(separator: "; ")
+                        return desktop.focused(destination, in: observation)
+                    }
+                } catch { throw HarnessError("\(error); last observation: \(last); fixture \(fixture.pid), other \(other.pid)") }
                 try requireFinalState("the rail lands at the area top and its old rail is hidden") {
                     _ = try drain()
                     let observation = try desktop.observe(), area = observation.area
                     let shown = key == kVK_ANSI_J ? bottom : top, hidden = key == kVK_ANSI_J ? top : bottom
                     return shown.allSatisfy { id in observation.windows.contains { $0.id == id && $0.visible && abs($0.frame[1] - area[1] - 10) <= 1 } }
                         && hidden.allSatisfy { !observation.visibleIDs.contains($0) }
+                }
+                // The stage places the real windows at once, so focus can land
+                // before the sampler answers twice; keep sampling after it.
+                try requireFinalState("the observer has native focused-application answers") {
+                    _ = try drain()
+                    return samples.filter { $0.frontmost != 0 }.count >= 2
                 }
                 _ = try drain("motionStop")
                 let given = try harness.motionGiven()

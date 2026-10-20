@@ -74,7 +74,9 @@ extension Acceptance {
         }
         @Test("#26 E24: carousel does no stage work at rest and keeps the resource budget") func carouselAcrossWorkspacesKeepsTheIdleResourceBudget() throws {
             try harness.reset()
-            try desktop.configure("[experiments]\ncarousel = true\n", layout: "carousel")
+            // Thirty animated setup changes still run on the stage; a short
+            // duration keeps the suite inside its CI budget.
+            try desktop.configure("[experiments]\ncarousel = true\n[animation]\nduration = 80\n", layout: "carousel")
             let setupWorkStart = try harness.stageWork()
             for index in 0..<20 {
                 let id = try fixture.open(kind: index.isMultiple(of: 2) ? "heavyText" : "web", key: "idle\(index)", ["widthFraction": 0.4])

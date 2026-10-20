@@ -460,6 +460,14 @@ final class Workspaces {
             followExternalSelection(pid: selection.pid, id: selection.id)
         }
         cancelFocusDecision()
+        // So does a command right after the user activated another app, before
+        // its report arrives: that app's last reported window is the one in
+        // front. tessel's own pending focus request is not an activation.
+        if expectedFocus == nil, let front = applications.frontmostPID, let current = focused,
+           let owner = entries[current]?.pid, owner != front, let selection = appFocus[front], available(selection),
+           entries[selection]?.observation.parent == nil, entries[selection]?.workspace != nil {
+            selectExternalFocus(selection, layoutWindows: [])
+        }
         switch command {
         case .workspace(let number):
             guard number != status.active else { return }
