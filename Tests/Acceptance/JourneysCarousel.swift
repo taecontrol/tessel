@@ -11,7 +11,7 @@ extension Acceptance.Journeys {
             try harness.startApp(reduceMotion: true)
             defer { harness.stopApp(); try? harness.startApp() }
             let ids = try desktop.railSetup([0.6, 0.6], duration: 400)
-            let frames = try harness.displayFrames()
+            let work = try harness.stageWork()
             try desktop.post(kVK_ANSI_L)
             try desktop.expectFocus(ids[1])
             try requireFinalState("the scrolled rail shows its second tile complete") {
@@ -19,11 +19,11 @@ extension Acceptance.Journeys {
                 return observation.windows.contains { $0.id == ids[1] && $0.frame[0] + $0.frame[2] <= area[0] + area[2] - 9 }
             }
             let given = try harness.motionGiven()
-            try #require(try harness.displayFrames() == frames, "a move under Reduce Motion requests no display frames; \(given)")
+            try #require(try harness.stageWork() == work, "a move under Reduce Motion captures and shows nothing; \(given)")
         }
     }
 
-    @Test("#26 E15: mixed-app cards keep the moving rail above the other without stray activation")
+    @Test("#26 E15: a mixed-app rail change lands focus and both rails without stray activation")
     func carouselCardsKeepCrossAppOrderAndFocus() throws {
         let other = try FixtureSession(directory:harness.directory,number:harness.otherFixtures.count+1)
         harness.otherFixtures.append(other)
@@ -33,8 +33,10 @@ extension Acceptance.Journeys {
         try requireFinalState("all mixed-app fixture windows are catalogued") { Set(try harness.rows().map(\.id)) == Set(ids) }
         try desktop.activate(key:"topA")
         try desktop.configure("[experiments]\ncarousel = true\n[animation]\nduration = 400\n",layout:"carousel")
-        try step("card wiring: transfer one window from each app into the second rail") {
-            try desktop.activate(key:"bottomA"); try desktop.post(kVK_ANSI_J,shift:true)
+        try step("rail wiring: transfer one window from each app into the second rail") {
+            // Same-app selection: the app is already frontmost, so wait for
+            // its focus before the command.
+            try desktop.activate(key:"bottomA"); try desktop.expectFocus(c); try desktop.post(kVK_ANSI_J,shift:true)
             try requireFinalState("the first bottom fixture is in rail two") { try harness.row(c)?.rail == 2 }
             if try !finalState({ try desktop.shown(c, in: desktop.observe()) }) {
                 let state = try desktop.observe()
@@ -65,11 +67,11 @@ extension Acceptance.Journeys {
                 return bottom.allSatisfy { id in observation.windows.contains { $0.id == id && $0.visible && abs($0.frame[1] - observation.area[1] - 10) <= 1 } }
                     && top.allSatisfy { !observation.visibleIDs.contains($0) }
             }
-            // Opposite focus apps exercise both activation handoffs, including
-            // retaining the leaving app throughout upward motion.
+            // Opposite focus apps exercise both activation handoffs: focus
+            // moves to the entering rail's app while both rails slide.
             try desktop.activate(key:"bottomA"); try desktop.expectFocus(c)
             try desktop.post(kVK_ANSI_K)
-            try requireFinalState("the return card has finished before arranging its focus") {
+            try requireFinalState("the return has finished before arranging its focus") {
                 let observation = try desktop.observe()
                 return top.allSatisfy { observation.visibleIDs.contains($0) } && bottom.allSatisfy { !observation.visibleIDs.contains($0) }
             }
@@ -87,19 +89,16 @@ extension Acceptance.Journeys {
                 throw HarnessError("mixed-app source pair: expected \(top), area \(observation.area), frames \(observation.windows.map { "\($0.id):\($0.frame) visible=\($0.visible) focus=\($0.focused)" })")
             }
         }
-        for (key,moving,destination,destinationPID) in [(kVK_ANSI_J,bottom,c,fixture.pid),(kVK_ANSI_K,bottom,b,other.pid)] {
-            try step("display-frame and card wiring: sample intermediate positions and native order") {
+        for (key,_,destination,destinationPID) in [(kVK_ANSI_J,bottom,c,fixture.pid),(kVK_ANSI_K,bottom,b,other.pid)] {
+            try step("stage wiring: the rails swap under the stage and only the two fixture apps activate") {
                 let sourcePID = try desktop.observe().frontmostFixturePID
-                guard let started = finalValue({
+                let work = try harness.stageWork()
+                // The observer samples the frontmost app on its own display link.
+                guard finalValue({
                     try? harness.observer.command("contract",["operation":"motionStart","pid":fixture.pid,
                         "targets":[["pid":fixture.pid,"ids":[a,c]],["pid":other.pid,"ids":[b,d]]]]).contract
-                }) else {
-                    throw HarnessError("motion observer did not start")
-                }
-                _ = started
+                }) != nil else { throw HarnessError("motion observer did not start") }
                 defer { _ = try? harness.observer.command("contract",["operation":"motionStop","pid":fixture.pid]) }
-                // The observer samples on its own display-link thread. Drain
-                // it while waiting so every frame fits the bounded reply.
                 var samples: [NativeContractReply.MotionSample] = []
                 @MainActor func drain(_ operation: String = "motionSamples") throws -> NativeContractReply {
                     let reply = try #require(try harness.observer.command("contract",["operation":operation,"pid":fixture.pid,"drain":true]).contract)
@@ -111,36 +110,17 @@ extension Acceptance.Journeys {
                     _ = try drain()
                     return try desktop.focused(destination, in: desktop.observe(focusedOnly: true))
                 }
-                try requireFinalState("the card lands at the area top and its old rail is hidden") {
+                try requireFinalState("the rail lands at the area top and its old rail is hidden") {
                     _ = try drain()
                     let observation = try desktop.observe(), area = observation.area
                     let shown = key == kVK_ANSI_J ? bottom : top, hidden = key == kVK_ANSI_J ? top : bottom
                     return shown.allSatisfy { id in observation.windows.contains { $0.id == id && $0.visible && abs($0.frame[1] - area[1] - 10) <= 1 } }
                         && hidden.allSatisfy { !observation.visibleIDs.contains($0) }
                 }
-                let reply = try drain("motionStop")
-                try #require(reply.motionFrameCount == samples.count,"the observer must retain every delivered display frame; frames=\(reply.motionFrameCount ?? -1), samples=\(samples.count)")
-                let area = try desktop.observe().area
-                let overlap = samples.filter { sample in
-                    top.contains { sample.order.contains($0) } && bottom.contains { sample.order.contains($0) }
-                        // Closet return and AXRaise prepare the card before
-                        // its first animated frame. E15 owns the moving card,
-                        // rather than the intermediate preparation order.
-                        && sample.windows.contains { moving.contains($0.id) && $0.valid && $0.frame.count == 4
-                            && $0.frame[1] > area[1]+11 && $0.frame[1] < area[1]+area[3]-33 }
-                }
+                _ = try drain("motionStop")
                 let given = try harness.motionGiven()
-                try #require(overlap.count >= 2,"the independent observer must see overlapping cards, not just their final state; \(given); samples=\(samples.count), movingY=\(samples.map { sample in sample.windows.filter { moving.contains($0.id) }.map { "\($0.id):\($0.valid):\($0.frame.count > 1 ? $0.frame[1] : -1)" } })")
-                let intermediates = overlap.flatMap(\.windows).filter { moving.contains($0.id) && $0.valid && $0.frame.count == 4 && $0.frame[1] > area[1]+11 && $0.frame[1] < area[1]+area[3]-33 }
-                try #require(!intermediates.isEmpty,"real AX samples must include an intermediate moving-card position")
-                for sample in overlap {
-                    try #require(sample.windows.allSatisfy { $0.valid },"a sampling failure must not count as occlusion")
-                    if sample.frontmost != 0 {
-                        try #require(sample.frontmost == (key == kVK_ANSI_J ? destinationPID : sourcePID),"Down activates before motion; Up retains the leaving activation until hide")
-                    }
-                    let movingIndices = moving.compactMap { sample.order.firstIndex(of:$0) }
-                    let staticIndices = top.compactMap { sample.order.firstIndex(of:$0) }
-                    try #require(!movingIndices.isEmpty && !staticIndices.isEmpty && movingIndices.max()! < staticIndices.min()!,"every moving-card window must be above every other-card window; key=\(key), moving=\(moving), order=\(sample.order), frames=\(sample.windows.map { "\($0.id):\($0.frame)" }), front=\(sample.frontmost)")
+                if try harness.status().workspaces?.motion == "on" {
+                    try #require(try harness.stageWork() > work, "an animated rail change captures and shows its rails; \(given)")
                 }
                 var reachedDestination = false
                 let activationSamples = samples.filter { $0.frontmost != 0 }

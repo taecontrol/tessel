@@ -86,8 +86,13 @@ final class SnapshotStore: WindowPublishing, @unchecked Sendable {
     }
 
     #if TESSEL_DEVELOPMENT
-    func recordDisplayFrame() {
-        lock.withLock { status.testMotion?.displayFrames += 1 }
+    func recordStage(_ event: StageEvent) {
+        lock.withLock {
+            switch event {
+            case .capture: status.testMotion?.stageCaptures += 1
+            case .show: status.testMotion?.stageShows += 1
+            }
+        }
     }
     func enableMotionInstrumentation() {
         lock.withLock { status.testMotion = AppStatus.TestMotion() }

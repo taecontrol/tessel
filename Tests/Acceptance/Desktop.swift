@@ -172,7 +172,13 @@ struct Desktop {
         try activate(firstSession, key: "w0")
         try requireFinalState("every rail setup window listed") { Set(try harness.rows().map(\.id)) == Set(ids) }
         try configure(carousel + "[animation]\nduration = \(duration)\n", layout: "carousel")
-        try expectShown(ids[0])
+        // The focused first window keeps its width at the rail's left end.
+        try requireFinalState("fixture \(ids[0]) focused at the rail's left end") {
+            let observation = try observe(focusedOnly: true), area = observation.area
+            return focused(ids[0], in: observation) && observation.windows.contains {
+                $0.id == ids[0] && abs($0.frame[0] - (area[0] + 10)) <= 1 && abs($0.frame[3] - (area[3] - 20)) <= 1
+            }
+        }
         try requireFinalState("initial rail sizing and membership") {
             let observation = try observe(), rows = try harness.rows()
             return ids.enumerated().allSatisfy { index, id in

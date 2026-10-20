@@ -58,11 +58,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.config = config
         let store = SnapshotStore(status: appStatus(config.status))
         self.store = store
-        let displayFrames = SystemDisplayFrames()
+        let stage = SystemMotionStage()
         #if TESSEL_DEVELOPMENT
         if LaunchOptions.fixtureOnly {
             store.enableMotionInstrumentation()
-            displayFrames.onFrame = { store.recordDisplayFrame() }
+            stage.onEvent = { store.recordStage($0) }
         }
         #endif
         do { server = try SocketServer { store.reply(to: $0) } }
@@ -70,7 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let workspaces = Workspaces(store: store, trusted: trusted, configuration: config.status.effective,
                                     applications: applications, ax: ax, screens: SystemScreen(), windowOrder: SystemWindowOrder(),
                                     scheduler: scheduler, hotkeys: SystemHotkeys(), fixtureOnly: LaunchOptions.fixtureOnly,
-                                    motionPreferences: SystemMotionPreferences(), displayFrames: displayFrames, pointerActivity: SystemPointerActivity()) {
+                                    motionPreferences: SystemMotionPreferences(), stage: stage, pointerActivity: SystemPointerActivity()) {
             try SkyLightCloset(simulateMissing: LaunchOptions.missingSkyLight, simulateFailedHide: LaunchOptions.failedHide)
         }
         self.workspaces = workspaces

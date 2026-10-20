@@ -1,5 +1,6 @@
 #!/bin/bash
-# Grant Accessibility only on the disposable, SIP-disabled GitHub runner.
+# Grant Accessibility and Screen Recording only on the disposable, SIP-disabled
+# GitHub runner.
 set -euo pipefail
 if [[ $# -gt 1 || ( $# -eq 1 && $1 != --deny-development ) ]]; then
     echo 'Usage: ci-accessibility [--deny-development]' >&2
@@ -17,4 +18,8 @@ for bundle_id in com.taecontrol.tessel.dev com.taecontrol.tessel.fixture; do
     fi
     sudo sqlite3 "$database" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags, last_modified) VALUES ('kTCCServiceAccessibility','$bundle_id',0,$auth,4,1,0,strftime('%s','now'));"
 done
-echo 'Accessibility permission test state provisioned on the disposable runner.'
+# The carousel's stage and its contracts capture windows with ScreenCaptureKit.
+for bundle_id in com.taecontrol.tessel.dev com.taecontrol.tessel.fixture; do
+    sudo sqlite3 "$database" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags, last_modified) VALUES ('kTCCServiceScreenCapture','$bundle_id',0,2,4,1,0,strftime('%s','now'));"
+done
+echo 'Accessibility and Screen Recording permission test state provisioned on the disposable runner.'

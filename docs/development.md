@@ -120,12 +120,12 @@ a journey asks for it. That argument domain precedes the user's preference in
 tessel's process only. macOS protects the persistent preference, and the private
 setter the Reduce Motion contract uses changes only the observer's own process,
 so nothing desktop-wide changes and neither cleanup nor an interrupted run has
-anything to restore. A launch waits until `status --json` reports the matching
-effective duration. Each suite that launches the app prints a `Motion:` line
+anything to restore. A launch waits until `status --json` reports whether
+motion is off for Reduce Motion as the harness asked. Each suite that launches the app prints a `Motion:` line
 with the effective and configured durations and both Reduce Motion values, read
 in a fresh signed observer when the suite starts; E15 and E24 failures repeat
 it. The Reduce Motion journey checks the other value natively: a configured
-400 ms carousel move requests no display frames.
+400 ms carousel move captures and shows nothing.
 
 The observer validates the running fixture's signed identifier before reading a
 window or posting a key, revalidating on every operation. Audit-bound Security
@@ -196,10 +196,11 @@ The runner first hides the Dock: fixture Dock icons can move the visible frame's
 bottom edge by two points on its 1024×768 display. It creates a short-lived
 certificate in a temporary keychain, removed at the end; no signing material is
 stored in GitHub. Before any harness suite, `scripts/ci-accessibility` grants the
-development app and fixture access on that disposable runner. Only `CI=true`
+development app and fixture Accessibility and Screen Recording on that disposable
+runner. Only `CI=true`
 together with `GITHUB_ACTIONS=true` enables
 Accessibility denial and restart steps. Local runs use the signed development
-bundle's existing permission and never provision the Accessibility database.
+bundle's existing permissions and never provision the TCC database.
 
 ## Configuration and observation
 
@@ -354,18 +355,17 @@ Option+R (`cycle width`) chooses the next preset, keeping the tile's left edge
 still unless a minimal scroll is needed to show it completely. AX readback
 learns rejected minimum and maximum widths; later cycles skip them. Mouse
 widths remain exact until cycling. A rail shorter than the area stretches its
-windows proportionally; that stretch and end expansion preserve nominal widths.
+windows proportionally; the stretch preserves nominal widths.
 Height-constrained windows stay tiled at the top, with an explanatory reason.
 
 Option+H/L (`focus left|right`) first selects the nearest complete window in
 that direction. Otherwise it advances one stop: a window edge meeting the
 same side of the area, clamped to the strip's ends. Focus waits for a complete
-window. At an end, another press expands its edge tile to fill the area; a
-press away leaves expansion. The initial rail starts with its first tile
-expanded when possible. Navigation and swaps never wrap.
+window. At an end, another press bounces: no window changes width or position.
+Navigation and swaps never wrap.
 
 Option+K/J (`focus up|down`) selects the adjacent rail. Each rail remembers its
-stop, focus and expansion. Option+Shift+H/L (`move left|right`) swaps neighboring
+stop and focus. Option+Shift+H/L (`move left|right`) swaps neighboring
 tiles and keeps focus. Option+Shift+K/J (`move up|down`) inserts after the
 remembered tile of the adjacent rail, creating a rail beyond an end unless the
 moving tile is already alone there. Empty rails disappear.
@@ -394,57 +394,61 @@ duration = 80
 alt-r = "cycle width"
 ```
 
-`duration` accepts TOML integers from 0 through 1000 and defaults to 80 ms.
+`duration` accepts TOML integers from 0 through 1000 and defaults to 250 ms.
 `status --json` reports `workspaces.layout: "carousel"`, `animationDuration`
-(the effective duration, zero with Reduce Motion), the nullable one-based `rail`
-and `railCount`. `windows --json` includes nullable one-based `rail` and `slot`.
+(the effective duration, zero when motion is off), `motion` (`"on"`, or
+`"off: "` and why: duration 0, Reduce Motion or a missing Screen Recording
+grant), the nullable one-based `rail` and `railCount`. `windows --json` includes nullable one-based `rail` and `slot`.
 The status item shows the workspace number and one bar per rail.
 
-Local layout changes use a demand-driven NSScreen display link and the
-prototype's critically damped spring. Retargeting starts from geometry confirmed
-by each AX worker, reading back interrupted writes once their lane drains.
-An unanswered read skips that tile's intermediate guesses. Slow apps retain at
-most one intermediate frame; the final frame is always written, read back and
-retried. Resize ordering accounts for
-the window's current screen position; clipped geometry never becomes an
-intrinsic app width limit. Returning tiles are sized on screen before motion.
-Workspace switches and sends stay instant.
-Mouse presses cancel motion before dragging, and Reduce Motion notifications
-make subsequent commands instant. No display callbacks run at rest.
-If display callbacks stop or never arrive, a one-shot deadline at the motion's
-end plus 50 ms submits the same exact final AX layout and releases display
-demand. Normal landing, retargeting and cancellation remove that deadline;
-there is no recurring fallback timer or idle display demand.
-Window motion reports `AXWindowMoved`; sizing and native fullscreen entry report
-`AXWindowResized`, including in the WebKit fixture. During motion, resize events
-revalidate the affected root's fullscreen state on its AX lane before deferring
-full enumeration. Confirmed fullscreen state cancels further motion and removes
-workspace membership. An already admitted AX batch can finish before that state
-is observed; notification delivery alone is not an atomic fullscreen guard.
+Animated layout changes run on the stage
+([ADR 0006](adr/0006-move-carousel-windows-through-captures-on-a-stage.md)).
+`MotionStagePort` captures windows with ScreenCaptureKit, sized from their live
+bounds, and animates them with Core Animation in a click-through overlay at
+floating level, below the menu bar. The policy:
 
-Downward cards focus the incoming selection before raising its other windows.
-Preparation confirms native focus and CG order before moving frames; bounded
-focus readback retries never repeat activation or AXRaise.
-AXFrontmost activation brings every window of the incoming app forward, and CG
-can show that order after AX has confirmed the focus. The card's background-app
-windows are raised only once CG shows it, or at the motion's deadline;
-otherwise the activation would cover them with the incoming app's other windows.
-If focus confirmation exhausts those retries, preparation is cancelled and the
-ordinary instant presenter lands the selected rail with its bounded AX retries.
-Upward cards retain the leaving selection until it has moved down and hidden.
-The active key is raised last; sibling raises restore AXMain without another
-raise or app activation. An active app can keep its window above a raised
-background window, so activation and ordering are confirmed separately.
-When an external selection makes a revealed window the active key, the card
-moves without waiting to be above that one window; it must still be above every
-other window of the rail it covers.
-Horizontally entering and leaving tiles keep at least one point on screen;
-leaving tiles hide after motion. Size writes happen after showing a tile.
+1. Requests focus, and captures every seen window and what lies under the
+   area at once.
+2. Shows each seen window's capture where the window is: its observed frame
+   on screen, its unclamped strip position when parked or closeted. The stage
+   reports it shown once WindowServer has drawn it.
+3. Moves the stand-ins to the layout, and runs the ordinary instant presenter
+   underneath. The presenter closets, shows, positions, sizes and focuses each
+   real window once.
+4. Once the stand-ins have settled and every placement is confirmed, asks the
+   stage to reveal the accepted frames; the stage waits until WindowServer
+   lists them, fades into them, and the policy clears it. In any case it
+   clears 300 ms after settling.
 
-Fixture-only development status adds `testMotion.displayFrames`. The app's real
-display adapter increments it, and the signed development CLI preserves it.
-The resource suite samples only outside its measured idle window. Daily builds
-contain neither the counter nor this status field.
+Further commands retarget the stand-ins from where they are on screen, keeping
+their speed, and cancel the earlier settle, reveal and linger. A window first
+seen by a retarget is captured then and joins at its start. A command while a
+wall bounce prepares replaces the bounce. A window that closes loses its
+stand-in. A
+resize crossfades the stand-in to a new capture once the app accepts the
+size. An accepted size the app chose is learned as before and retargets the
+strip. A rail change slides the leaving and entering rails as one sheet, one
+rail height apart. A wall bounce moves the stand-ins away from the wall and
+back, 70 ms each way, and moves no real window.
+
+A pointer press, native fullscreen entry, disabling the experiment and a
+layout change clear the stage at once; the pointer case keeps the user's
+geometry. A failed capture clears it and places the windows at once. A
+placement that supersedes an unconfirmed focus request carries that focus
+forward. A native selection reported during the motion is still followed: the
+placement that carries out the motion does not invalidate external focus
+decisions. A command that arrives while such a decision waits its 50 ms first
+follows the selection, so it acts on the window the user just chose. The stage
+answers `available` from its last Screen Recording preflight, which takes about
+10 ms, and refreshes it off the main thread. Workspace switches and sends stay instant, and so does every
+change when motion is off. No capture or timer remains at rest; the overlay
+stays ordered in, empty and transparent, so the next show draws at once.
+
+Fixture-only development status adds `testMotion.stageCaptures` and
+`testMotion.stageShows`. The app's real stage adapter increments them, and the
+signed development CLI preserves them. The resource suite samples them only
+outside its measured idle window. Daily builds contain neither the counters
+nor this status field.
 
 A manually moved tile stays where released until the next layout change. A
 busy AX presentation retries after 100, 200, 400 and 800 ms unless superseded.
@@ -454,12 +458,41 @@ Crash recovery uses the same closet boundary without persisted membership.
 
 ### Native motion contracts and E21 capture
 
-[ADR 0005](adr/0005-animate-tiled-windows-through-accessibility.md) records why
-live geometry uses AX and vertical motion uses cards. The signed contracts in
-`ContractsMotion.swift` pin vertical menu-bar/32-point clamps, horizontal
-one-point edges/40-point snapback, AXMain/AXRaise across apps, retained closet
-handles and lossy hidden size writes, resize anchoring at the current x,
-display-frame demand, Reduce Motion notifications and pointer-down delivery.
+[ADR 0005](adr/0005-animate-tiled-windows-through-accessibility.md) records the
+native AX facts that placement relies on, and
+[ADR 0006](adr/0006-move-carousel-windows-through-captures-on-a-stage.md) why
+motion runs on a stage. The signed contracts in `ContractsMotion.swift` pin:
+
+- vertical menu-bar/32-point clamps;
+- horizontal one-point edges and 40-point snapback;
+- AXMain/AXRaise across apps;
+- retained closet handles and lossy hidden size writes;
+- resize anchoring at the current x;
+- Reduce Motion notifications;
+- pointer-down delivery.
+
+`ContractsStage.swift` pins:
+
+- the Screen Recording preflight;
+- whole-window captures on screen, as a sliver and in the closet, without
+  moving or activating the window;
+- a click-through floating overlay listed above windows and below the menu bar
+  that reads back drawn from its own window within the stage's 150 ms wait;
+- AX sizes bounded by the current x and by the current top against the screen
+  bottom, so a window moves before it grows.
+
+Listed is not drawn. On the owner's Mac, WindowServer drew the overlay within a
+frame of its commit about half the time and 40–65 ms later otherwise, whatever
+its content, mostly while another app redrew busily. The stage therefore reads
+one point of its own window, which needs no Screen Recording and leaves the
+recording indicator alone, and places the real windows only once the overlay
+is drawn, waiting at most 150 ms. Likewise, Accessibility accepts a placement
+before WindowServer moves the window, so the stage clears only once
+WindowServer lists every placed window at its accepted frame and every
+closeted one off screen, then fades into them over 40 ms.
+
+The stage contracts need Screen Recording granted to the signed fixture
+observer; without it they fail and say so.
 The Reduce Motion contract changes the preference through HIServices' private
 setter, which affects only the observer's own process: it pins how NSWorkspace
 reads and announces the interface preference, not a desktop-wide change.
@@ -474,8 +507,10 @@ client state, even while the target app is stopped; it consumes no simulated
 remote-delivery time. The simulator declares the corresponding assumption IDs;
 these native facts must be verified before changing its behavior.
 
-E15's motion observer uses fixture-owned WindowServer bounds, as the capture
-does. The primary-screen contract exercises that display sampler while its
+E15 now checks a mixed-app rail change by its landing: focus, both rails, and
+only the two fixture apps activating. When motion is on, it also checks that
+the stage captured and showed. Its observer uses fixture-owned WindowServer
+bounds. The primary-screen contract exercises that display sampler while its
 fixture is stopped: geometry must remain valid without an AX reply. Native
 focus is read before geometry and CG order afterward, so a slow focus answer
 cannot pair earlier frames with later stacking. Missing CG metadata still
@@ -483,13 +518,16 @@ falls back to AX; an unanswered read remains invalid.
 
 The display link runs on the observer's own sampler thread, never on the main
 thread that serves observation commands. A full observation waits on AX replies
-from fixtures that are busy with tessel's motion writes, and such commands have
-held the main thread for over 300 ms in the middle of a card. E15 drains the
-samples while it waits and requires one sample per delivered display callback.
+from busy fixtures, and such commands have held the main thread for over
+300 ms. E15 drains the samples while it waits.
 The busy frontmost app answers the sampler's focused-application read, so that
 read uses the 20 ms focused-only bound; an unanswered read reports zero.
 
-Record the E1, E3, E7, E10 and E14 journeys at both 80 and 400 ms with:
+E21's recording predates the stage. It samples WindowServer bounds of the real
+windows, which now move once under the stage, so it no longer shows the motion
+the owner sees. It needs a pixel recording of the overlay before it can be
+reviewed again. Until then it records the E1, E3, E7, E10 and E14 journeys at
+both 80 and 400 ms with:
 
 ```sh
 TESSEL_CAPTURE_CAROUSEL=1 scripts/verify captureCarouselMotionForOwnerReview
@@ -540,7 +578,7 @@ deterministic policy layer and are not tagged in these files:
 | Switch | #2 E31, E32 |
 | Send | #2 E35 |
 | Rail scroll and elevator | Wiring regression (no policy example IDs) |
-| Carousel cards | #26 E15 |
+| Carousel rail change | #26 E15 |
 | Reduce Motion | Wiring check that Reduce Motion makes a carousel move instant (E18 belongs to P) |
 | Reload | File watcher wiring for save, atomic replace, chmod and delete |
 | Crash, quit and disable | #2 E28, E29, E34 |
@@ -560,8 +598,8 @@ visibility all match. Full observations read focus and CG visibility after AX
 geometry, so moving frames are not paired with an earlier preparation state. Samples must finish within the final-state margin.
 Only this suite judges elapsed time. Both workspace and carousel nearest-rank
 p95 remain at most 200 ms. The carousel latency suite explicitly configures
-`[animation] duration = 0`; E16/E17 independently prove animation timing against
-the virtual display clock at the policy boundary. This preserves the existing
+`[animation] duration = 0`; E16/E17 independently prove the stage's timing
+against the simulator's clock at the policy boundary. This preserves the existing
 CI processing/observation budget without adding intentional display waiting.
 A local-only proposal to raise the animated total to 280 ms was withdrawn:
 recalibration requires evidence of its spread on CI's runner. Sample counts,
@@ -572,10 +610,9 @@ native completion and observation overhead. The signed primary-screen contract
 pins CG window bounds against accepted AX geometry, including the one-point
 edge and a stopped fixture. Rail samples read those bounds, then a focused-only
 AX/CG observation; its `sampledAt` dates the latest input. This avoids repeated
-AX reads of hidden windows and unrelated controls while measuring final geometry. The deterministic E17 deadline bounds display
-delivery at duration plus one refresh and separately bounds the final AX batch
-by E16's eight-millisecond frame budget; it does not claim that a callback's
-timestamp is the end of synchronous AX work.
+AX reads of hidden windows and unrelated controls while measuring final geometry. The deterministic E17
+bound covers the stage's landing after the last command; it does not claim
+when a slow app finishes its own placement.
 It prints p50, p95 and maximum, and writes `.work/latency.json` (schema 2) with
 the samples, counts, percentiles, configured animation duration, completion
 definition and nonpersonal run metadata. CI uploads that artifact even on failure; incomplete runs retain their partial counts and the
@@ -695,17 +732,18 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #26 E24 | R |
 | #26 E25 | P |
 
-E21 has an opt-in executable capture in `CapturesCarousel.swift`; its visual
-review is pending for the owner. All mapped rows now have executable coverage.
-E15 owns J: the native cross-app stacking assertion takes precedence over the overlapping P range in
-the accepted spec. E14 and E16 own P; their untagged journey steps check wiring.
+E21 has an opt-in executable capture in `CapturesCarousel.swift`; it needs a
+pixel recording of the stage before the owner can review it again. All mapped
+rows have executable coverage. E15 owns J: the native mixed-app landing and
+activation assertions. E14 and E16 own P; their untagged journey steps check
+wiring.
 
-All deterministic carousel examples run directly, including cards, spring
-frames, interrupts, Reduce Motion, edge safety and bounce. E21's recording is
-owner-reviewed visual evidence. Retained membership and AX-retry
-scenarios use duration zero; CarouselMotion proves the animated path. E4's
-command matrix checks settled invariants at duration zero, while E16 checks
-intermediate frames at 80 and 400 ms.
+All deterministic carousel examples run directly against the simulated stage:
+rail slides, captures, placement under the stage, retargets, interrupts,
+Reduce Motion, a missing Screen Recording grant, closet timing and bounce.
+Retained membership and AX-retry scenarios use duration zero; CarouselMotion
+proves the animated path. E4's command matrix checks settled invariants at
+duration zero, while E16 checks the stage at 80 and 250 ms.
 
 
 ## Deterministic checks (#24)

@@ -2,7 +2,7 @@ import Foundation
 import Testing
 
 extension Acceptance.Contracts {
-    @Test("ax-resize-anchoring: moving left before growing avoids a false width maximum", contract(.axResizeAnchoring))
+    @Test("ax-resize-anchoring: moving before growing avoids a false width or height maximum", contract(.axResizeAnchoring))
     func resizeUsesTheCurrentScreenPosition() throws {
         let id = try fixture.open(); _ = try window(id)
         let screen = try native("screen"), full = try #require(screen.screen), area = try #require(screen.axVisibleFrame)
@@ -18,6 +18,19 @@ extension Acceptance.Contracts {
         try requireFinalState("moving first accepts the full requested width") {
             let frame = try native("retained", ["id": id]).window?.frame ?? []
             return frame.count == 4 && abs(frame[0] - 10) <= 1 && abs(frame[2] - size[0]) <= 1
+        }
+        let tall = [600.0, area[3] - 20], low = full[1] + full[3] - 300
+        try #require(try write(id, "AXPosition", [10, low]) == 0)
+        try #require(try write(id, "AXSize", tall) == 0)
+        try requireFinalState("the old top constrains the requested height to the screen bottom") {
+            let frame = try native("retained", ["id": id]).window?.frame ?? []
+            return frame.count == 4 && abs(frame[1] + frame[3] - (full[1] + full[3])) <= 1 && frame[3] < tall[1] - 1
+        }
+        try #require(try write(id, "AXPosition", [10, y]) == 0)
+        try #require(try write(id, "AXSize", tall) == 0)
+        try requireFinalState("rising first accepts the full requested height") {
+            let frame = try native("retained", ["id": id]).window?.frame ?? []
+            return frame.count == 4 && abs(frame[1] - y) <= 1 && abs(frame[3] - tall[1]) <= 1
         }
     }
 
@@ -175,17 +188,6 @@ extension Acceptance.Contracts {
                 return frame.count == 4 && desktop.near(Array(frame.suffix(2)),requested)
             }
         }
-    }
-
-    @Test("display-frame-demand: native display frames arrive on request and stop completely after invalidation", contract(.displayFrameDemand))
-    func displayFramesStopWithoutDemand() throws {
-        try native("motionStart"); defer { _ = try? native("motionStop") }
-        try requireFinalState("the native display link delivers several screen frames") { try (native("motionSamples").motionFrameCount ?? 0) >= 4 }
-        let stopped = try #require(try native("motionStop").motionFrameCount)
-        // Observe over multiple refresh periods; this is a negative observation,
-        // not a latency assertion. The standard final-state margin still applies.
-        sleep(seconds:0.1)
-        try #require(try native("motionSamples").motionFrameCount == stopped)
     }
 
     @Test("reduce-motion-notifications: NSWorkspace reads the preference and publishes a native change", contract(.reduceMotionNotifications))

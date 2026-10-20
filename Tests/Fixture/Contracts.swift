@@ -12,6 +12,7 @@ struct FixtureContractError: Error, CustomStringConvertible {
 @MainActor
 final class FixtureContracts: NSObject {
     private let motionProbe = FixtureMotionProbe()
+    private let stage = FixtureStage()
     private var handles: [UInt32: AXUIElement] = [:]
     private var bars: [AXUIElement] = []
     private var captured: [String: CFTypeRef] = [:]
@@ -34,6 +35,7 @@ final class FixtureContracts: NSObject {
         switch operation {
         case "reset":
             motionProbe.reset()
+            stage.hideOverlay()
             stopObserving()
             NSWorkspace.shared.notificationCenter.removeObserver(self)
             spaces?.stop(returning: liveMovedWindows())
@@ -63,6 +65,9 @@ final class FixtureContracts: NSObject {
             }]
         case "clearEvents": events.removeAll(); eventElements.removeAll(); return [:]
         case "finder", "activateFinder": return try finder(activate: operation == "activateFinder")
+        case "screenRecording": return stage.preflight()
+        case "stageOverlayShow": return stage.showOverlay()
+        case "stageOverlayHide": stage.hideOverlay(); return [:]
         case "screen":
             guard let screen = NSScreen.screens.first else { throw FixtureContractError("primary screen unavailable") }
             let full = screen.frame, visible = screen.visibleFrame, cg = CGDisplayBounds(CGMainDisplayID())
@@ -89,6 +94,10 @@ final class FixtureContracts: NSObject {
             return [:]
         case "cgFrames":
             return ["cgFrames": Dictionary(uniqueKeysWithValues: fixtureCGFrames([pid]).map { (String($0.key), $0.value.frame) })]
+        case "stageCapture":
+            guard let id = command["id"] as? UInt32 else { throw FixtureContractError("a stage capture needs a window") }
+            _ = try retained(["id": id], pid: pid)
+            return try stage.capture(id, pid: pid)
         case "motionStart": try motionProbe.start(command); return motionProbe.facts()
         case "motionStop": motionProbe.stop(); return motionProbe.facts()
         case "motionSamples": return motionProbe.facts(draining: command["drain"] as? Bool == true)

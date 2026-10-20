@@ -1,8 +1,26 @@
 import CoreGraphics
+import Ports
 import Simulator
 import Testing
 
 @Suite @MainActor struct CarouselWidths {
+    @Test("a tile cut by the right edge that starts low still fills the area height", arguments: [0, 250])
+    func clippedTileFromALowOriginFillsTheHeight(duration: Int) {
+        requireCarousel(Scenario.run("clipped tile height duration=\(duration)") { s in
+            s.mac.setScreen(ScreenGeometry(frame: CGRect(x: 0, y: 0, width: 1728, height: 1117),
+                                           visibleFrame: CGRect(x: 0, y: 0, width: 1728, height: 1084)))
+            let app = s.mac.launch()
+            // Opened low and short: AX clamps a taller size to the screen bottom.
+            let ids = (0..<3).map { _ in app.open(WindowSpec(frame: CGRect(x: 100, y: 665, width: 768, height: 332), positionAcceptance: .screenEdges)) }
+            app.select(ids[0])
+            let tessel = s.startTessel(); s.settle()
+            tessel.changeConfig(CarouselFixture.config + "[animation]\nduration = \(duration)\n"); s.settle()
+            let clipped = s.mac.frame(ids[2])!
+            s.expect("the third tile is cut by the right edge, \(clipped)", clipped.minX < 1728 && clipped.maxX > 1728)
+            s.expect("and fills the area height, \(clipped)", abs(clipped.minY - 43) <= 1 && abs(clipped.height - 1064) <= 1)
+        })
+    }
+
     @Test("accepted subpoint width differences do not turn focus-only commands into resizes")
     func acceptedSizesRemainStable() {
         requireCarousel(Scenario.run("stable AX width readback") { s in
@@ -25,13 +43,13 @@ import Testing
         })
     }
 
-    @Test("#26 E7: width cycling uses gap-aware presets, anchors the left edge and exits expansion")
+    @Test("#26 E7: width cycling uses gap-aware presets and anchors the left edge")
     func presetCycleAnchorsAndMinimallyReveals() {
-        requireCarousel(Scenario.run("cycle expanded nominal thirds") { s in
+        requireCarousel(Scenario.run("cycle nominal thirds") { s in
             let f = CarouselFixture(s, presets: [1.0/3, 0.5, 1]), a = f.ids[0], b = f.ids[1]
             f.press("alt-r")
-            f.near(f.frame(a).width, f.width(0.5), "cycling an expanded nominal third chooses half")
-            f.near(f.frame(a).minX, f.area.minX, "cycling leaves expansion at the same left edge")
+            f.near(f.frame(a).width, f.width(0.5), "cycling a nominal third chooses half")
+            f.near(f.frame(a).minX, f.area.minX, "cycling keeps the same left edge")
             for p in [2.0/3, 1, 1.0/3] { f.press("alt-r"); f.near(f.frame(a).width, f.width(p), "next preset \(p)") }
             f.press("alt-l"); f.focus(b)
             let left = f.frame(b).minX
@@ -88,12 +106,12 @@ import Testing
             })
         }
         if maximum {
-            requireCarousel(Scenario.run("a constrained edge bounces without trying rejected expansion") { s in
+            requireCarousel(Scenario.run("a constrained edge bounces without a size write") { s in
                 let f = CarouselFixture(s, presets: [0.5, 0.5], duration: 0), b = f.ids[1]
                 f.app.limitSize(b, maximum: CGSize(width: f.area.width * 0.8, height: 100_000))
                 f.press("alt-l"); f.press("alt-r"); f.press("alt-r")
                 f.mac.clearMotionHistory(); f.press("alt-l")
-                s.expect("a rejected full width is not retried by edge expansion", !f.mac.geometryWrites.contains { $0.attribute == .size })
+                s.expect("a press at the end never resizes the end window", !f.mac.geometryWrites.contains { $0.attribute == .size })
                 f.invariants("maximum-constrained edge")
             })
         }
@@ -116,14 +134,14 @@ import Testing
             f.press("alt-r"); f.near(f.frame(b).width, f.width(0.5), "next preset above forty percent is half")
         })
         for end in [false, true] {
-            requireCarousel(Scenario.run("mouse width leaves \(end ? "end" : "start") expansion") { s in
+            requireCarousel(Scenario.run("mouse width at the \(end ? "end" : "start") of the rail") { s in
                 let f = CarouselFixture(s)
                 if end { for _ in 0..<3 { f.press("alt-l") } }
                 let id = end ? f.ids[2] : f.ids[0]
-                f.expanded(id); f.mac.clearMotionHistory()
+                f.focus(id); f.mac.clearMotionHistory()
                 f.app.resize(id, to: CGSize(width: f.area.width * 0.4, height: f.area.height)); s.settle()
-                f.near(f.frame(id).width, f.area.width * 0.4, "a mouse resize ends expansion and keeps its exact width")
-                s.expect("leaving expansion does not resize the mouse-controlled tile", !f.mac.geometryWrites.contains { $0.window == id && $0.attribute == .size })
+                f.near(f.frame(id).width, f.area.width * 0.4, "a mouse resize at a rail end keeps its exact width")
+                s.expect("tessel does not resize the mouse-controlled tile", !f.mac.geometryWrites.contains { $0.window == id && $0.attribute == .size })
             })
         }
     }

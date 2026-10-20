@@ -23,11 +23,12 @@ The optional `[experiments] carousel = true` experiment arranges each workspace
 as remembered rows of windows. Option+H/L visits edge stops without wrapping;
 Option+K/J moves between rows. Add Shift to move the window instead.
 Option+R cycles widths through one third, one half, two thirds and full.
-Short rows stretch to fill the area, and an end window can expand without
-changing its nominal width. Fully off-screen windows use the same hidden Space.
-Carousel enables workspaces by itself. Layout changes use an 80 ms spring through
-Accessibility; `[animation] duration` accepts 0–1000 ms, and macOS Reduce Motion
-makes them instant. Workspace switches and sends remain instant.
+Short rows stretch to fill the area. A window keeps its width at either end of
+a row. Fully off-screen windows use the same hidden Space.
+Carousel enables workspaces by itself. Layout changes animate for 250 ms by moving
+window captures while the windows are placed underneath, which needs Screen
+Recording; without it, or with macOS Reduce Motion, changes are instant.
+`[animation] duration` accepts 0–1000 ms. Workspace switches and sends remain instant.
 
 Build from source with Xcode 27 using [the development guide](docs/development.md).
 
@@ -36,6 +37,7 @@ Build from source with Xcode 27 using [the development guide](docs/development.m
 - Apple silicon
 - macOS 27 or later
 - The Accessibility permission
+- Screen Recording, only for the carousel experiment's animations
 
 ## License
 

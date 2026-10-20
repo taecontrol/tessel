@@ -13,7 +13,7 @@ import Testing
             load(base)
             s.expect("carousel activates independently of workspaces", t.status.enabled && t.status.layout == "carousel")
             s.expect("default alt-r cycles width", t.status.keys["alt-r"] == "cycle width")
-            s.expect("omitted animation defaults to eighty milliseconds", encodedDuration(t.configuration.effective) == 80)
+            s.expect("omitted animation defaults to 250 milliseconds", encodedDuration(t.configuration.effective) == 250)
             for value in [0,1,80,400,1000] {
                 load(base + "[animation]\nduration = \(value)\n")
                 s.expect("duration \(value) is accepted", t.configuration.error == nil && encodedDuration(t.configuration.effective) == value)
@@ -39,20 +39,22 @@ import Testing
         })
     }
 
-    @Test("#26 E23: JSON status reports carousel, effective duration and current rail counts")
+    @Test("#26 E23: JSON status reports carousel, effective duration, why motion is off, and current rail counts")
     func statusEncodesEffectiveAnimationDuration() {
         requireCarousel(Scenario.run("carousel JSON status") { s in
             let f = CarouselFixture(s)
-            @MainActor func check(_ duration: Int, rail: Int, count: Int) {
+            @MainActor func check(_ duration: Int, rail: Int, count: Int, motion: String = "on") {
                 let json = encodedObject(f.tessel.status)
                 s.expect("JSON layout is carousel", json["layout"] as? String == "carousel")
                 s.expect("JSON effective animation duration is \(duration)", json["animationDuration"] as? Int == duration)
+                s.expect("JSON motion is \(motion), got \(String(describing: json["motion"]))", json["motion"] as? String == motion)
                 s.expect("JSON current rail and count are present", json["rail"] as? Int == rail && json["railCount"] as? Int == count)
             }
-            check(80, rail: 1, count: 1)
-            f.select(f.ids[2]); f.press("alt-shift-j"); check(80, rail: 2, count: 2)
-            f.mac.setReduceMotion(true); s.settle(); check(0, rail: 2, count: 2)
+            check(250, rail: 1, count: 1)
+            f.select(f.ids[2]); f.press("alt-shift-j"); check(250, rail: 2, count: 2)
+            f.mac.setReduceMotion(true); s.settle(); check(0, rail: 2, count: 2, motion: "off: Reduce Motion")
             f.mac.setReduceMotion(false); s.settle(); f.configure(duration: 400); s.settle(); check(400, rail: 2, count: 2)
+            f.mac.setScreenRecording(false); f.press("alt-h"); check(0, rail: 2, count: 2, motion: "off: Screen Recording permission needed")
         })
     }
 }

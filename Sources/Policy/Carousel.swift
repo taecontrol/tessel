@@ -1,7 +1,8 @@
 import CoreGraphics
 import Foundation
 
-/// A bounded strip per rail. Nominal widths survive stretching and expansion;
+/// A bounded strip per rail. Nominal widths survive stretching, and a window
+/// keeps its width at either end of the rail;
 /// the presenter supplies accepted sizes without making navigation decisions.
 struct Carousel {
     static let presets = [1.0 / 3, 0.5, 2.0 / 3, 1]
@@ -12,14 +13,11 @@ struct Carousel {
         var minimum: Double = 1
         var maximum: Double = .infinity
     }
-    enum Expansion { case start, end }
     struct Rail {
         let identity: UInt64
         var tiles: [Tile] = []
         var offset: Double = 0
         var focused: UInt32?
-        var expanded: Expansion?
-        var acceptsInitialExpansion = true
     }
     struct Workspace {
         var rails: [Rail] = []
@@ -87,8 +85,6 @@ struct Carousel {
         let x = geometry(ws.rails[p.rail])[p.slot].minX
         ws.rails[p.rail].tiles[p.slot].preset = nil
         ws.rails[p.rail].tiles[p.slot].size.width = min(width, value)
-        ws.rails[p.rail].expanded = nil
-        ws.rails[p.rail].acceptsInitialExpansion = false
         anchor(&ws.rails[p.rail], id: id, x: x)
         reveal(&ws.rails[p.rail])
         workspaces[p.workspace] = ws
@@ -111,7 +107,6 @@ struct Carousel {
             tile.size.width = min(tile.maximum, max(tile.minimum, tile.size.width))
         }
         ws.rails[p.rail].tiles[p.slot] = tile
-        if tile.maximum < width - 1 { ws.rails[p.rail].expanded = nil }
         reveal(&ws.rails[p.rail])
         workspaces[p.workspace] = ws
     }
@@ -119,10 +114,6 @@ struct Carousel {
         guard let p = location(id), var ws = workspaces[p.workspace] else { return }
         ws.current = p.rail
         let changed = ws.rails[p.rail].focused != id
-        if changed {
-            ws.rails[p.rail].expanded = nil
-            ws.rails[p.rail].acceptsInitialExpansion = false
-        }
         ws.rails[p.rail].focused = id
         // Reasserting focus after a stop must not reveal past that stop.
         if changed { reveal(&ws.rails[p.rail]) }
@@ -133,7 +124,6 @@ struct Carousel {
         if ws.rails.isEmpty { ws.rails.append(makeRail()) }
         ws.rails[0].tiles.append(tile)
         if ws.rails[0].focused == nil { ws.rails[0].focused = tile.id }
-        if ws.rails[0].acceptsInitialExpansion, canExpand(ws.rails[0], at: 0) { ws.rails[0].expanded = .start }
         workspaces[workspace] = ws
     }
     mutating func insert(_ tile: Tile, workspace: Int, restoring: Bool = false) {
@@ -152,8 +142,6 @@ struct Carousel {
         let anchorID = left.flatMap { id in rail.tiles.contains { $0.id == id } ? id : nil } ?? rail.focused
         let index = anchorID.flatMap { id in rail.tiles.firstIndex { $0.id == id } }
         let x = index.map { geometry(rail)[$0].minX }
-        rail.expanded = nil
-        rail.acceptsInitialExpansion = false
         rail.tiles.insert(tile, at: index.map { $0 + 1 } ?? 0)
         if let anchorID, let x { anchor(&rail, id: anchorID, x: x) }
         rail.focused = tile.id
@@ -175,8 +163,6 @@ struct Carousel {
             ws.current = max(0, min(ws.current, ws.rails.count - 1))
         } else {
             let x = geometry(rail)[neighborIndex].minX
-            ws.rails[p.rail].expanded = nil
-            ws.rails[p.rail].acceptsInitialExpansion = false
             ws.rails[p.rail].tiles.remove(at: p.slot)
             if rail.focused == id { ws.rails[p.rail].focused = neighbor }
             if let neighbor { anchor(&ws.rails[p.rail], id: neighbor, x: x) }
@@ -201,8 +187,6 @@ struct Carousel {
         let candidates = Self.presets.filter { fits(tile, $0) }
         guard let next = candidates.first(where: { presetWidth($0) > current + 1 }) ?? candidates.first else { return }
         rail.tiles[p.slot].preset = next
-        rail.expanded = nil
-        rail.acceptsInitialExpansion = false
         anchor(&rail, id: id, x: x); reveal(&rail)
         ws.rails[p.rail] = rail; workspaces[p.workspace] = ws
     }
@@ -210,11 +194,6 @@ struct Carousel {
         guard var ws = workspaces[workspace], ws.rails.indices.contains(ws.current) else { return nil }
         var rail = ws.rails[ws.current]
         guard let i = rail.tiles.firstIndex(where: { $0.id == rail.focused }) else { return nil }
-        rail.acceptsInitialExpansion = false
-        if let expanded = rail.expanded {
-            if (expanded == .end) == (direction > 0) { return nil }
-            rail.expanded = nil
-        }
         let ahead: (Int) -> Bool = { ($0 - i) * direction > 0 }
         func nearest(_ indices: [Int]) -> Int? { indices.sorted { ($0 - $1) * direction < 0 }.first }
         if let next = nearest(whole(rail).filter(ahead)) {
@@ -223,8 +202,6 @@ struct Carousel {
             rail.offset = stop
             let complete = whole(rail)
             if let next = nearest(complete.filter(ahead)) ?? (complete.contains(i) ? i : complete.first) { rail.focused = rail.tiles[next].id }
-        } else if i == (direction > 0 ? rail.tiles.count - 1 : 0), canExpand(rail, at: i) {
-            rail.expanded = direction > 0 ? .end : .start
         } else { return nil }
         ws.rails[ws.current] = rail; workspaces[workspace] = ws
         return rail.focused
@@ -240,8 +217,6 @@ struct Carousel {
         let j = p.slot + direction
         guard rail.tiles.indices.contains(j) else { return false }
         let x = geometry(rail)[p.slot].minX, other = rail.tiles[j].id
-        rail.expanded = nil
-        rail.acceptsInitialExpansion = false
         rail.tiles.swapAt(p.slot, j)
         anchor(&rail, id: other, x: x); reveal(&rail)
         ws.rails[p.rail] = rail; workspaces[p.workspace] = ws
@@ -273,16 +248,11 @@ struct Carousel {
         for w in widths { starts.append(x); x += w + gap }
         return (starts, widths, max(0, x - gap))
     }
-    private func geometry(_ rail: Rail, expanded: Bool = true) -> [CGRect] {
+    private func geometry(_ rail: Rail) -> [CGRect] {
         let m = strip(rail), n = rail.tiles.count
         guard n > 0 else { return [] }
         var widths = m.widths, xs = m.starts.map { $0 - rail.offset }
-        if expanded, let end = rail.expanded {
-            let i = end == .start ? 0 : n - 1
-            widths[i] = min(width, rail.tiles[i].maximum)
-            var x = end == .start ? 0 : widths[i] - widths.reduce(0, +) - gap * Double(n - 1)
-            for j in 0..<n { xs[j] = x; x += widths[j] + gap }
-        } else if m.total < width {
+        if m.total < width {
             // Accepted maxima cap a tile; remaining capacity goes to its peers.
             var free = Set(0..<n), remaining = max(0, width - gap * Double(n - 1))
             while !free.isEmpty {
@@ -298,10 +268,7 @@ struct Carousel {
         return (0..<n).map { CGRect(x: xs[$0], y: 0, width: widths[$0], height: rail.tiles[$0].size.height) }
     }
     private func whole(_ rail: Rail) -> [Int] {
-        geometry(rail, expanded: false).enumerated().compactMap { i, f in f.minX >= -1e-6 && f.maxX <= width + 1e-6 ? i : nil }
-    }
-    private func canExpand(_ rail: Rail, at i: Int) -> Bool {
-        rail.tiles.count > 1 && rail.tiles[i].maximum >= width - 1 && geometry(rail, expanded: false)[i].width < width - 1e-6
+        geometry(rail).enumerated().compactMap { i, f in f.minX >= -1e-6 && f.maxX <= width + 1e-6 ? i : nil }
     }
     private func clamp(_ rail: inout Rail) { rail.offset = max(0, min(max(0, strip(rail).total - width), rail.offset)) }
     private func anchor(_ rail: inout Rail, id: UInt32, x: Double) {
@@ -309,7 +276,7 @@ struct Carousel {
         rail.offset = strip(rail).starts[i] - x; clamp(&rail)
     }
     private func reveal(_ rail: inout Rail) {
-        guard rail.expanded == nil, let i = rail.tiles.firstIndex(where: { $0.id == rail.focused }) else { return }
+        guard let i = rail.tiles.firstIndex(where: { $0.id == rail.focused }) else { return }
         let m = strip(rail)
         if m.starts[i] < rail.offset { rail.offset = m.starts[i] }
         if m.starts[i] + m.widths[i] > rail.offset + width { rail.offset = m.starts[i] + m.widths[i] - width }

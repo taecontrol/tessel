@@ -15,7 +15,8 @@ import Testing
     var mac: SimulatedMac { s.mac }
     static let config = "[experiments]\ncarousel = true\n"
 
-    init(_ s: Scenario, presets: [Double] = [0.5, 0.5, 0.5], duration: Int = 80, reduced: Bool = false, minimumFractions: [Int:Double] = [:]) {
+    init(_ s: Scenario, presets: [Double] = [0.5, 0.5, 0.5], duration: Int = 250, reduced: Bool = false, minimumFractions: [Int:Double] = [:],
+         maximumFractions: [Int: Double] = [:]) {
         self.s = s
         s.mac.setScreen(ScreenGeometry(frame: CGRect(x: 0, y: 0, width: 1728, height: 1117),
                                        visibleFrame: CGRect(x: 0, y: 0, width: 1728, height: 1084)))
@@ -24,7 +25,8 @@ import Testing
         let app = s.mac.launch()
         self.app = app
         ids = presets.enumerated().map { index, p in
-            var spec = WindowSpec(frame: CGRect(x: 40, y: 60, width: p * 1718 - 10, height: 1064), minimumSize: CGSize(width: max(1,(minimumFractions[index] ?? 0) * 1708), height: 1), positionAcceptance: .screenEdges)
+            var spec = WindowSpec(frame: CGRect(x: 40, y: 60, width: p * 1718 - 10, height: 1064), minimumSize: CGSize(width: max(1,(minimumFractions[index] ?? 0) * 1708), height: 1),
+                                  maximumSize: CGSize(width: (maximumFractions[index] ?? 100) * 1708, height: 100_000), positionAcceptance: .screenEdges)
             spec.closetHeightLoss = 312
             return app.open(spec)
         }

@@ -27,6 +27,26 @@ struct NativeContractReply: Codable {
     let pointerEvents: [String]?
     let reduceMotion: Bool?
     let motionChanges: [Bool]?
+    let screenRecording: Bool?
+    let preflightStable: Bool?
+    let preflightMilliseconds: Double?
+    struct Stage: Codable {
+        let captureSize: [Double]?
+        let scale: Double?
+        let frameBefore: [Double]?
+        let frameAfter: [Double]?
+        let frontmostBefore: Int32?
+        let frontmostAfter: Int32?
+        let opaque: Double?
+        let captureMilliseconds: Double?
+        let overlayListedMilliseconds: Double?
+        let overlayDrawnMilliseconds: Double?
+        let overlayLayer: Int?
+        let menuBarLayer: Int?
+        let ignoresMouse: Bool?
+        let key: Bool?
+    }
+    let stage: Stage?
     let sampledAt: Double?
     struct Window: Codable {
         let id: UInt32
