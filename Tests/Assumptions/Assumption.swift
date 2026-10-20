@@ -36,6 +36,7 @@ package enum Assumption: String, CaseIterable, Sendable {
     case terminationActivationOrder = "termination-activation-order"
     case nativeTabPublication = "native-tab-publication"
     case deferredAXActivation = "deferred-ax-activation"
+    case activationKeyRestoration = "activation-key-restoration"
     case minimizeFocusInterruption = "minimize-focus-interruption"
     case axFrontmostActivation = "ax-frontmost-activation"
 
@@ -101,6 +102,7 @@ package enum Assumption: String, CaseIterable, Sendable {
         case .terminationActivationOrder: "A dying process may still satisfy a liveness probe when macOS activates a survivor before termination notification delivery; window destruction, process exit and lifecycle delivery are separate."
         case .nativeTabPublication: "A native tab's bar can identify its successor while AXWindows still lists the former root and AXFocusedWindow is temporarily unpublished."
         case .deferredAXActivation: "AX can accept activation before the app becomes active; pending activation may complete asynchronously, on a main or raise write, or on another activation request."
+        case .activationKeyRestoration: "An AX activation can finish after the AXMain and AXRaise that follow it; when the selected window is in the closet, the app's previous key window becomes key again, and AXMain and AXRaise after the activation select the requested window."
         case .minimizeFocusInterruption: "AX main or raise can cancel pending minimization; after completion main leaves it minimized, while raise restores it and may return cannotComplete before the restore finishes."
         case .axFrontmostActivation: "AXFrontmost activation orders every window of the app above other apps' windows; CG can apply that order after AX already reports the app frontmost and its focused window."
         }

@@ -161,6 +161,9 @@ private final class AppWindows: @unchecked Sendable {
     // selection whose activation facts have not arrived yet.
     private var focusIntent = UUID()
     private var railActivationCheck: (token: UUID, work: any ScheduledWork)?
+    // AppKit can finish an activation after AX accepted it and then make the
+    // app's previous key window key again over tessel's request.
+    private var awaitedActivation: (intent: UUID, id: UInt32, expiry: any ScheduledWork)?
     private var constrained = Set<UInt32>()
     private struct Validation {
         let area: CGRect
@@ -473,11 +476,18 @@ private final class AppWindows: @unchecked Sendable {
     }
 
     private func publishSnapshot(replacing replacements: [UInt32: UInt32] = [:]) {
-        var focused: UInt32 = 0
-        if let window = try? value(application, .focusedWindow)?.element {
-            // Equal AX handles do not inherit each other's messaging timeout.
-            ax.setMessagingTimeout(window, seconds: 0.05)
-            focused = ax.windowID(window).value ?? 0
+        var focused = focusedWindow()
+        if change == .activation, let awaited = awaitedActivation {
+            awaited.expiry.cancel()
+            awaitedActivation = nil
+            // The activation tessel requested made another window key: select
+            // the requested one again, now that the app is active.
+            if focused != awaited.id, presentationLock.withLock({ focusIntent == awaited.intent }),
+               let window = elementsByID[awaited.id], (try? canPresent(window, id: awaited.id)) == true,
+               (try? check(ax.set(.main, of: window, to: .bool(true)))) != nil,
+               (try? check(ax.perform(.raise, on: window))) != nil {
+                focused = focusedWindow()
+            }
         }
         let frontmost = (try? value(application, .frontmost)?.bool) == true
         if frontmost {
@@ -495,6 +505,13 @@ private final class AppWindows: @unchecked Sendable {
         publish(observations, focused == 0 ? nil : focused, frontmost, change, activationToken)
         change = .snapshot
         activationToken = nil
+    }
+
+    private func focusedWindow() -> UInt32 {
+        guard let window = try? value(application, .focusedWindow)?.element else { return 0 }
+        // Equal AX handles do not inherit each other's messaging timeout.
+        ax.setMessagingTimeout(window, seconds: 0.05)
+        return ax.windowID(window).value ?? 0
     }
 
     private func frame(_ window: AXElement) throws -> CGRect {
@@ -614,12 +631,23 @@ private final class AppWindows: @unchecked Sendable {
             guard presentationLock.withLock({ presentation == token }) else { return }
             if focus {
                 guard try canPresent(window,id:id) else { return }
+                let active = try value(application, .frontmost)?.bool == true
                 try check(ax.set(.frontmost, of: application, to: .bool(true)))
                 guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return }
                 try check(ax.set(.main, of: window, to: .bool(true)))
                 guard presentationLock.withLock({ presentation == token }), try value(window, .minimized)?.bool != true,
                       isNativeFront(window,id:id) else { return }
                 try check(ax.perform(.raise, on: window))
+                awaitedActivation?.expiry.cancel()
+                awaitedActivation = nil
+                if !active {
+                    let intent = presentationLock.withLock { focusIntent }
+                    let expiry = queue.after(milliseconds: 1000) { [weak self] in
+                        guard let self, self.awaitedActivation?.intent == intent else { return }
+                        self.awaitedActivation = nil
+                    }
+                    awaitedActivation = (intent, id, expiry)
+                }
                 // AX accepts an activation request before it necessarily
                 // becomes active. Retry once only while it is unconfirmed.
                 railActivationCheck?.work.cancel()

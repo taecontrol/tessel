@@ -310,6 +310,39 @@ extension Acceptance.Contracts {
         try expectFocus(id)
     }
 
+    @Test("activation-key-restoration: an activation can key the previous window over a closeted selection until it is selected again", contract(.activationKeyRestoration))
+    func activationKeyRestoration() throws {
+        let previous = try fixture.open(key: "previous"), requested = try fixture.open(key: "requested")
+        let cover = try other()
+        _ = try cover.open()
+        try native("closetStart")
+        defer { _ = try? native("closetStop") }
+        var restored = 0
+        let trials = 16
+        for _ in 0..<trials {
+            try desktop.activate(key: "previous")
+            try expectFocus(previous)
+            try desktop.activate(cover)
+            try native("closetHide", ["ids": [requested]])
+            try requireFinalState("the requested window leaves the active Space") { !(try native().visible.contains(requested)) }
+            // tessel's order: activate, then main and raise at once, while
+            // the window is still in the closet.
+            try #require(try native("activateSelecting", ["id": requested]).results == [0, 0, 0])
+            try requireFinalState("the activation completes") { try native().frontmost == true }
+            sleep(seconds: 0.2)
+            let focus = try #require(try native().focused?.id)
+            try #require(focus == requested || focus == previous, "the activation keys the requested or the previous window")
+            if focus == previous {
+                restored += 1
+                for attribute in ["AXMain", "AXRaise"] { try #require(try write(requested, attribute) == 0) }
+                try expectFocus(requested)
+            }
+            try native("closetShow", ["ids": [requested]])
+            try expectFocus(requested)
+        }
+        print("Activation key restoration: the previous key window won \(restored) of \(trials) activations")
+    }
+
     @Test("minimize-focus-interruption: focus writes cancel pending minimize; only raise restores a completed minimize", contract(.minimizeFocusInterruption), arguments: ["AXMain", "AXRaise"])
     func minimizeFocusInterruption(_ attribute: String) throws {
         _ = try fixture.open(key: "sibling")

@@ -226,6 +226,27 @@ import Testing
         })
     }
 
+    @Test("a cross-app rail change keeps its focus when the completing activation keys the app's previous window")
+    func activationKeysPreviousWindow() {
+        requireCarousel(Scenario.run("activation keys the previous window") { s in
+            let f = CarouselFixture(s, presets: [0.5, 0.5]), y = f.ids[1]
+            let other = f.mac.launch()
+            let spec = WindowSpec(frame: CGRect(x: 40, y: 60, width: 849, height: 1064), positionAcceptance: .screenEdges)
+            let b = other.open(spec), d = other.open(spec)
+            s.settle()
+            f.select(y); f.press("alt-shift-j")
+            other.select(d); s.settle(); f.press("alt-shift-j")
+            f.press("alt-k"); other.select(b); s.settle(); f.focus(b)
+            f.press("alt-j"); f.focus(d)
+            f.press("alt-h"); f.focus(y)
+            s.expect("the other app's last key window is in the bottom rail", other.focusedWindow == d)
+            other.restoreKeyOverClosetOnNextActivation()
+            f.press("alt-k")
+            f.focus(b)
+            s.expect("the top rail stays current", f.tessel.status.rail == 1 && !f.mac.isVisible(d))
+        })
+    }
+
     @Test("#26 E14: a rail change slides both rails as one sheet, swaps the real rails once underneath, and each rail remembers its state")
     func railsSlideAsOneSheet() {
         requireCarousel(Scenario.run("vertical sheet") { s in

@@ -104,6 +104,14 @@ final class FixtureContracts: NSObject {
             return [:]
         case "cgFrames":
             return ["cgFrames": Dictionary(uniqueKeysWithValues: fixtureCGFrames([pid]).map { (String($0.key), $0.value.frame) })]
+        case "activateSelecting":
+            // tessel's focus burst: activate the app, then make the window
+            // main and raise it without waiting for the activation.
+            let window = try retained(command, pid: pid)
+            let results = [AXUIElementSetAttributeValue(application, kAXFrontmostAttribute as CFString, kCFBooleanTrue),
+                           AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue),
+                           AXUIElementPerformAction(window, kAXRaiseAction as CFString)]
+            return ["results": results.map(\.rawValue)]
         case "stageCapture":
             guard let id = command["id"] as? UInt32 else { throw FixtureContractError("a stage capture needs a window") }
             _ = try retained(["id": id], pid: pid)

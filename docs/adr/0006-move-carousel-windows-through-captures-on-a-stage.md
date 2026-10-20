@@ -85,6 +85,10 @@ real windows over 40 ms. In any case it clears 300 ms after settling.
   captures are not retaken for it.
 - A placement that supersedes an unconfirmed focus request carries that focus
   forward.
+- The requested window is still in the closet when its app activates. AppKit
+  can finish that activation after AXMain and AXRaise and make the app's
+  previous key window key again (`activation-key-restoration`). The app's
+  worker selects the requested window again when the activation arrives.
 
 **Repeated commands** retarget the stand-ins from where they are on screen and
 keep their speed: toward the new rest, the faster of the speed they have and
@@ -157,8 +161,9 @@ and transparent, so a show draws without ordering it in again.
 - The 300 ms limit bounds how long a slow app's frozen capture can stay on
   screen.
 - New simulator assumptions, each pinned by a signed contract:
-  `screen-recording-preflight`, `stage-whole-window-capture` and
-  `stage-overlay`. `display-frame-demand` is retired with the display link.
+  `screen-recording-preflight`, `stage-whole-window-capture`,
+  `stage-overlay` and `activation-key-restoration`. `display-frame-demand` is
+  retired with the display link.
   The stage contracts need Screen Recording for the signed fixture observer.
 - This supersedes ADR-0005's animation, vertical cards and display-link
   decisions. Its findings about AX clamps, closet identity, resize anchoring

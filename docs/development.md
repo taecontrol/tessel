@@ -436,7 +436,11 @@ A pointer press, native fullscreen entry, disabling the experiment and a
 layout change clear the stage at once; the pointer case keeps the user's
 geometry. A failed capture clears it and places the windows at once. A
 placement that supersedes an unconfirmed focus request carries that focus
-forward. A native selection reported during the motion is still followed: the
+forward. A window focused while still in the closet can lose key when AppKit
+finishes the app's activation after AXMain and AXRaise: the app's previous key
+window becomes key again. The app's worker selects the requested window once
+more when that activation arrives, within 1 s of the request, so the rail does
+not follow the previous window back. A native selection reported during the motion is still followed: the
 placement that carries out the motion does not invalidate external focus
 decisions. A command that arrives while such a decision waits its 50 ms first
 follows the selection, so it acts on the window the user just chose. The stage
