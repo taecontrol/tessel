@@ -197,7 +197,8 @@ bottom edge by two points on its 1024×768 display. It creates a short-lived
 certificate in a temporary keychain, removed at the end; no signing material is
 stored in GitHub. Before any harness suite, `scripts/ci-accessibility` grants the
 development app and fixture Accessibility and Screen Recording on that disposable
-runner. Only `CI=true`
+runner, and records their screen-capture approval so macOS does not interrupt the
+first capture with an alert that takes focus. Only `CI=true`
 together with `GITHUB_ACTIONS=true` enables
 Accessibility denial and restart steps. Local runs use the signed development
 bundle's existing permissions and never provision the TCC database.

@@ -21,6 +21,7 @@ struct NativeContractReply: Codable {
         let frontmost: Int32
     }
     let cgFrames: [String: [Double]]?
+    let foreground: [String]?
     let motionSamples: [MotionSample]?
     let motionFrameCount: Int?
     let pointerPresses: Int?

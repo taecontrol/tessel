@@ -65,6 +65,16 @@ final class FixtureContracts: NSObject {
             }]
         case "clearEvents": events.removeAll(); eventElements.removeAll(); return [:]
         case "finder", "activateFinder": return try finder(activate: operation == "activateFinder")
+        case "foreground":
+            // What holds the screen when a journey loses focus: the frontmost
+            // app and the owners of on-screen windows, without titles.
+            let front = NSWorkspace.shared.frontmostApplication
+            let owners = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? [])
+                .compactMap { window -> String? in
+                    guard let layer = window[kCGWindowLayer as String] as? Int, layer >= 0 else { return nil }
+                    return "\(window[kCGWindowOwnerName as String] as? String ?? "?")@\(layer)"
+                }
+            return ["foreground": ["front \(front?.bundleIdentifier ?? front?.localizedName ?? "none")"] + owners]
         case "screenRecording": return stage.preflight()
         case "stageOverlayShow": return stage.showOverlay()
         case "stageOverlayHide": stage.hideOverlay(); return [:]

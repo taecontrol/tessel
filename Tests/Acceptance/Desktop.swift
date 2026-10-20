@@ -67,7 +67,10 @@ struct Desktop {
                 last = "area \(observation.area), " + (window.map { "frame \($0.frame), visible \($0.visible), main \($0.main), focused \($0.focused)" } ?? "window absent")
                 return shown(id, in: observation, gap: gap)
             }
-        } catch { throw HarnessError("\(error); last observation: \(last)") }
+        } catch {
+            let foreground = (try? harness.observer.command("contract", ["operation": "foreground"]).contract?.foreground)?.joined(separator: ", ") ?? "unknown"
+            throw HarnessError("\(error); last observation: \(last); foreground: \(foreground)")
+        }
     }
 
     func expectFocus(_ id: UInt32) throws {

@@ -22,4 +22,14 @@ done
 for bundle_id in com.taecontrol.tessel.dev com.taecontrol.tessel.fixture; do
     sudo sqlite3 "$database" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags, last_modified) VALUES ('kTCCServiceScreenCapture','$bundle_id',0,2,4,1,0,strftime('%s','now'));"
 done
+# macOS also asks to keep allowing a direct screen capture on an app's first
+# capture, and that alert takes focus mid-journey. Record an approval for each
+# signed app; a runner that refuses the write only loses the shortcut.
+approvals="$HOME/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals.plist"
+root=$(cd "$(dirname "$0")/.." && pwd)
+for app in "$root/.build/apps/Tessel Dev.app" "$root/.build/apps/Tessel Fixture.app"; do
+    executable="$app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
+    defaults write "$approvals" "$executable" -date "4000-01-01 00:00:00 +0000" \
+        || echo "Screen capture approval for $app was not recorded" >&2
+done
 echo 'Accessibility and Screen Recording permission test state provisioned on the disposable runner.'
