@@ -40,6 +40,11 @@ extension Acceptance.Contracts {
         try native("closetHide", ["ids": [id]])
         try requireFinalState("the window leaves the active Space") { try native("spaces", ["ids": [id]]).memberships?.first?.ordinary.isEmpty == true }
         try capture("in the closet")
+        // Like the other closet contracts, return the window and let it rejoin
+        // the active Space before the closet is destroyed, so the next
+        // contract's native transitions start from a settled desktop.
+        try native("closetShow", ["ids": [id]])
+        try requireFinalState("the window rejoins the active Space") { try native("spaces", ["ids": [id]]).memberships?.first?.ordinary.isEmpty == false }
     }
 
     @Test("stage-overlay: a click-through floating overlay is listed and reads back drawn within the stage's wait, above windows and below the menu bar, without taking focus", contract(.stageOverlay))
