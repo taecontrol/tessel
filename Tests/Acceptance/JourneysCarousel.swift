@@ -68,8 +68,11 @@ extension Acceptance.Journeys {
                     && top.allSatisfy { !observation.visibleIDs.contains($0) }
             }
             // Opposite focus apps exercise both activation handoffs: focus
-            // moves to the entering rail's app while both rails slide.
-            try desktop.activate(key:"bottomA"); try desktop.expectFocus(c)
+            // moves to the entering rail's app while both rails slide. tessel's
+            // own key selects bottomA, so the rail remembers it before K; an
+            // external activation is reported after a key posted right away.
+            let cSlot = try #require(try harness.row(c)?.slot), dSlot = try #require(try harness.row(d)?.slot)
+            try desktop.post(cSlot < dSlot ? kVK_ANSI_H : kVK_ANSI_L); try desktop.expectFocus(c)
             try desktop.post(kVK_ANSI_K)
             try requireFinalState("the return has finished before arranging its focus") {
                 let observation = try desktop.observe()

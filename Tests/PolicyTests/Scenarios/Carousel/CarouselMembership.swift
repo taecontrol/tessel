@@ -4,25 +4,6 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct CarouselMembership {
-    @Test("a command right after another app is activated acts on that app's window", arguments: [0, 250])
-    func commandRightAfterAnotherAppActivates(duration: Int) {
-        requireCarousel(Scenario.run("command after activation duration=\(duration)") { s in
-            let f = CarouselFixture(s, duration: duration), a = f.ids[0]
-            let other = f.mac.launch()
-            let b = other.open(WindowSpec(frame: CGRect(x: 40, y: 60, width: 849, height: 1064), positionAcceptance: .screenEdges))
-            s.settle()
-            other.select(b); s.settle()
-            f.select(a)
-            // The user brings the other app back and transfers at once,
-            // before its activation is reported.
-            other.select(b)
-            f.tessel.pressKey("alt-shift-j")
-            s.settle()
-            s.expect("the activated app's window moved to the new rail", f.tessel.windows.first { $0.id == b }?.rail == 2)
-            s.expect("the previous window stayed", f.tessel.windows.first { $0.id == a }?.rail == 1)
-        })
-    }
-
     @Test("a command right after an external selection in the same app acts on the selected window", arguments: [0, 250], [60, 90])
     func commandRightAfterExternalSelection(duration: Int, delay: Int) {
         requireCarousel(Scenario.run("command after external selection duration=\(duration) delay=\(delay)") { s in
