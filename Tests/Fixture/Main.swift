@@ -219,6 +219,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
         case "windowLevels":
             let ordinary = makeWindow(key: "ordinary", kind: "standard")
             let dialog = makeWindow(key: "dialog", kind: "dialog")
+            makeWindow(key: "panel", kind: "panel")
             ordinary.level = .normal
             dialog.level = .normal
             let popup = NSWindow(contentRect: NSRect(x: 140, y: 180, width: 376, height: 22),

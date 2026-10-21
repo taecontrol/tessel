@@ -619,11 +619,13 @@ Hidden floats retain `state: "floats"`, workspace membership, null `rail` and
 `slot`, and `visible: false` in `windows --json`. Manual classifications report
 `floats` / `moved to the layer` or `tiled` / `moved to a rail`.
 
-Classification is fixed independently of the flag: tessel manages CG layer-zero
-windows with subrole `AXStandardWindow`, `AXDialog`, `AXSystemDialog`, or
-`AXFloatingWindow`. A nonzero layer is `ignored` with reason `window level <n>`,
-checked before the subrole. Other subroles are `ignored` with that subrole as
-the reason. Ignored records have null `workspace`, `rail` and `slot`; their
+Classification is fixed independently of the flag: tessel manages windows at CG
+layer 0 or the floating level 3 with subrole `AXStandardWindow`, `AXDialog`,
+`AXSystemDialog`, or `AXFloatingWindow`. Layer 3 includes apps' own floating
+utility panels, inspectors and palettes. Every other layer is `ignored` with
+reason `window level <n>`, checked before the subrole. Other subroles are
+`ignored` with that subrole as the reason. Ignored records have null `workspace`,
+`rail` and `slot`; their
 appearance or removal changes neither focus history nor layouts. Native
 fullscreen remains detected through `AXFullScreen`, including a transient
 `AXUnknown` fullscreen root. The catalog reads CG levels only for the IDs it

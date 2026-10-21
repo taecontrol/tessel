@@ -25,9 +25,10 @@ package struct WindowSpec: Sendable {
                  resizable: Bool = true, minimumSize: CGSize = CGSize(width: 1, height: 1),
                  maximumSize: CGSize = CGSize(width: 100_000, height: 100_000), parent: UInt32? = nil,
                  positionAcceptance: PositionAcceptance = .rightEdgeStrip, offDisplayMembership: OffDisplayMembership = .included,
-                 minimizedRaiseReply: MinimizedRaiseReply = .success, cgLayer: Int = 0, popupParent: UInt32? = nil) {
+                 minimizedRaiseReply: MinimizedRaiseReply = .success, cgLayer: Int? = nil, popupParent: UInt32? = nil) {
         self.frame = frame; self.subrole = subrole; self.resizable = resizable
-        self.cgLayer = cgLayer; self.popupParent = popupParent
+        // Floating NSPanel utilities default to layer 3; apps can override it.
+        self.cgLayer = cgLayer ?? (subrole == "AXFloatingWindow" ? 3 : 0); self.popupParent = popupParent
         self.minimumSize = minimumSize; self.maximumSize = maximumSize; self.parent = parent
         self.positionAcceptance = positionAcceptance
         self.offDisplayMembership = offDisplayMembership

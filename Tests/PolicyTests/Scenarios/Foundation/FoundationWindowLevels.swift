@@ -4,9 +4,9 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct FoundationWindowLevels {
-    @Test("#19 E1: non-zero CG layers are ignored without membership, movement or focus", arguments: [Layout.off, .carousel])
-    func nonzeroWindowLevelsAreIgnored(_ layout: Layout) {
-        requireLayer(Scenario.run("non-zero native levels without the layer flag, layout=\(layout.rawValue)") { s in
+    @Test("#19 E1: only normal and floating CG levels are managed; other layers cannot affect membership, movement or focus", arguments: [Layout.off, .carousel])
+    func managedAndIgnoredWindowLevels(_ layout: Layout) {
+        requireLayer(Scenario.run("native levels without the layer flag, layout=\(layout.rawValue)") { s in
             let app = s.mac.launch(windows: 1), t = s.startTessel(layout); s.settle()
             let tile = app.windows[0]
             let cases = [(8, "AXSystemDialog"), (21, "AXSystemDialog"), (24, "AXDialog"), (-2_147_483_601, "AXUnknown")]
@@ -28,6 +28,13 @@ import Testing
                 s.expect("ignored windows never enter or leave the closet", !s.mac.visibilityChanges.flatMap(\.windows).contains(id))
                 s.expect("the native window stays visible and unmoved", s.mac.isVisible(id) && !s.mac.isInCloset(id) && s.mac.frame(id) == frame)
             }
+            let panel = app.open(WindowSpec(subrole: "AXFloatingWindow"), background: true)
+            s.settle()
+            s.expect("a floating panel uses CG layer 3", s.mac.windowOrder.windowLevels([panel])[panel] == 3)
+            FoundationProof.row(panel, in: t, state: .floats, reason: "AXFloatingWindow", scenario: s)
+            let row = t.windows.first { $0.id == panel }
+            s.expect("a managed panel has no rail or slot", row?.rail == nil && row?.slot == nil)
+            if layout == .carousel { s.expect("a floating panel joins the active workspace", row?.workspace == 1) }
         })
     }
 
@@ -115,7 +122,8 @@ import Testing
             let cases: [(WindowSpec, String)] = [
                 (WindowSpec(subrole: "AXDialog"), "AXDialog"),
                 (WindowSpec(subrole: "AXSystemDialog"), "AXSystemDialog"),
-                (WindowSpec(subrole: "AXFloatingWindow"), "AXFloatingWindow"),
+                // This example retains the app's explicit normal-level override.
+                (WindowSpec(subrole: "AXFloatingWindow", cgLayer: 0), "AXFloatingWindow"),
                 (WindowSpec(resizable: false), "fixed size"),
                 (WindowSpec(maximumSize: CGSize(width: 500, height: 100_000)), "cannot fill the screen"),
             ]

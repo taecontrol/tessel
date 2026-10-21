@@ -88,6 +88,10 @@ IDs, failed/non-array reads and retained closed handles. They do not publish
 catalog rows or decide workspace membership. The production catalog must
 interpret the resulting port calls.
 
+`WindowSpec` defaults `AXFloatingWindow` panels to CG layer 3 and other windows
+to layer 0, as pinned by `window-levels`. Set `cgLayer` explicitly for an app's
+level override, such as a normal-level panel, or for a system surface.
+
 Content tabs flatten their selected page: an empty page contributes no contents
 or child, while a populated page exposes its static-text leaf in both AXContents
 and AXChildren. The content handles remain distinct from the tab buttons.

@@ -95,6 +95,9 @@ final class WindowCatalog {
 private enum AXReadError: Error { case unresponsive, gone, changed }
 
 private struct WindowFacts {
+    // Layer 3 holds apps' own floating utility panels, inspectors and palettes.
+    private static let managedWindowLevels: Set<Int> = [0, 3]
+
     let id: UInt32
     let minimized: Bool
     var fullscreen: Bool
@@ -113,7 +116,7 @@ private struct WindowFacts {
     func record(app: String, bundleId: String, hidden: Bool) -> WindowRecord {
         let state: WindowState
         var reason: String
-        if level != 0 { state = .ignored; reason = "window level \(level)" }
+        if !Self.managedWindowLevels.contains(level) { state = .ignored; reason = "window level \(level)" }
         // AXFullScreen remains authoritative while a native transition exposes
         // a temporary root with an unknown subrole.
         else if fullscreen { state = .fullscreen; reason = "native fullscreen" }
