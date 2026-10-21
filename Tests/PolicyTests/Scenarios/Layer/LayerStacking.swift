@@ -57,6 +57,36 @@ import Testing
 }
 
 @Suite @MainActor struct LayerStacking {
+    @Test("#19 E9: spec gap — pinning before a deferred layer entry activates still restacks once B is frontmost", arguments: WriteOrder.allCases)
+    func pinDuringDeferredEntry(_ writes: WriteOrder) {
+        requireLayer(Scenario.run("pin during deferred layer entry / \(writes)", writes: writes) { s in
+            let f = LayerStackingFixture(s)
+            // B is the MRU float, while A's second tile covers A's float.
+            f.press("toggle layer"); f.press("focus right"); f.press("toggle layer"); f.press("focus right")
+            f.apps[1].deferNextActivation(completion: .nextRequest)
+            let start = f.mac.scheduler.trace.count
+            f.mac.clearMotionHistory()
+            f.tessel.press("toggle layer")
+            let held = f.mac.pause(after: .read(f.apps[1]))
+            if case .paused = held {} else { s.expect("B's unconfirmed focus read is held: \(held)", false) }
+            s.expect("A still owns keyboard focus when pinning", f.mac.frontmostApp == f.apps[0].pid)
+            // Pinning keeps the same logical selection without requesting
+            // focus again, and cancels the presenter's activation retry.
+            f.tessel.press("pin layer")
+            s.settle()
+            s.expect("no background float is raised while A is still frontmost: \(f.raises(since: start))",
+                     f.raises(since: start).allSatisfy { ![f.floats[0], f.floats[2]].contains($0) })
+            f.apps[1].select(f.floats[1])
+            s.settle()
+            f.stacking(focus: f.floats[1], owner: f.apps[1].pid)
+            let raised = f.raises(since: start).filter { f.floats.contains($0) && $0 != f.floats[1] }
+            s.expect("one pass after B's activation raises C, then A: \(raised)", raised == [f.floats[2], f.floats[0]])
+            s.expect("each background raise preserves B's float focus", f.mac.focusEffects.filter {
+                $0.raisedWindow.map { [f.floats[0], f.floats[2]].contains($0) } ?? false
+            }.allSatisfy { $0.window == f.floats[1] })
+        })
+    }
+
     @Test("#19 E9: a cold stage retarget retains restacking until the selected tile's native activation", arguments: WriteOrder.allCases)
     func retargetRetainsDeferredActivation(_ writes: WriteOrder) {
         requireLayer(Scenario.run("cold pinned retarget during activation / \(writes)", writes: writes) { s in
@@ -177,6 +207,23 @@ import Testing
             s.expect("every extra float raise keeps the new tile's keyboard focus", f.mac.focusEffects.filter {
                 $0.raisedWindow.map { f.floats.contains($0) } ?? false
             }.allSatisfy { $0.window == f.tiles[2] })
+        })
+    }
+
+    @Test("#19 E27: a pinned cross-app tile focus under motion raises each visible background float once", arguments: WriteOrder.allCases)
+    func animatedRaiseBudget(_ writes: WriteOrder) {
+        requireLayer(Scenario.run("animated pinned raise budget / \(writes)", writes: writes) { s in
+            let f = LayerStackingFixture(s, duration: 250)
+            f.press("pin layer"); f.press("cycle width"); f.press("focus right")
+            let start = f.mac.scheduler.trace.count
+            f.mac.clearMotionHistory()
+            // The stage focuses B's tile early; native focus confirms during
+            // the motion, before the real windows are placed under it.
+            f.press("focus right")
+            s.expect("the change runs on the stage", f.mac.stageEvents.contains { if case .show = $0.kind { true } else { false } })
+            f.stacking(focus: f.tiles[2], owner: f.apps[1].pid)
+            let raised = f.raises(since: start).filter { f.floats.contains($0) }
+            s.expect("one pass after placement raises C, then A: \(raised)", raised == [f.floats[2], f.floats[0]])
         })
     }
 
