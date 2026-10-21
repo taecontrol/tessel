@@ -13,6 +13,7 @@ final class Workspaces {
         let pid: Int32
         var workspace: Int?
         var recent: UInt64 = 0
+        var manual: WindowState? = nil
     }
     private let store: any WindowPublishing
     private let applications: any ApplicationPort
@@ -74,7 +75,16 @@ final class Workspaces {
         var pending: Set<UInt32>
     }
     private var carouselPresentation: CarouselPresentation?
-    private var carouselEnabled: Bool { configuration.experiments["carousel"] == true }
+    private var carouselEnabled: Bool { configuration.carouselEnabled }
+    private var layerEnabled: Bool { configuration.layerEnabled }
+    private var layers: [Int: FloatingLayer] = [:]
+    private var layerPlacements: [UInt32: CGRect] = [:]
+    private var desktopFocusObservation: (any ApplicationObservation)?
+    private var layerHandoff: (token: UInt64, selection: UInt32)?
+    private var layer: FloatingLayer {
+        get { layers[status.active] ?? FloatingLayer() }
+        set { layers[status.active] = newValue }
+    }
     private var focused: UInt32?
     private var clock: UInt64 = 0
     private var closet: WindowCloset?
@@ -137,7 +147,9 @@ final class Workspaces {
         carousel.width = area.width
         carousel.gap = next.gaps.outer
         status.layout = carouselEnabled ? "carousel" : "stack"
-        let layoutChanged = old.experiments["carousel"] != next.experiments["carousel"]
+        let layoutChanged = old.carouselEnabled != next.carouselEnabled
+        let layerChanged = old.layerEnabled != next.layerEnabled
+        if layerChanged { clearStage(); layers.removeAll() }
         if status.enabled && layoutChanged {
             clearStage()
             if !carouselEnabled { catalog?.returnInside(ids: Set(entries.keys.filter { entries[$0]?.workspace != nil && entries[$0]?.observation.record.state != .fullscreen }), area: area) }
@@ -154,7 +166,7 @@ final class Workspaces {
             installKeys()
             // A layout change retains the native selection. Its notification
             // can still be queued behind an app's current AX read.
-            render(focusing: focused, relayout: true, takeFocus: false)
+            render(focusing: layerEnabled && layerChanged ? carousel.remembered(status.active) : focused, relayout: true, takeFocus: false)
         }
         if !status.enabled {
             do { try closet.start() }
@@ -171,14 +183,19 @@ final class Workspaces {
             // focus back, so render without a focus request. A fresh report
             // then selects whichever window really has focus.
             var nativeFocus: UInt32?
-            if let front = enablingFront, let current = appFocus[front], available(current) {
+            if let front = enablingFront, let current = appFocus[front], available(current), !layerEnabled || !floating(current) {
                 rememberInitialFocus(current)
                 nativeFocus = current
             }
             installKeys()
+            if layerEnabled, focused.map(floating) == true { focused = carousel.remembered(1) }
             if !entries.isEmpty { render(focusing: focused ?? preferred(in: 1), relayout: true, takeFocus: nativeFocus == nil) }
         } else {
-            if old.keys != next.keys { installKeys() }
+            if old.keys != next.keys || layerChanged { installKeys() }
+            if layerChanged && !layoutChanged {
+                let selection = layerEnabled ? carousel.remembered(status.active) : focused
+                render(focusing: selection, relayout: false, instant: true)
+            }
             if old.gaps != next.gaps {
                 if carouselEnabled {
                     carousel.resizeArea(height: area.height)
@@ -194,8 +211,12 @@ final class Workspaces {
         hotkeys?.stop()
         hotkeys = nil
         let keys = configuration.keys.filter { binding in
-            guard !carouselEnabled, let command = WorkspaceCommand(binding.value) else { return true }
-            switch command { case .focus, .move, .cycleWidth: return false; default: return true }
+            guard let command = WorkspaceCommand(binding.value) else { return true }
+            switch command {
+            case .toggleLayer, .pinLayer, .toggleFloat: return layerEnabled
+            case .focus, .move, .cycleWidth: return carouselEnabled
+            default: return true
+            }
         }
         do { hotkeys = try hotkeyInstaller.install(keys: keys) { [weak self] in self?.perform($0) } }
         catch { disable(reason: "Could not register workspace hotkeys") }
@@ -220,6 +241,10 @@ final class Workspaces {
         closet?.stop(returning: entries.filter { $0.value.workspace != nil && $0.value.observation.record.state != .fullscreen }.map(\.key))
         closeted.removeAll()
         arrival.removeAll()
+        layers.removeAll()
+        desktopFocusObservation = nil
+        layerHandoff = nil
+        layerPlacements.removeAll()
         focused = nil
         expectedFocus = nil
         for id in entries.keys { entries[id]?.workspace = nil }
@@ -274,6 +299,7 @@ final class Workspaces {
         var restored: [UInt32] = []
         var changedTiling = false
         var newlyTiled = Set<UInt32>()
+        var newFloats: [UInt32] = []
         var enteredFullscreen = false
         var resizedRail = false
         // A pointer interruption gives geometry back to the user. Drop sizing
@@ -282,10 +308,14 @@ final class Workspaces {
         let interruptedHere = interruptedSizing.intersection(incoming)
         carouselSizing.subtract(interruptedHere)
         interruptedSizing.subtract(interruptedHere)
-        for observation in observations.sorted(by: { $0.record.id < $1.record.id }) {
+        for var observation in observations.sorted(by: { $0.record.id < $1.record.id }) {
             let id = observation.record.id
             let old = entries[id]
-            entries[id] = Entry(observation: observation, pid: pid, workspace: old?.workspace, recent: old?.recent ?? 0)
+            if let manual = old?.manual, availableState(observation.record.state) {
+                observation.record.state = manual
+                observation.record.reason = manual == .floats ? "moved to the layer" : "moved to a rail"
+            }
+            entries[id] = Entry(observation: observation, pid: pid, workspace: old?.workspace, recent: old?.recent ?? 0, manual: old?.manual)
             if observation.record.state == .fullscreen || observation.record.state == .ignored || !primary(observation) {
                 if old?.workspace != nil {
                     detach(id)
@@ -320,6 +350,7 @@ final class Workspaces {
             if let old, availableState(old.observation.record.state), available(id), old.observation.record.state != observation.record.state {
                 changedTiling = true
                 if observation.record.state == .tiled { newlyTiled.insert(id) }
+                if layerEnabled && floating(id) { newFloats.append(id) }
             }
         }
         guard status.enabled else { publish(); return }
@@ -328,9 +359,15 @@ final class Workspaces {
             expectedFocus = nil
             // A coalesced destruction snapshot can also remove the neighbor
             // captured while the focused window was detached.
-            focused = closeSelection.flatMap { available($0) ? $0 : nil }
-                ?? (lostCurrent && carouselEnabled ? carousel.remembered(status.active) : nil)
-                ?? mostRecent(in: status.active)
+            if layerEnabled {
+                if case .single(let id) = layer.entry, !floating(id) { layer.entry = .rails }
+                if floatingOrder(in: status.active).isEmpty { layer = FloatingLayer() }
+                focused = preferred(in: status.active)
+            } else {
+                focused = closeSelection.flatMap { available($0) ? $0 : nil }
+                    ?? (lostCurrent && carouselEnabled ? carousel.remembered(status.active) : nil)
+                    ?? mostRecent(in: status.active)
+            }
             needsRender = true
         }
         // Entering a native fullscreen Space is the user's operation. Keep the
@@ -349,14 +386,20 @@ final class Workspaces {
         let restoredRoots = restored.filter { entries[$0]?.observation.parent == nil }
         let restoredFocus = reportedFocus.flatMap { restoredRoots.contains($0) ? $0 : nil }
             ?? restoredRoots.max { (entries[$0]?.recent ?? 0) < (entries[$1]?.recent ?? 0) }
-        if let restored = restoredFocus {
+        let initialEnumeration = firstSnapshot && (!carouselEnabled || initialApplications.contains(pid))
+        if layerEnabled && !initialEnumeration { newFloats += newWindows.filter { floating($0) } }
+        if let newFloat = newFloats.last, entries[newFloat]?.workspace == status.active {
+            layer.arrive(newFloat)
+            remember(newFloat)
+            render(focusing: newFloat, relayout: false, instant: true)
+        } else if let restored = restoredFocus {
             if let workspace = entries[restored]?.workspace { status.active = workspace }
+            if layerEnabled && floating(restored) { layer.entry = .all }
             remember(restored)
             render(focusing: restored, relayout: false, layoutWindows: Set(restoredRoots))
         } else if let newest = newWindows.last(where: { available($0) && entries[$0]?.observation.parent == nil }) {
             // Initial enumeration preserves the app's actual focused window. Later
             // creations join the end of arrival order and become visible immediately.
-            let initialEnumeration = firstSnapshot && (!carouselEnabled || initialApplications.contains(pid))
             let selection = initialEnumeration && frontmost ? reportedFocus.flatMap { available($0) ? $0 : nil } ?? newest : newest
             if initialEnumeration && !frontmost && pid != enablingFront, let current = focused, available(current) {
                 // Discovery redraws cancel pending writes, but must finish a
@@ -365,7 +408,10 @@ final class Workspaces {
             } else if initialEnumeration && !frontmost && pid != enablingFront && focused == nil {
                 render(focusing: nil, relayout: false, activateDesktop: false, layoutWindows: Set(newWindows))
             } else {
-                if initialEnumeration && frontmost { rememberInitialFocus(selection) }
+                if initialEnumeration && frontmost {
+                    if layerEnabled && floating(selection) { layer.entry = .all }
+                    rememberInitialFocus(selection)
+                }
                 else { remember(selection) }
                 // Startup discovers a native selection; it does not request
                 // one. This read can already predate a newer user selection.
@@ -419,7 +465,16 @@ final class Workspaces {
                 externalSelection = (pid, reportedFocus)
             }
         }
+        finishLayerHandoff()
         publish()
+    }
+
+    private func finishLayerHandoff() {
+        guard let handoff = layerHandoff, handoff.token == transition, status.enabled, layerEnabled,
+              available(handoff.selection), entries[handoff.selection]?.workspace == status.active,
+              applications.frontmostPID.flatMap({ appFocus[$0] }) == handoff.selection else { return }
+        layerHandoff = nil
+        render(focusing: handoff.selection, relayout: false, takeFocus: false, instant: true)
     }
 
     private var decisionPending: Bool { focusDecision != nil && externalSelection != nil }
@@ -440,13 +495,16 @@ final class Workspaces {
         let affectsVisible = removed.contains { $0.value.workspace == status.active && !closeted.contains($0.key) }
         let lostRailFocus = carouselEnabled && focused.map { removed[$0] != nil && carousel.location($0) != nil } == true
         for id in removed.keys { forget(id) }
+        if layerEnabled {
+            for workspace in Set(removed.values.compactMap(\.workspace)).sorted() { reconcileLayer(in: workspace) }
+        }
         knownApplications.remove(pid)
         appFocus.removeValue(forKey: pid)
         store.update(pid: pid, windows: nil)
         if status.enabled && affectsVisible {
             // App termination closes its tiles just like a destruction snapshot;
             // a floating MRU must not override the surviving rail's selection.
-            let selection = lostRailFocus ? carousel.remembered(status.active) ?? mostRecent(in: status.active) : preferred(in: status.active)
+            let selection = lostRailFocus && !layerEnabled ? carousel.remembered(status.active) ?? mostRecent(in: status.active) : preferred(in: status.active)
             render(focusing: selection, relayout: false)
         }
         publish()
@@ -461,6 +519,22 @@ final class Workspaces {
         }
         cancelFocusDecision()
         switch command {
+        case .toggleLayer:
+            guard layerEnabled else { return }
+            if layer.focused {
+                layer.entry = .rails
+                render(focusing: carousel.remembered(status.active), relayout: false, instant: true)
+            } else if let next = preferredFloat(in: status.active) {
+                layer.entry = .all
+                render(focusing: next, relayout: false, instant: true)
+            }
+        case .pinLayer:
+            guard layerEnabled else { return }
+            layer.togglePin()
+            render(focusing: focused, relayout: false, takeFocus: false, instant: true)
+        case .toggleFloat:
+            guard layerEnabled else { return }
+            toggleFloat()
         case .workspace(let number):
             guard number != status.active else { return }
             status.active = number
@@ -482,11 +556,18 @@ final class Workspaces {
                 if let tile { carousel.insert(tile, workspace: number) }
                 else { addCarouselTile(focused) }
             }
+            if layerEnabled && floating(focused) {
+                reconcileLayer(in: workspace)
+                layers[number, default: FloatingLayer()].entry = .all
+            }
             status.active = number
             remember(focused)
             render(focusing: focused, relayout: false, layoutWindows: [focused], instant: true)
         case .focus(let direction):
             guard carouselEnabled else { return }
+            if layerEnabled && layer.focused {
+                navigateLayer(direction == .left || direction == .up ? -1 : 1); break
+            }
             if entries[focused ?? 0]?.observation.record.state == .floats && carousel.location(focused ?? 0) == nil {
                 perform(direction == .left || direction == .up ? .previous : .next); return
             }
@@ -511,6 +592,9 @@ final class Workspaces {
             // even if the resulting target frames match the previous layout.
             render(focusing:focused,relayout:false)
         case .next, .previous:
+            if layerEnabled && layer.focused {
+                navigateLayer({ if case .next = command { 1 } else { -1 } }()); break
+            }
             if carouselEnabled, let focused, carousel.location(focused) != nil {
                 guard let next = carousel.focusX(status.active,direction: { if case .next = command { return 1 }; return -1 }()) else {
                     if case .next = command { bounce(.right) } else { bounce(.left) }; return
@@ -553,6 +637,7 @@ final class Workspaces {
     private func selectExternalFocus(_ id: UInt32, layoutWindows: Set<UInt32>) {
         guard let workspace = entries[id]?.workspace else { return }
         status.active = workspace
+        if layerEnabled { layer.entry = floating(id) ? .all : .rails }
         remember(id)
         // The native operation already selected this window. A queued raise
         // can otherwise interrupt a minimize that begins after this snapshot.
@@ -563,6 +648,7 @@ final class Workspaces {
     private func render(focusing selection: UInt32?, relayout: Bool, activateDesktop: Bool = true, takeFocus: Bool = true,
                         layoutWindows: Set<UInt32> = [], instant: Bool = false) {
         guard status.enabled, let closet else { return }
+        if layerEnabled, let selection, carousel.location(selection) != nil { layer.entry = .rails }
         if carouselEnabled { renderCarousel(focusing: selection, activateDesktop: activateDesktop, takeFocus: takeFocus, instant: instant); return }
         cancelFocusDecision()
         transition += 1
@@ -667,6 +753,8 @@ final class Workspaces {
         if let workspace = entry.workspace, let index = arrival[workspace]?.firstIndex(of: previous) {
             arrival[workspace]?[index] = id
         }
+        if let workspace = entry.workspace, layers[workspace]?.entry == .single(previous) { layers[workspace]?.entry = .single(id) }
+        if let frame = layerPlacements.removeValue(forKey: previous) { layerPlacements[id] = frame }
         carousel.replace(previous,with:id)
         if let frame = carouselPresentation?.frames.removeValue(forKey: previous) { carouselPresentation?.frames[id] = frame }
         if carouselPresentation?.pending.remove(previous) != nil { carouselPresentation?.pending.insert(id) }
@@ -698,6 +786,7 @@ final class Workspaces {
         detach(id)
         entries.removeValue(forKey: id)
         closeted.remove(id)
+        layerPlacements[id] = nil
     }
 
     private func rememberInitialFocus(_ id: UInt32) {
@@ -721,6 +810,10 @@ final class Workspaces {
     }
 
     private func preferred(in workspace: Int) -> UInt32? {
+        if layerEnabled {
+            if layers[workspace]?.focused == true { return preferredFloat(in: workspace) ?? carousel.remembered(workspace) }
+            return carousel.remembered(workspace).flatMap { available($0) ? $0 : nil }
+        }
         let recent = mostRecent(in: workspace)
         if carouselEnabled {
             // Floating dialogs retain the workspace's focus history; tiles
@@ -760,6 +853,7 @@ final class Workspaces {
     private func onScreen() -> Set<UInt32> { Set(windowOrder.onScreenOrder()) }
 
     private func publish() {
+        status.layer = status.enabled && layerEnabled ? layer.status : nil
         status.animationDuration = motionDuration
         status.motion = configuration.animation.duration == 0 ? "off: duration 0"
             : motionPreferences?.reduceMotion == true ? "off: Reduce Motion"
@@ -778,7 +872,8 @@ final class Workspaces {
             if carouselEnabled && status.enabled, let p = carousel.location(id) {
                 row.rail = p.rail+1; row.slot = p.slot+1
                 row.state = .tiled
-                if let size = carousel.size(id), size.height < area.height-2 { row.reason = "maximum height; aligned to top" }
+                if entries[id]?.manual == .tiled { row.reason = "moved to a rail" }
+                else if let size = carousel.size(id), size.height < area.height-2 { row.reason = "maximum height; aligned to top" }
                 else if row.reason == "cannot fill the screen" { row.reason = "standard window" }
             }
             rows[entry.pid, default: []].append(row)
@@ -792,7 +887,74 @@ final class Workspaces {
 
     private func railTile(_ id: UInt32) -> Bool {
         guard let e = entries[id], e.workspace != nil, e.observation.parent == nil, available(id) else { return false }
-        return e.observation.record.state == .tiled || e.observation.record.reason == "cannot fill the screen"
+        return e.observation.record.state == .tiled || !layerEnabled && e.observation.record.reason == "cannot fill the screen"
+    }
+
+    private func floating(_ id: UInt32) -> Bool {
+        guard let entry = entries[id], entry.workspace != nil, entry.observation.parent == nil else { return false }
+        return entry.observation.record.state == .floats && carousel.location(id) == nil
+    }
+
+    private func floatingOrder(in workspace: Int) -> [UInt32] {
+        (arrival[workspace] ?? []).filter { floating($0) }
+    }
+
+    private func preferredFloat(in workspace: Int) -> UInt32? {
+        floatingOrder(in: workspace).reduce(nil) { best, id in
+            guard let best else { return id }
+            return (entries[id]?.recent ?? 0) > (entries[best]?.recent ?? 0) ? id : best
+        }
+    }
+
+    private func reconcileLayer(in workspace: Int) {
+        if floatingOrder(in: workspace).isEmpty { layers[workspace] = FloatingLayer() }
+        else if case .single(let id) = layers[workspace]?.entry,
+                entries[id]?.workspace != workspace || !floating(id) { layers[workspace]?.entry = .rails }
+    }
+
+    private func navigateLayer(_ step: Int) {
+        let order = floatingOrder(in: status.active)
+        guard !order.isEmpty else { return }
+        let index = focused.flatMap { order.firstIndex(of: $0) } ?? 0
+        layer.entry = .all
+        render(focusing: order[(index + step + order.count) % order.count], relayout: false, instant: true)
+    }
+
+    private func toggleFloat() {
+        guard let id = focused, let entry = entries[id], entry.workspace == status.active,
+              available(id), entry.observation.parent == nil else { return }
+        if carousel.location(id) != nil {
+            carousel.remove(id)
+            carouselSizing.remove(id)
+            carouselSizes[id] = nil
+            entries[id]?.manual = .floats
+            entries[id]?.observation.record.state = .floats
+            entries[id]?.observation.record.reason = "moved to the layer"
+            arrival[status.active]?.removeAll { $0 == id }
+            arrival[status.active, default: []].append(id)
+            layerPlacements[id] = CGRect(x: area.midX - area.width / 4, y: area.midY - area.height / 3,
+                                         width: area.width / 2, height: area.height * 2 / 3)
+            layer.entry = .all
+        } else if floating(id) {
+            guard entry.observation.resizable else {
+                if motionDuration > 0, let screen = screens.primaryScreen {
+                    bounceStage(CGPoint(x: 1, y: 0), frames: [id: entry.observation.frame], bounds: screen.frame, duration: motionDuration)
+                }
+                return
+            }
+            entries[id]?.manual = .tiled
+            entries[id]?.observation.record.state = .tiled
+            entries[id]?.observation.record.reason = "moved to a rail"
+            let width = entry.observation.frame.width
+            let preset = Carousel.presets.min {
+                let a = abs(carousel.presetWidth($0) - width), b = abs(carousel.presetWidth($1) - width)
+                return abs(a - b) < 1e-6 ? $0 > $1 : a < b
+            }
+            carousel.insert(Carousel.Tile(id: id, size: CGSize(width: width, height: area.height), preset: preset), workspace: status.active)
+            carouselSizes[id] = entry.observation.frame.size
+            layer.entry = .rails
+        } else { return }
+        render(focusing: id, relayout: false, instant: true)
     }
 
     private func addCarouselTile(_ id: UInt32, initial: Bool = false, restoring: Bool = false) {
@@ -834,6 +996,14 @@ final class Workspaces {
         return configuration.animation.duration
     }
 
+    private var pinnedFrames: [UInt32: CGRect] {
+        guard layerEnabled, layer.pinned else { return [:] }
+        return Dictionary(uniqueKeysWithValues: floatingOrder(in: status.active).compactMap { id in
+            guard !closeted.contains(id), let entry = entries[id] else { return nil }
+            return (id, entry.observation.frame)
+        })
+    }
+
     /// Animated carousel changes run on the stage: captures of the windows that
     /// are seen move in tessel's overlay while the ordinary presenter places the
     /// real windows underneath, once each. The stage clears when the motion has
@@ -858,9 +1028,11 @@ final class Workspaces {
             if staging == nil { bounceStage(bounce, frames: previous.frames, bounds: bounds, duration: duration) }
             return
         }
-        let target = carousel.frames(status.active, area: area)
+        let tiles = carousel.frames(status.active, area: area)
+        let pinned = pinnedFrames
+        let target = tiles.merging(pinned) { _, float in float }
         let rail = carousel.current(status.active)?.identity, index = carousel.workspaces[status.active]?.current ?? 0
-        if staging == nil, previous.frames == target, previous.rail == rail, previous.pending.isEmpty {
+        if staging == nil, previous.frames == tiles, previous.rail == rail, previous.pending.isEmpty {
             renderCarouselInstant(focusing: selection, activateDesktop: activateDesktop, takeFocus: takeFocus)
             return
         }
@@ -874,7 +1046,7 @@ final class Workspaces {
             // A stand-in starts exactly where its window is, which can differ
             // from the layout after the user moved it. Parked and closeted
             // windows start at their unclamped strip position.
-            var rects = previous.frames
+            var rects = previous.frames.merging(pinned) { _, float in float }
             for (id, rect) in previous.frames where !closeted.contains(id) {
                 if let observed = entries[id]?.observation.frame, observed != rect, observed.intersection(bounds).width > 1 { rects[id] = observed }
             }
@@ -891,11 +1063,11 @@ final class Workspaces {
         var to = target, entering: [UInt32: CGRect] = [:]
         // A window that left the rail goes with the leaving sheet; a closed
         // one loses its stand-in.
-        for (id, rect) in stagingNow.rects where target[id] == nil && available(id) { to[id] = rect.offsetBy(dx: 0, dy: -shift) }
+        for (id, rect) in stagingNow.rects where target[id] == nil && available(id) && !floating(id) { to[id] = rect.offsetBy(dx: 0, dy: -shift) }
         // A window new to the rail starts where it opened.
         for (id, rect) in target where stagingNow.rects[id] == nil {
             let opened = entries[id].map(\.observation.frame).flatMap { Self.onScreen($0, bounds) ? $0 : nil }
-            entering[id] = vertical ? rect.offsetBy(dx: 0, dy: shift) : previous.frames[id] ?? opened ?? rect
+            entering[id] = pinned[id] ?? (vertical ? rect.offsetBy(dx: 0, dy: shift) : previous.frames[id] ?? opened ?? rect)
         }
         let starts = stagingNow.rects.merging(entering) { current, _ in current }
         stagingNow.starts.merge(entering) { current, _ in current }
@@ -911,7 +1083,7 @@ final class Workspaces {
         // Every seen window is captured at once, and focus is requested. The
         // focus look changes when the real window replaces its stand-in.
         let focusChanges = takeFocus && focused != nil && focused != leavingFocus
-        stage.capture(seen, background: first ? Set(starts.keys).union(to.keys) : nil)
+        stage.capture(seen, background: first ? Set(starts.keys).union(to.keys) : nil, foreground: Set(pinned.keys))
         expectedFocus = takeFocus ? focused : nil
         let shown = starts.filter { seen.contains($0.key) }
         if first {
@@ -995,13 +1167,17 @@ final class Workspaces {
     /// and back; the real windows do not move.
     private func bounceStage(_ wall: CGPoint, frames: [UInt32: CGRect], bounds: CGRect, duration: Int) {
         guard let stage else { return }
-        let seen = frames.filter { Self.onScreen($0.value, bounds) && available($0.key) }
+        let pinned = pinnedFrames
+        let all = frames.merging(pinned) { original, _ in original }
+        let seen = all.filter { Self.onScreen($0.value, bounds) && available($0.key) }
         guard !seen.isEmpty else { return }
         stageGeneration += 1
         let generation = stageGeneration
-        staging = Staging(generation: generation, rects: frames, rail: carouselPresentation?.rail, railIndex: carouselPresentation?.railIndex ?? 0)
-        let offset = seen.mapValues { $0.offsetBy(dx: wall.x * area.width * 0.03, dy: wall.y * area.height * 0.03) }
-        stage.capture(Set(seen.keys), background: Set(frames.keys))
+        staging = Staging(generation: generation, rects: all, rail: carouselPresentation?.rail, railIndex: carouselPresentation?.railIndex ?? 0)
+        let offset = Dictionary(uniqueKeysWithValues: seen.map { id, rect in
+            (id, frames[id] == nil ? rect : rect.offsetBy(dx: wall.x * area.width * 0.03, dy: wall.y * area.height * 0.03))
+        })
+        stage.capture(Set(seen.keys), background: Set(all.keys), foreground: Set(seen.keys.filter { floating($0) }))
         // A command during the bounce retargets it like any motion.
         func bouncing() -> Bool { staging?.generation == generation && staging?.revision == 0 }
         stage.show(seen) { [weak self] ok in
@@ -1049,6 +1225,8 @@ final class Workspaces {
         guard status.enabled, let closet else { return }
         transition += 1
         let token = transition
+        desktopFocusObservation = nil
+        layerHandoff = nil
         if !keepFocus { expectedFocus = nil }
         catalog?.cancelPresentations(invalidatingFocus: takeFocus)
         if let selection, available(selection) { remember(selection) } else { focused = nil }
@@ -1058,6 +1236,7 @@ final class Workspaces {
         var show = Set(frames.filter { Self.onScreen($0.value, bounds) }.keys)
         show.formUnion(entries.keys.filter {
             entries[$0]?.workspace == status.active && available($0) && entries[$0]?.observation.parent == nil && carousel.location($0) == nil
+                && (!layerEnabled || layer.shows($0))
         })
         for id in entries.keys {
             if let parent = entries[id]?.observation.parent, show.contains(parent), available(id) { show.insert(id) }
@@ -1065,8 +1244,36 @@ final class Workspaces {
         let managed = Set(entries.keys.filter { entries[$0]?.workspace != nil && available($0) })
         let hide = managed.subtracting(show)
         let newlyShown = show.intersection(closeted).union(show.subtracting(onScreen()))
-        closet.hide(hide.subtracting(closeted).filter { entries[$0]?.observation.parent == nil })
         closet.show(newlyShown.filter { entries[$0]?.observation.parent == nil })
+        closeted.subtract(show)
+        // A modal can keep its app waiting in the closet, but it must first
+        // relinquish keyboard focus. Show and focus the destination before
+        // committing the hide, including a workspace switch from the layer.
+        if layerEnabled, let front = applications.frontmostPID, let native = appFocus[front], hide.contains(native) {
+            if let selection, show.contains(selection), let candidate = entries[selection] {
+                expectedFocus = selection
+                layerHandoff = (token, selection)
+                let target = newlyShown.contains(selection) ? frames[selection] : nil
+                catalog?.presentRail(pid: candidate.pid, id: selection, frame: target, position: target != nil,
+                                     resize: target != nil, focus: true, screenRight: screenRight) { [weak self] _ in
+                    guard let self, self.status.enabled, self.transition == token else { return }
+                    // Activation can still be unconfirmed at completion. Its
+                    // later catalog publication completes the same handoff.
+                    self.finishLayerHandoff()
+                    self.publish()
+                }
+            } else if activateDesktop {
+                desktopFocusObservation = applications.observe { [weak self] event, app in
+                    guard let self, event == .activated, app.pid != front, self.transition == token else { return }
+                    self.desktopFocusObservation = nil
+                    self.render(focusing: nil, relayout: false, activateDesktop: false, takeFocus: false, instant: true)
+                    self.publish()
+                }
+                activateFinderDesktop()
+            }
+            return
+        }
+        closet.hide(hide.subtracting(closeted).filter { entries[$0]?.observation.parent == nil })
         closeted.formUnion(hide); closeted.subtract(show)
         for id in show.sorted() {
             guard let frame = frames[id] else { continue }
@@ -1092,14 +1299,18 @@ final class Workspaces {
         }
         for id in ordered where entries[id]?.observation.parent == nil {
             guard let candidate = entries[id] else { continue }
-            let resize = carouselSizing.contains(id)
+            let floatTarget = layerPlacements[id]
+            let resize = carouselSizing.contains(id) || floatTarget != nil
             let position = positions.contains(id) || resize
-            let target = position || resize ? frames[id] : nil
+            let target = floatTarget ?? (position || resize ? frames[id] : nil)
             guard target != nil || takeFocus && id == focused else { continue }
             catalog?.presentRail(pid:candidate.pid,id:id,frame:target,position:position,resize:resize,focus:takeFocus && id == focused, screenRight: screenRight) { [weak self] accepted in
                 guard let self, self.status.enabled, self.carouselEnabled, self.transition == token else { return }
                 if let accepted {
                     self.carouselPresentation?.pending.remove(id)
+                    if floatTarget != nil {
+                        self.layerPlacements[id] = nil
+                    }
                     if underStage { self.staging?.placed[id] = accepted }
                 }
                 if resize, let accepted, let target {

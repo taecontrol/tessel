@@ -11,7 +11,7 @@ import Testing
         let stage = mac.stage
         #expect(stage.available)
         var shown: [Bool] = [], settled = 0
-        stage.capture([a, b], background: [a, b])
+        stage.capture([a, b], background: [a, b], foreground: [])
         stage.show([a: .zero, b: .zero]) { shown.append($0) }
         mac.settle()
         // Two windows then the background, 14 ms each; the overlay draws a frame later.
@@ -20,13 +20,13 @@ import Testing
         stage.move([a: CGRect(x: 10, y: 0, width: 1, height: 1)], entering: [:], duration: 0.25) { settled += 1 }
         mac.settle()
         #expect(settled == 1 && mac.stageEvents.last?.kind == .settled && mac.stageEvents.last?.at == 86 + 175)
-        stage.capture([b], background: nil)
+        stage.capture([b], background: nil, foreground: [])
         stage.refresh(a)
         stage.clear()
         mac.settle()
         #expect(mac.stageEvents.last?.kind == .clear)
         mac.failCapture(of: a)
-        stage.capture([a], background: nil)
+        stage.capture([a], background: nil, foreground: [])
         stage.show([a: .zero]) { shown.append($0) }
         mac.settle()
         #expect(shown == [true, false])

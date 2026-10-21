@@ -87,6 +87,7 @@ final class SystemMotionStage: MotionStagePort {
     /// The longest the stage waits for WindowServer to draw the overlay.
     private static let drawLimit = 0.15
     private var standIns: [UInt32: StandIn] = [:]
+    private var foreground = Set<UInt32>()
     /// One window's capture, measured once.
     private final class Capture: @unchecked Sendable {
         let sample: CMSampleBuffer
@@ -187,7 +188,9 @@ final class SystemMotionStage: MotionStagePort {
         return CGRect(x: main.frame.minX, y: menu, width: main.frame.width, height: main.frame.height - menu)
     }
 
-    func capture(_ windows: Set<UInt32>, background excluding: Set<UInt32>?) {
+    func capture(_ windows: Set<UInt32>, background excluding: Set<UInt32>?, foreground: Set<UInt32>) {
+        self.foreground.formUnion(foreground)
+        for (id, standIn) in standIns { standIn.container.zPosition = self.foreground.contains(id) ? 2 : 1 }
         let token = session
         if activity == nil {
             activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical], reason: "carousel motion")
@@ -202,7 +205,7 @@ final class SystemMotionStage: MotionStagePort {
                     // failed once: try once more, so a window first seen by a
                     // retarget still gets its stand-in.
                     self.captures[id] = nil
-                    if self.retried.insert(id).inserted { self.capture([id], background: nil) }
+                    if self.retried.insert(id).inserted { self.capture([id], background: nil, foreground: []) }
                 }
                 return image
             }
@@ -405,6 +408,7 @@ final class SystemMotionStage: MotionStagePort {
         ready.removeAll()
         refreshes.removeAll()
         retried.removeAll()
+        foreground.removeAll()
         background?.cancel(); background = nil
         lastMove = nil
         revealing += 1
@@ -477,6 +481,8 @@ final class SystemMotionStage: MotionStagePort {
         }
         guard let content, let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) else { return nil }
         let floating = Int(CGWindowLevelForKey(.floatingWindow))
+        // The policy excludes normal-level pinned floats as well as tiles;
+        // their own stand-ins cover the tiles above this backdrop.
         let excluded = content.windows.filter {
             excluding.contains($0.windowID) || $0.owningApplication?.processID == getpid() || $0.windowLayer >= floating
         }
@@ -542,6 +548,7 @@ final class SystemMotionStage: MotionStagePort {
 
     private func place(_ id: UInt32, image: Capture, at rect: CGRect) {
         let standIn = standIns[id] ?? StandIn()
+        standIn.container.zPosition = foreground.contains(id) ? 2 : 1
         standIn.rect = rect
         standIn.path = nil
         standIn.container.frame = rect

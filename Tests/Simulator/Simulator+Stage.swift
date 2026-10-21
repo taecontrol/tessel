@@ -75,7 +75,7 @@ extension SimulatedMac {
             mac.recordStage(.accessRequest)
         }
 
-        func capture(_ windows: Set<UInt32>, background excluding: Set<UInt32>?) {
+        func capture(_ windows: Set<UInt32>, background excluding: Set<UInt32>?, foreground: Set<UInt32>) {
             mac.assume(.stageWholeWindowCapture)
             mac.scheduler.call("MotionStagePort.capture")
             if let excluding { mac.stageState.backgroundExclusions.append(excluding) }
