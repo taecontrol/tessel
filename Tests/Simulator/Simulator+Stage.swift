@@ -19,16 +19,25 @@ extension SimulatedMac {
         package let at: Int
         package let kind: StageEventKind
     }
+    /// What policy asked for, even if an adapter deduplicates the work or a
+    /// later clear cancels it. Events above describe completed native work.
+    package struct StageCaptureRequest: Sendable {
+        package let at: Int
+        package let windows: Set<UInt32>
+        package let backgroundExcluding: Set<UInt32>?
+        package let foreground: Set<UInt32>
+        package let refreshing: Bool
+    }
     struct StageState {
         var screenRecording = true
         var events: [StageEvent] = []
+        var captureRequests: [StageCaptureRequest] = []
         var session = 0
         /// Captures are serial, like ScreenCaptureKit's.
         var captureCost = 14
         var busyUntil = 0
         var captured: [UInt32: Int] = [:]
         var backgroundReady: Int?
-        var backgroundExclusions: [Set<UInt32>] = []
         var shown = false
         var failing = Set<UInt32>()
         /// Counts moves, reveals and clears: a later one cancels an earlier
@@ -38,7 +47,7 @@ extension SimulatedMac {
 
     @MainActor package var stage: any MotionStagePort { Stage(mac: self) }
     @MainActor package var stageEvents: [StageEvent] { stageState.events }
-    @MainActor package var stageBackgroundExclusions: [Set<UInt32>] { stageState.backgroundExclusions }
+    @MainActor package var stageCaptureRequests: [StageCaptureRequest] { stageState.captureRequests }
     /// Screen Recording, which the stage needs.
     @MainActor package func setScreenRecording(_ granted: Bool) {
         action("Screen Recording=\(granted)")
@@ -46,7 +55,10 @@ extension SimulatedMac {
     }
     /// Failure injection: a window ScreenCaptureKit cannot capture.
     @MainActor package func failCapture(of id: UInt32) { stageState.failing.insert(id) }
-    @MainActor package func clearStageHistory() { stageState.events.removeAll() }
+    @MainActor package func clearStageHistory() {
+        stageState.events.removeAll()
+        stageState.captureRequests.removeAll()
+    }
 
     @MainActor private func recordStage(_ kind: StageEventKind) {
         stageState.events.append(StageEvent(at: scheduler.now, kind: kind))
@@ -77,8 +89,9 @@ extension SimulatedMac {
 
         func capture(_ windows: Set<UInt32>, background excluding: Set<UInt32>?, foreground: Set<UInt32>) {
             mac.assume(.stageWholeWindowCapture)
+            mac.stageState.captureRequests.append(StageCaptureRequest(at: mac.scheduler.now, windows: windows,
+                backgroundExcluding: excluding, foreground: foreground, refreshing: false))
             mac.scheduler.call("MotionStagePort.capture")
-            if let excluding { mac.stageState.backgroundExclusions.append(excluding) }
             let session = mac.stageState.session
             for id in windows.sorted() where mac.stageState.captured[id] == nil {
                 let done = max(mac.scheduler.now, mac.stageState.busyUntil) + mac.stageState.captureCost
@@ -159,6 +172,8 @@ extension SimulatedMac {
 
         func refresh(_ window: UInt32) {
             mac.assume(.stageWholeWindowCapture)
+            mac.stageState.captureRequests.append(StageCaptureRequest(at: mac.scheduler.now, windows: [window],
+                backgroundExcluding: nil, foreground: [], refreshing: true))
             mac.scheduler.call("MotionStagePort.refresh")
             let session = mac.stageState.session
             mac.scheduler.main.after(milliseconds: 17 + mac.stageState.captureCost) { [mac] in

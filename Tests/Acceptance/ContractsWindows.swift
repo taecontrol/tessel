@@ -2,12 +2,12 @@ import Foundation
 import Testing
 
 extension Acceptance.Contracts {
-    @Test("window-levels: CG layers distinguish ordinary roots, borderless child popups and status-bar windows", contract(.windowLevels))
+    @Test("window-levels: CG layers distinguish native roots and remain readable by ID off the active Space", contract(.windowLevels))
     func windowLevels() throws {
         let reply = try fixture.command("windowLevels")
         let ordinary = try #require(reply.windows["ordinary"]), dialog = try #require(reply.windows["dialog"])
         let popup = try #require(reply.windows["popup"]), status = try #require(reply.windows["status"])
-        // One native setup and one final-state observation, with no sleeps or
+        // One native setup and one closet round trip, with no sleeps or
         // repeated transitions; this contract is intended to cost about 1 s.
         try requireFinalState("the independent observer reads each native layer and AX root") {
             let roots = try native().roots
@@ -18,6 +18,24 @@ extension Acceptance.Contracts {
                 && high.layer.map { $0 != 0 } == true
                 && [a, b, child, high].allSatisfy { $0.subroleError == 0 && $0.roleError == 0 }
                 && !a.sheets.contains { $0.id == popup }
+        }
+        let started = try native("closetStart")
+        defer { _ = try? native("closetStop") }
+        let active = try #require(started.activeSpace), closet = try #require(started.closetSpace)
+        try #require(closet != 0 && closet != active)
+        try native("closetHide", ["ids": [dialog]])
+        try requireFinalState("CG still describes a fixture window by ID while it is only in the closet") {
+            let state = try native(), spaces = try native("spaces", ["ids": [dialog]])
+            let retained = try native("retained", ["id": dialog]).window
+            return spaces.activeSpace == active && spaces.memberships?.first?.ordinary.isEmpty == true
+                && spaces.memberships?.first?.all == [closet] && !state.visible.contains(dialog)
+                && retained?.id == dialog && retained?.layer == 0
+        }
+        try native("closetShow", ["ids": [dialog]])
+        try requireFinalState("the observed window returns to the active Space with the same readable layer") {
+            let state = try native(), spaces = try native("spaces", ["ids": [dialog]])
+            return spaces.activeSpace == active && spaces.memberships?.first?.ordinary == [active]
+                && state.visible.contains(dialog) && state.roots.first { $0.id == dialog }?.layer == 0
         }
     }
 

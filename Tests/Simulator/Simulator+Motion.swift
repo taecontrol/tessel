@@ -71,7 +71,8 @@ extension SimulatedMac {
         }
     }
     @MainActor package func clearMotionHistory() {
-        motion.writes.removeAll(); motion.visibility.removeAll(); motion.focusRequests.removeAll(); motion.focusEffects.removeAll(); stageState.events.removeAll()
+        motion.writes.removeAll(); motion.visibility.removeAll(); motion.focusRequests.removeAll(); motion.focusEffects.removeAll()
+        clearStageHistory()
     }
     func recordFocusEffect() {
         let window = front.flatMap { apps[$0]?.key }

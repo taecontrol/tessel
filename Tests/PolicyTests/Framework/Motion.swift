@@ -21,10 +21,16 @@ import Testing
         mac.settle()
         #expect(settled == 1 && mac.stageEvents.last?.kind == .settled && mac.stageEvents.last?.at == 86 + 175)
         stage.capture([b], background: nil, foreground: [])
+        stage.capture([b], background: [b], foreground: [])
         stage.refresh(a)
         stage.clear()
         mac.settle()
         #expect(mac.stageEvents.last?.kind == .clear)
+        // Requests survive deduplication and cancellation, including a second
+        // background request and a refresh that never completes.
+        #expect(mac.stageCaptureRequests.map(\.windows) == [Set([a, b]), [b], [b], [a]])
+        #expect(mac.stageCaptureRequests.compactMap(\.backgroundExcluding) == [Set([a, b]), [b]])
+        #expect(mac.stageCaptureRequests.map(\.refreshing) == [false, false, false, true])
         mac.failCapture(of: a)
         stage.capture([a], background: nil, foreground: [])
         stage.show([a: .zero]) { shown.append($0) }

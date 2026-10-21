@@ -38,15 +38,27 @@ import Testing
             // Stack learns a failed fill after placement. Carousel normally
             // learns height bounds and keeps tiles; do not invent a different
             // classification rule just to exercise a late catalog transition.
-            let learned = mac.pause(after: .call("SchedulingPort.after +100ms"))
-            if case .paused = learned {} else { s.expect("the failed fill reaches its validation checkpoint: \(learned)", false); return }
+            let discovered = mac.pause(after: .read(app))
+            if case .paused = discovered {} else { s.expect("the new tile's discovery read is captured: \(discovered)", false); return }
+            s.expect("discovery is withheld before its publication", !t.windows.contains { $0.id == constrained })
+            let delivered = mac.deliver(app)
+            if case .paused = delivered {} else { s.expect("the new tile's discovery is published: \(delivered)", false); return }
+            s.expect("the constrained window is initially published as a tile", t.windows.first { $0.id == constrained }?.state == .tiled)
+            let readback = mac.pause(after: .call("AccessibilityPort.copy AXSize window \(constrained) \(app.alias)"))
+            if case .paused = readback {} else { s.expect("stack placement reaches the constrained size readback: \(readback)", false); return }
+            s.expect("the app has accepted its constrained size before classification", mac.frame(constrained)?.size == CGSize(width: 500, height: 300))
             mac.scheduler.resume()
-            let publishing = mac.pause(after: .call("MainLane.async"))
-            if case .paused = publishing {} else { s.expect("the failed-fill snapshot is waiting to publish: \(publishing)", false); return }
+            let learned = mac.pause(after: .read(app))
+            if case .paused = learned {} else { s.expect("the failed-fill snapshot reaches its paired read before publication: \(learned)", false); return }
+            s.expect("the learned classification is still withheld", t.windows.first { $0.id == constrained }?.state == .tiled)
             t.changeConfig(LayerFixture.config)
             let reloaded = mac.scheduler.run()
             if case .paused = reloaded {} else { s.expect("config reload runs while publication is held: \(reloaded)", false) }
-            s.expect("the layer config is accepted before the classification arrives", t.configuration.error == nil)
+            s.expect("the layer config is accepted before the classification arrives", t.configuration.error == nil && t.configuration.effective.layerEnabled)
+            s.expect("enabling the layer does not publish the held classification", t.windows.first { $0.id == constrained }?.state == .tiled)
+            let classified = mac.deliver(app)
+            if case .paused = classified {} else { s.expect("the learned classification is delivered to the layer: \(classified)", false); return }
+            s.expect("delivery publishes the late failed-fill reason", t.windows.first { $0.id == constrained }?.reason == "cannot fill the screen")
             s.settle()
             let row = t.windows.first { $0.id == constrained }, layer = encodedObject(t.status)["layer"] as? [String: Any]
             s.expect("the late catalog transition is an actual constrained float", row?.state == .floats && row?.reason == "cannot fill the screen")

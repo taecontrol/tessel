@@ -42,11 +42,11 @@ extension Acceptance {
             try desktop.post(kVK_ANSI_J, shift: true)
             try requireFinalState("the recording has a second rail") { try harness.row(scene.tiles[2])?.rail == 2 }
             try desktop.post(kVK_ANSI_K)
-            try desktop.expectFocus(scene.tiles[0])
+            try desktop.expectFocus(scene.tiles[1])
             try desktop.post(kVK_ANSI_Z, shift: true)
             try requireFinalState("both floats are pinned above the rail before recording") {
                 let observed = try desktop.observe()
-                return scene.floats.allSatisfy { observed.visibleIDs.contains($0) } && desktop.focused(scene.tiles[0], in: observed)
+                return scene.floats.allSatisfy { observed.visibleIDs.contains($0) } && desktop.focused(scene.tiles[1], in: observed)
             }
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let movie = directory.appending(path: "E11-pinned-rails.mov")

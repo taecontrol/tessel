@@ -85,7 +85,8 @@ enum LayerMode: String, CaseIterable {
     func near(_ actual: Double, _ expected: Double, _ message: String) {
         s.expect("\(message): expected \(expected), got \(actual)", abs(actual - expected) <= 1)
     }
-    var captures: [UInt32] { mac.stageEvents.compactMap { if case .capture(let id) = $0.kind { id } else { nil } } }
+    var captureRequests: [SimulatedMac.StageCaptureRequest] { mac.stageCaptureRequests }
+    var captures: [UInt32] { captureRequests.filter { !$0.refreshing }.flatMap { $0.windows.sorted() } }
     func closetMoves(showing: Bool) -> [UInt32] { mac.visibilityChanges.filter { $0.showing == showing }.flatMap(\.windows) }
     var axWrites: [String] { Self.axWrites(in: mac.scheduler.trace) }
     static func axWrites(in trace: [String]) -> [String] {
