@@ -52,6 +52,7 @@ extension SimulatedMac {
             mac.scheduler.call("ApplicationPort.activate \(mac.apps[pid]?.alias ?? "app-unknown") pid=\(pid)")
             guard mac.scheduler.isActive, mac.apps[pid]?.terminated == false else { return }
             mac.front = pid
+            mac.recordFocusEffect()
             mac.post(.activated, pid: pid)
         }
         func isAlive(_ pid: Int32) -> Bool {

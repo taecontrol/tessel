@@ -31,26 +31,45 @@ import Testing
         })
     }
 
-    @Test("#19 E2: an AXUnknown layer-zero root cannot change remembered focus or layout", arguments: [Layout.off, .carousel])
-    func unknownRootCannotChangeFocusOrLayout(_ layout: Layout) {
-        requireLayer(Scenario.run("unknown native root appears and disappears, layout=\(layout.rawValue)") { s in
+    @Test("#19 E2: an AXUnknown layer-zero root cannot change remembered focus or layout", arguments: [Layout.off, .carousel], [false, true])
+    func unknownRootCannotChangeFocusOrLayout(_ layout: Layout, withdraw: Bool) {
+        requireLayer(Scenario.run("unknown native root churn, layout=\(layout.rawValue), withdraw=\(withdraw)") { s in
             let f = CarouselFixture(s, presets: [0.5, 0.5], duration: 0)
             f.press("alt-l")
             if layout == .off { f.tessel.configure(.off); s.settle() }
             let before = f.snapshot(), focused = f.mac.focusedWindow, rail = f.tessel.status.rail
+            @MainActor func membership() -> [String] {
+                f.tessel.windows.filter { f.ids.contains($0.id) }.map { "\($0.id):\($0.workspace ?? 0):\($0.rail ?? 0):\($0.slot ?? 0)" }
+            }
+            let members = membership()
+            @MainActor func unchanged(_ phase: String) {
+                f.unchanged(before)
+                s.expect("\(phase) leaves tile membership unchanged", membership() == members)
+                s.expect("\(phase) leaves native focus and rail unchanged", f.mac.focusedWindow == focused && f.tessel.status.rail == rail)
+            }
             f.mac.clearMotionHistory()
             let start = f.mac.scheduler.trace.count
             let popup = f.app.open(WindowSpec(subrole: "AXUnknown", resizable: false, popupParent: f.ids[1]), background: true)
             s.settle()
             let row = f.tessel.windows.first { $0.id == popup }
             s.expect("the unknown subrole is the ignored reason", row?.state.rawValue == "ignored" && row?.reason == "AXUnknown")
-            s.expect("the root has no managed membership", row?.workspace == nil)
-            s.expect("creation leaves native focus unchanged", f.mac.focusedWindow == focused)
-            f.app.close(popup); s.settle()
-            s.expect("withdrawal leaves native focus and rail unchanged", f.mac.focusedWindow == focused && f.tessel.status.rail == rail)
-            f.unchanged(before)
+            s.expect("the root has no managed membership", row?.workspace == nil && row?.rail == nil && row?.slot == nil)
+            unchanged("creation")
+            if withdraw {
+                f.app.close(popup); s.settle()
+                unchanged("withdrawal")
+            }
+            s.expect("popup churn never writes tile geometry", f.mac.geometryWrites.allSatisfy { !f.ids.contains($0.window) })
+            s.expect("popup churn never moves tiles through the closet", f.mac.visibilityChanges.allSatisfy { Set($0.windows).isDisjoint(with: f.ids) })
             s.expect("popup churn never places or focuses the ignored root", !LayerFixture.axWrites(in: Array(f.mac.scheduler.trace.dropFirst(start))).contains { $0.contains("window \(popup) ") })
-            if layout == .carousel { f.press("alt-h"); f.focus(f.ids[0]); f.order(f.ids) }
+            if layout == .carousel {
+                // Probe memory while the popup exists as well as after its
+                // withdrawal, outside the churn's zero-operation journal.
+                f.press("alt-2"); f.press("alt-1")
+                s.expect("popup churn preserves the remembered tile", f.mac.focusedWindow == focused)
+                unchanged("returning to the remembered tile")
+                f.press("alt-h"); f.focus(f.ids[0]); f.order(f.ids)
+            }
         })
     }
 

@@ -37,15 +37,25 @@ import Testing
             let fractions = [0.36, 0.54, 0.70, 0.96], presets = [1.0 / 3, 0.5, 2.0 / 3, 1.0]
             let spec = WindowSpec(frame: CGRect(x: 40, y: 70, width: areaWidth * fractions[width], height: 260), subrole: "AXDialog",
                                   maximumSize: CGSize(width: 100_000, height: 300))
-            let f = LayerFixture(s, floatSpecs: mode == .single ? [] : [spec])
-            f.select(f.tiles[1])
+            let sibling = WindowSpec(subrole: "AXFloatingWindow")
+            let f = LayerFixture(s, tileCount: 5, floatSpecs: mode == .single ? [sibling] : [spec, sibling])
+            let remaining = f.floats.last!
+            f.select(f.tiles[3]); f.press("move down")
+            f.select(f.tiles[4]); f.press("move down")
+            f.select(f.tiles[3])
+            f.order(Array(f.tiles.prefix(3)))
+            f.order([f.tiles[3], f.tiles[4]], rail: 2)
+            s.expect("the current second rail remembers a non-final tile", f.tessel.status.rail == 2 && f.tessel.status.railCount == 2 && f.mac.focusedWindow == f.tiles[3])
             let target: UInt32
             if mode == .single { target = f.open(spec); f.state("single", focused: true) }
             else { target = f.floats[0]; f.enter(mode) }
             f.press("toggle float"); f.focus(target)
             f.classification(target, "tiled", "moved to a rail")
-            f.order([f.tiles[0], f.tiles[1], target, f.tiles[2]])
+            f.order(Array(f.tiles.prefix(3)))
+            f.order([f.tiles[3], target, f.tiles[4]], rail: 2)
+            s.expect("the float enters the current rail immediately right of memory", f.tessel.status.rail == 2 && f.row(target)?.rail == 2 && f.row(target)?.slot == 2)
             f.state(mode == .pinnedLayer ? "pinned" : "hidden", focused: false)
+            f.visible([remaining], mode == .pinnedLayer)
             f.near(f.frame(target).width, presets[width] * (f.area.width + 10) - 10, "nearest nominal rail width")
             s.expect("the forced tile may stay shorter than the area", f.frame(target).height <= 300 && f.frame(target).height < f.area.height)
         })

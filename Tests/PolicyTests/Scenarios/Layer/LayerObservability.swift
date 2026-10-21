@@ -50,9 +50,7 @@ import Testing
     func focusSafetyAcrossTransitions(_ mode: LayerMode) {
         requireLayer(Scenario.run("focus and closet invariants in \(mode.rawValue)") { s in
             let f = LayerFixture(s)
-            let unknown = f.open(WindowSpec(subrole: "AXUnknown", popupParent: f.tiles[0]), background: true)
-            let high = f.open(WindowSpec(subrole: "AXSystemDialog", cgLayer: 21), background: true)
-            f.enter(mode)
+            var ignored: [UInt32] = []
             @MainActor func safe(_ label: String, entering: Bool, action: @MainActor () -> Void) {
                 f.mac.clearMotionHistory()
                 action(); s.settle()
@@ -62,11 +60,19 @@ import Testing
                 s.expect("\(label): native focus is transferred before every hide", f.mac.visibilityChanges.allSatisfy { change in
                     change.showing || (change.focusedWindow.map { !change.windows.contains($0) } ?? true)
                 })
-                s.expect("\(label): tessel never selects an ignored window", f.mac.focusRequests.allSatisfy { ![unknown, high].contains($0.window) })
+                s.expect("\(label): every tessel focus effect leaves keyboard focus outside the closet", f.mac.focusEffects.allSatisfy { !$0.hidden })
+                s.expect("\(label): tessel never selects an ignored window", f.mac.focusRequests.allSatisfy { !ignored.contains($0.window) })
+                // Entering may request a hidden destination. Actual keyboard
+                // focus must still be outside the closet after every effect.
                 if !entering {
                     s.expect("\(label): no focus request targets a hidden float", f.mac.focusRequests.allSatisfy { !$0.hidden || f.row($0.window)?.state.rawValue != "floats" })
                 }
             }
+            safe("ignored windows arrive", entering: false) {
+                ignored.append(f.app.open(WindowSpec(subrole: "AXUnknown", popupParent: f.tiles[0]), background: true))
+                ignored.append(f.app.open(WindowSpec(subrole: "AXSystemDialog", cgLayer: 21), background: true))
+            }
+            safe("enter \(mode.rawValue)", entering: mode == .shown || mode == .pinnedLayer) { f.enter(mode) }
             // Toggling enters from rails and exits from every focused layer row.
             safe("toggle from \(mode.rawValue)", entering: mode == .hidden || mode == .pinnedRails) { f.tessel.press("toggle layer") }
             safe("toggle back", entering: mode != .hidden && mode != .pinnedRails) { f.tessel.press("toggle layer") }
@@ -74,7 +80,7 @@ import Testing
             safe("external hidden float selection", entering: true) { f.app.select(f.floats[0]) }
             safe("hide a focused modal layer", entering: false) { f.tessel.press("toggle layer") }
             safe("new float", entering: false) { _ = f.app.open(WindowSpec(subrole: "AXDialog")) }
-            if let single = f.mac.focusedWindow, ![unknown, high].contains(single), !f.tiles.contains(single) {
+            if let single = f.mac.focusedWindow, !ignored.contains(single), !f.tiles.contains(single) {
                 safe("focused float closes", entering: false) { f.app.close(single) }
             }
         })

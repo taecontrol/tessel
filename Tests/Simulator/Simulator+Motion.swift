@@ -21,10 +21,16 @@ extension SimulatedMac {
         package let window: UInt32
         package let hidden: Bool
     }
+    package struct NativeFocus: Sendable {
+        package let at: Int
+        package let window: UInt32?
+        package let hidden: Bool
+    }
     struct MotionState {
         var writes: [GeometryWrite] = []
         var visibility: [VisibilityChange] = []
         var focusRequests: [FocusRequest] = []
+        var focusEffects: [NativeFocus] = []
         var reduced = false
         var preferences: [WeakPreference] = []
         var pointers: [WeakPointer] = []
@@ -50,6 +56,9 @@ extension SimulatedMac {
     @MainActor package var geometryWrites: [GeometryWrite] { motion.writes }
     @MainActor package var visibilityChanges: [VisibilityChange] { motion.visibility }
     @MainActor package var focusRequests: [FocusRequest] { motion.focusRequests }
+    /// Actual keyboard focus after a tessel focus effect, rather than its
+    /// requested target. External app/user selections are not policy effects.
+    @MainActor package var focusEffects: [NativeFocus] { motion.focusEffects }
     @MainActor package func setScreen(_ geometry: ScreenGeometry) { self.geometry = geometry }
     @MainActor package func setReduceMotion(_ enabled: Bool) {
         assume(.reduceMotionNotifications)
@@ -62,7 +71,11 @@ extension SimulatedMac {
         }
     }
     @MainActor package func clearMotionHistory() {
-        motion.writes.removeAll(); motion.visibility.removeAll(); motion.focusRequests.removeAll(); stageState.events.removeAll()
+        motion.writes.removeAll(); motion.visibility.removeAll(); motion.focusRequests.removeAll(); motion.focusEffects.removeAll(); stageState.events.removeAll()
+    }
+    func recordFocusEffect() {
+        let window = front.flatMap { apps[$0]?.key }
+        motion.focusEffects.append(NativeFocus(at: scheduler.now, window: window, hidden: window.map(isCloseted) ?? false))
     }
     func isCloseted(_ id: UInt32) -> Bool {
         guard let spaces = windows[id]?.spaces else { return false }
