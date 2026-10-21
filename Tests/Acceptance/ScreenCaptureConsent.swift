@@ -62,6 +62,11 @@ extension Acceptance {
         }
 
         private func captureWholeWindow(_ id: UInt32) throws {
+            // The observer captures only windows whose AX handles a snapshot retained.
+            try requireFinalState("the observer retains the fixture window's handle") {
+                let state = try harness.observer.command("contract", ["operation": "snapshot", "pid": harness.fixture.pid]).contract
+                return state?.roots.contains { $0.id == id && $0.roleError == 0 } == true
+            }
             let facts = try harness.observer.command("contract", ["operation": "stageCapture", "pid": harness.fixture.pid, "id": id]).contract?.stage
             guard let size = facts?.captureSize, size.count == 2, size.allSatisfy({ $0 > 0 }), (facts?.opaque ?? 0) > 0.9 else {
                 throw HarnessError("Tessel Fixture did not return a real whole-window capture")
