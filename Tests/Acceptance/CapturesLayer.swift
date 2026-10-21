@@ -11,7 +11,7 @@ extension Acceptance {
         var fixture: FixtureSession { desktop.fixture }
         var directory: URL { root.appending(path: ".work/captures/layer") }
 
-        func prepare(backgroundPanels: Bool = false) throws -> (tiles: [UInt32], floats: [UInt32], tilePIDs: [Int32]) {
+        func prepare(backgroundPanels: Bool = false) throws -> (tiles: [UInt32], floats: [UInt32], tilePIDs: [Int32], floatPID: Int32) {
             try desktop.clear()
             // A mixed-app rail exposes both sides of the native stacking limit:
             // panels cover background tiles while the focused tile stays above.
@@ -28,7 +28,7 @@ extension Acceptance {
                 let observed = try desktop.observe()
                 return desktop.focused(tiles[0], in: observed) && floats.allSatisfy { !observed.visibleIDs.contains($0) }
             }
-            return (tiles, floats, [first.pid, fixture.pid, fixture.pid])
+            return (tiles, floats, [first.pid, fixture.pid, fixture.pid], panels.pid)
         }
 
         func instructions(_ example: String, _ text: String) throws {
@@ -58,9 +58,30 @@ extension Acceptance {
                     }
                 }
             }
-            try requireFinalState("both background panels are pinned in their at-rest order before recording") {
-                try pinnedOrder(desktop.observe(), focus: scene.tiles[1])
+            func expectPinnedOrder(_ description: String, focus: UInt32) throws {
+                let owners = Dictionary(uniqueKeysWithValues: zip(scene.tiles, scene.tilePIDs))
+                    .merging(Dictionary(uniqueKeysWithValues: scene.floats.map { ($0, scene.floatPID) })) { tile, _ in tile }
+                func window(_ id: UInt32) -> String {
+                    "\(scene.tiles.contains(id) ? "tile" : "float") \(id) (fixture pid \(owners[id]!))"
+                }
+                var last = "no observation"
+                do {
+                    try requireFinalState(description) {
+                        let observed = try desktop.observe()
+                        let focused = observed.windows.filter { owners[$0.id] != nil && $0.focused }.map(\.id)
+                        let target = observed.windows.first { $0.id == focus }
+                        let order = observed.visibleIDs.enumerated().filter { owners[$0.element] != nil }
+                            .map { "\($0.offset): \(window($0.element))" }
+                        let missing = (scene.tiles + scene.floats).filter { !observed.visibleIDs.contains($0) }.map(window)
+                        last = "frontmost fixture pid \(observed.frontmostFixturePID), expected \(owners[focus]!); "
+                            + "focused scene IDs \(focused), expected \(focus); "
+                            + "expected focus \(target.map { "visible=\($0.visible) main=\($0.main) focused=\($0.focused)" } ?? "absent"); "
+                            + "CG front-to-back [\(order.joined(separator: "; "))]; absent from CG [\(missing.joined(separator: "; "))]"
+                        return pinnedOrder(observed, focus: focus)
+                    }
+                } catch { throw HarnessError("\(error); last observation: \(last)") }
             }
+            try expectPinnedOrder("both background panels are pinned in their at-rest order before recording", focus: scene.tiles[1])
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let movie = directory.appending(path: "E11-pinned-rails.mov")
             try? FileManager.default.removeItem(at: movie)
@@ -82,9 +103,7 @@ extension Acceptance {
             recorder.waitUntilExit()
             try #require(recorder.terminationStatus == 0 && (try movie.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) > 0,
                          "E11 needs a pixel recording; geometry observations alone cannot prove overlay ordering")
-            try requireFinalState("the final tile keeps focus while panels remain above background tiles") {
-                try pinnedOrder(desktop.observe(), focus: scene.tiles[0])
-            }
+            try expectPinnedOrder("the final tile keeps focus while panels remain above background tiles", focus: scene.tiles[0])
             try instructions("E11", "Review E11-pinned-rails.mov. The stage must draw pinned floats in their at-rest stacking order: above every tile macOS lets them cover (background apps' tiles), below the frontmost app's windows that remain above them. The panels use a different signed fixture app from both tile apps; the mixed-app rail supplies background tiles they can cover. macOS 27 retains the frontmost app's focused tile above these background panels even after AXRaise. The movie must preserve that order throughout motion and clearing, without a pop. Same-app floats are never raised because AXRaise may select them; their native at-rest order also determines their stand-ins. Record the owner's visual verdict separately; creating this movie does not approve the behavior. Keep the movie local until any personal content is removed.")
         }
 
