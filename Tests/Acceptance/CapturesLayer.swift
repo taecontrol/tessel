@@ -3,7 +3,7 @@ import Foundation
 import Testing
 
 extension Acceptance {
-    @Suite(AppSession(), .enabled(if: ProcessInfo.processInfo.environment["TESSEL_CAPTURE_LAYER"] == "1", "owner review of the floating layer"))
+    @Suite(AppSession(), .enabled(if: ProcessInfo.processInfo.environment["TESSEL_CAPTURE_LAYER"] == "1", "local floating-layer evidence"))
     @MainActor
     struct LayerCaptures {
         let desktop = Desktop()
@@ -11,20 +11,24 @@ extension Acceptance {
         var fixture: FixtureSession { desktop.fixture }
         var directory: URL { root.appending(path: ".work/captures/layer") }
 
-        func prepare() throws -> (tiles: [UInt32], floats: [UInt32]) {
+        func prepare(backgroundPanels: Bool = false) throws -> (tiles: [UInt32], floats: [UInt32], tilePIDs: [Int32]) {
             try desktop.clear()
-            let tiles = try desktop.railSetup([0.5, 0.5, 0.5], duration: 0)
-            let floats = try ["panelA", "panelB"].map { try fixture.open(kind: "normalPanel", key: $0, ["background": true]) }
-            try fixture.command("move", ["key": "panelA", "frame": [150, 200, 400, 260]])
-            try fixture.command("move", ["key": "panelB", "frame": [400, 350, 380, 250]])
+            // A mixed-app rail exposes both sides of the native stacking limit:
+            // panels cover background tiles while the focused tile stays above.
+            let first = try backgroundPanels ? harness.other() : fixture
+            let tiles = try desktop.railSetup([0.5, 0.5, 0.5], firstIn: first, duration: 0)
+            let panels = try backgroundPanels ? harness.other() : fixture
+            let floats = try ["panelA", "panelB"].map { try panels.open(kind: "normalPanel", key: $0, ["background": true]) }
+            try panels.command("move", ["key": "panelA", "frame": [150, 200, 400, 260]])
+            try panels.command("move", ["key": "panelB", "frame": [400, 350, 380, 250]])
             try requireFinalState("the capture fixtures are catalogued") { Set(try harness.rows().map(\.id)) == Set(tiles + floats) }
-            try desktop.activate(key: "w0")
+            try desktop.activate(first, key: "w0")
             try desktop.configure("[experiments]\nlayer = true\n[animation]\nduration = 400\n", layout: "carousel")
             try requireFinalState("the capture starts on its tile with all floats hidden") {
                 let observed = try desktop.observe()
                 return desktop.focused(tiles[0], in: observed) && floats.allSatisfy { !observed.visibleIDs.contains($0) }
             }
-            return (tiles, floats)
+            return (tiles, floats, [first.pid, fixture.pid, fixture.pid])
         }
 
         func instructions(_ example: String, _ text: String) throws {
@@ -35,18 +39,27 @@ extension Acceptance {
             fflush(nil)
         }
 
-        @Test("#19 E11: record visible pinned floats above moving rails for owner review")
+        @Test("#19 E11: record pinned floats in their at-rest stacking order above background-app tiles")
         func capturePinnedFloatsAboveMovingRails() throws {
-            let scene = try prepare()
+            let scene = try prepare(backgroundPanels: true)
             try desktop.activate(key: "w2")
             try desktop.post(kVK_ANSI_J, shift: true)
             try requireFinalState("the recording has a second rail") { try harness.row(scene.tiles[2])?.rail == 2 }
             try desktop.post(kVK_ANSI_K)
             try desktop.expectFocus(scene.tiles[1])
             try desktop.post(kVK_ANSI_Z, shift: true)
-            try requireFinalState("both floats are pinned above the rail before recording") {
-                let observed = try desktop.observe()
-                return scene.floats.allSatisfy { observed.visibleIDs.contains($0) } && desktop.focused(scene.tiles[1], in: observed)
+            func pinnedOrder(_ observed: Observation, focus: UInt32) -> Bool {
+                guard let tile = scene.tiles.firstIndex(of: focus), observed.frontmostFixturePID == scene.tilePIDs[tile],
+                      desktop.focused(focus, in: observed), let keyIndex = observed.visibleIDs.firstIndex(of: focus) else { return false }
+                return scene.floats.allSatisfy { float in
+                    guard let index = observed.visibleIDs.firstIndex(of: float), keyIndex < index else { return false }
+                    return scene.tiles.enumerated().filter { scene.tilePIDs[$0.offset] != observed.frontmostFixturePID }.allSatisfy { _, id in
+                        observed.visibleIDs.firstIndex(of: id).map { index < $0 } ?? true
+                    }
+                }
+            }
+            try requireFinalState("both background panels are pinned in their at-rest order before recording") {
+                try pinnedOrder(desktop.observe(), focus: scene.tiles[1])
             }
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let movie = directory.appending(path: "E11-pinned-rails.mov")
@@ -69,13 +82,16 @@ extension Acceptance {
             recorder.waitUntilExit()
             try #require(recorder.terminationStatus == 0 && (try movie.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) > 0,
                          "E11 needs a pixel recording; geometry observations alone cannot prove overlay ordering")
-            try instructions("E11", "Review E11-pinned-rails.mov. Both invented panels must remain above every moving tile throughout the rail changes. Record the owner's verdict separately; creating this movie does not approve the behavior. Keep the movie local until any personal content is removed.")
+            try requireFinalState("the final tile keeps focus while panels remain above background tiles") {
+                try pinnedOrder(desktop.observe(), focus: scene.tiles[0])
+            }
+            try instructions("E11", "Review E11-pinned-rails.mov. The stage must draw pinned floats in their at-rest stacking order: above every tile macOS lets them cover (background apps' tiles), below the frontmost app's windows that remain above them. The panels use a different signed fixture app from both tile apps; the mixed-app rail supplies background tiles they can cover. macOS 27 retains the frontmost app's focused tile above these background panels even after AXRaise. The movie must preserve that order throughout motion and clearing, without a pop. Same-app floats are never raised because AXRaise may select them; their native at-rest order also determines their stand-ins. Record the owner's visual verdict separately; creating this movie does not approve the behavior. Keep the movie local until any personal content is removed.")
         }
 
-        @Test("#19 E30: prepare the chosen prototype interactions for an owner-performed comparison")
+        @Test("#19 E30: execute the selected prototype walkthroughs and record observed versus expected fidelity")
         func captureOwnerPrototypeComparison() throws {
-            _ = try prepare()
-            try instructions("E30", "Preparation only: the isolated fixtures are cleaned up when this test returns. In a separate authorized owner session with the signed fixed build, compare the chosen prototype variants U1 B, U2 B, U3 B, U4 A: arrival-order wrap with h/j/k/l; alt-f centers a tile at half width and two-thirds height; moving back chooses the nearest rail width; alt-shift-z pins. Record use of alt-z to return to the remembered tile and review the comparison. This harness does not record the owner's verdict.")
+            var fidelity = LayerFidelity(desktop: desktop, directory: directory)
+            try fidelity.run()
         }
 
         @Test("#19 E32: prepare the owner-performed timer-alert focus regression capture")

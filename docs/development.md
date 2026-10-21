@@ -89,7 +89,8 @@ disposable-runner permission steps. `--journeys` includes those steps on CI;
 separate signing and permission tests so the default can skip only the latter. Captures
 run only with their opt-in flag: `TESSEL_CAPTURE_WORKSPACES=1` for AppKit views,
 `TESSEL_CAPTURE_CAROUSEL=1` for E21 geometry recordings, or
-`TESSEL_CAPTURE_LAYER=1` for layer recordings and owner-session preparation. Select a suite or pass a test
+`TESSEL_CAPTURE_LAYER=1` for layer recordings, the automated E30 fidelity
+walkthrough and E32 owner-session preparation. Select a suite or pass a test
 name fragment, such as `scripts/verify switchWorkspaces`. Empty selections fail
 before a GUI session starts. The script sets `TESSEL_ACCEPTANCE=1`; a direct
 `TESSEL_ACCEPTANCE=1 swift build --build-tests` compiles these suites without
@@ -598,12 +599,53 @@ their geometry and scroll position. Inside the layer, Option+H/K cycles backward
 and Option+L/J forward in arrival order, wrapping at either end. Option+R and
 Option+Shift+H/J/K/L do nothing there.
 
-Option+Shift+Z (`pin layer`) keeps the floats visible above the rails while rail
+Option+Shift+Z (`pin layer`) keeps the floats visible while rail
 navigation continues. Option+Z still enters and leaves the layer. Unpinning on
-the rails hides it; unpinning inside leaves it shown. During rail motion, the
-stage captures each visible pinned float once, excludes it from the background,
-and draws it above the moving tiles. No layer animation, polling or recurring
-timer is added.
+the rails hides it; unpinning inside leaves it shown.
+
+After tile-focus placement and on layer transitions, a pinned or shown layer
+raises its visible background-app floats with AXRaise alone, serially from
+least to most recently used. Untouched floats favor the first arrival. The
+raise changes neither AXMain nor activation. Tessel skips frontmost-app floats:
+raising a root there can take keyboard focus from the tile, as
+[`ax-focus`](../Tests/Acceptance/ContractsAccessibility.swift) proves. The focused
+float is selected normally when entering or navigating the layer.
+
+This is best effort on macOS 27. Every raised float is above background apps'
+tiles, but the frontmost app's focused window can remain above another app's
+float. [`ax-raise-across-applications`](../Tests/Acceptance/ContractsMotion.swift)
+pins this limit; `ax-frontmost-activation` in the same file pins activation
+bringing the app's windows forward. CG on-screen membership (`visible`) includes
+covered windows; it cannot prove stacking. The supplementary E7/E9 spec-gap
+scenarios check the simulator's front-to-back `cg-on-screen-order` list and
+keyboard focus instead.
+
+During rail motion the stage captures each visible pinned float once, excludes
+it from the background, and draws stand-ins in their at-rest stacking order:
+above every tile macOS lets them cover (background apps' tiles), below the
+frontmost app's windows they will sit under. Retargets update stand-in order
+without extra captures. Visible stand-ins retain CG's observed order, including
+native panels and failed raises. A destination tile still in the closet gets a
+provisional slot until it is placed. The stage waits for the serial raise pass
+and reads CG order again when WindowServer confirms placement, immediately
+before the existing reveal fade. ADR-0006's capture and placement method is unchanged.
+No layer animation, polling or recurring timer is added.
+
+E11 remains an opt-in pixel recording. Its panels belong to a different signed
+fixture app from both apps in its mixed-app rail, so the movie shows them above
+background tiles and below the frontmost focused tile, without a pop as the
+stage clears. Same-app floats keep their native order because tessel skips their
+raise. E30 runs all seven prototype walkthroughs for U1 B, U2 B, U3 B and U4 A,
+plus four-direction wrap, remembered-tile return while pinned, and a 0.62-area
+width that must return at two-thirds rather than half. It posts real keys and
+uses signed fixture selection for the prototype's external focus actions. It
+writes frames as fractions of the usable area, focus, layer state and visibility
+to `.work/captures/layer/E30-fidelity.md`, retaining the last observation and
+failing on mismatch. E30 requires no owner interaction:
+
+```sh
+TESSEL_CAPTURE_LAYER=1 scripts/verify captureOwnerPrototypeComparison
+```
 
 A new float takes focus and, when the layer was hidden, appears alone. Another
 new float replaces that single view. Closing it or pressing Option+Z returns to

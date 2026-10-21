@@ -186,9 +186,7 @@ extension Acceptance {
         }
 
         func other(prohibited: Bool = false) throws -> FixtureSession {
-            let session = try FixtureSession(directory: harness.directory, number: harness.otherFixtures.count + 1, prohibited: prohibited)
-            harness.otherFixtures.append(session)
-            return session
+            try harness.other(prohibited: prohibited)
         }
 
         @discardableResult
