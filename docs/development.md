@@ -84,7 +84,8 @@ scripts/verify --resources
 ```
 
 With no arguments, `scripts/verify` runs every real-system suite except the
-disposable-runner permission steps. `--journeys` includes those steps on CI;
+disposable-runner permission steps and interactive screen-capture consent.
+`--journeys` includes the permission steps on CI;
 `--permission` selects just those steps. The signing-and-permission journey has
 separate signing and permission tests so the default can skip only the latter. Captures
 run only with their opt-in flag: `TESSEL_CAPTURE_WORKSPACES=1` for AppKit views,
@@ -100,8 +101,37 @@ All real-system state checks use the single generous 5 s `margin` in
 contracts and captures. Their final-state API accepts no per-call deadline.
 Only `Latency.swift` judges elapsed time. Compilation and CI permission
 provisioning have separate process limits; resource observation retains its
-ADR 0003 window and settle. The integrity check rejects shorter state waits and
+ADR 0003 window and settle. Interactive consent allows a 120 s human response
+and a 2 s acknowledgement settle. The integrity check rejects shorter state waits and
 retired `since:` or `within:` APIs outside latency.
+
+### Screen-capture consent
+
+Before local runs that capture windows, grant Screen Recording to Tessel Dev
+and Tessel Fixture, then run this one-time preparation on the awake, unlocked
+desktop with all other tessel instances stopped:
+
+```sh
+scripts/verify --screen-capture-consent
+```
+
+[ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit)
+can show a separate acknowledgement after a capture even when Screen Recording
+is granted. Short-lived verification processes can exit before the owner
+answers; answers given after the requesting process exits are recorded as
+refused, so the alert recurs and takes focus during later checks.
+
+When the system alert names **Tessel Dev**, click **Allow**; later do the same
+for **Tessel Fixture**. Keep the command running. It captures through each
+signed identity, keeps both capture processes alive for up to 120 s while an
+alert is pending, and retains them for 2 s after it disappears. For each
+identity it then quits, relaunches and captures again, watching for another
+alert for the full 5 s margin. Success prints `consent recorded for <identity>`;
+a repeat prints `alert reappeared: consent not recorded for <identity>` and
+fails after allowing time to answer. If no alert appears, it says the identity
+is already approved and still checks the restart. This step runs alone, is
+excluded from default verification, and is disabled on CI; CI provisions its
+disposable runner separately.
 
 ### Signed fixture harness
 
@@ -503,11 +533,9 @@ WindowServer lists every placed window at its accepted frame and every
 closeted one off screen, then fades into them over 40 ms.
 
 The stage contracts need Screen Recording granted to the signed fixture
-observer; without it they fail and say so.
-ScreenCaptureKit can also show a separate capture acknowledgement even with
-that grant. See [Screen capture permission diagnosis](screen-capture-permissions.md)
-for the evidence, the remaining consent decision and the bounded confirmation
-commands. A preflight alone does not settle that acknowledgement.
+observer; without it they fail and say so. Prepare both signed identities with
+the [screen-capture consent step](#screen-capture-consent) before local runs.
+A preflight alone does not settle ScreenCaptureKit's separate acknowledgement.
 The Reduce Motion contract changes the preference through HIServices' private
 setter, which affects only the observer's own process: it pins how NSWorkspace
 reads and announces the interface preference, not a desktop-wide change.
