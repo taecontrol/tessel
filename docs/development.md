@@ -455,6 +455,13 @@ answers `available` from its last Screen Recording preflight, which takes about
 change when motion is off. No capture or timer remains at rest; the overlay
 stays ordered in, empty and transparent, so the next show draws at once.
 
+Quit clears the stage at once, then waits for outstanding ScreenCaptureKit
+requests before returning managed windows and exiting, for at most 500 ms:
+exiting during a capture can leave replayd checking a dead client's audit token
+and showing an approval alert. Completion callbacks end the wait; the one-shot
+limit leaves margin over normal 15–100 ms captures and the measured 230 ms cold
+start, without letting a stuck capture block quit.
+
 Fixture-only development status adds `testMotion.stageCaptures` and
 `testMotion.stageShows`. The app's real stage adapter increments them, and the
 signed development CLI preserves them. The resource suite samples them only
@@ -818,6 +825,7 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #19 E30 | X |
 | #19 E31 | P |
 | #19 E32 | X |
+| #19 U-quit-capture-drain | P |
 | #26 E1 | P |
 | #26 E2 | P |
 | #26 E3 | P |

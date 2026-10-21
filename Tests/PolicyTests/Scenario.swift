@@ -16,6 +16,8 @@ enum Layout: String, CaseIterable, Sendable { case off, stack, carousel }
     private(set) var configurationPublications: [(at: Int, status: ConfigStatus)] = []
     private let input: ConfigurationInput
     private let mac: SimulatedMac
+    private(set) var quitCompletions = 0
+    private(set) var quitReadyAt: Int?
 
     init(on mac: SimulatedMac, configuration: Layout = .off, text: String? = nil) {
         self.mac = mac
@@ -71,7 +73,15 @@ enum Layout: String, CaseIterable, Sendable { case off, stack, carousel }
     var configuration: ConfigStatus { config.status }
     var configurationWatchRequests: Int { input.watchRequests }
     var windowPublications: [PublishedRows.Publication] { rows.publications }
-    func quit() { mac.action("quit tessel"); workspaces.disable(reason: "quit") }
+    func quit() {
+        mac.action("quit tessel")
+        if workspaces.prepareToQuit({ [self] in finishQuit() }) { finishQuit() }
+    }
+    private func finishQuit() {
+        quitReadyAt = mac.scheduler.now
+        workspaces.disable(reason: "quit")
+        quitCompletions += 1
+    }
 }
 
 @MainActor private final class ConfigurationInput { var data: Data?; var unreadable = false; var watchRequests = 0 }

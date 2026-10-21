@@ -58,6 +58,8 @@ final class Workspaces {
     private var staging: Staging?
     private var stageGeneration: UInt64 = 0
     private var requestedCapture = false
+    private var quitting = false
+    private var quitDeadline: (any ScheduledWork)?
     /// The longest frozen captures stay after settling, and the bounce's legs.
     private static let lingerLimit = 300, bounceSeconds = 0.07
     private var cardDirection: Int?
@@ -146,6 +148,7 @@ final class Workspaces {
     }
 
     func configure(_ next: Configuration) {
+        guard !quitting else { return }
         let old = configuration
         configuration = next
         status.gaps = next.gaps
@@ -229,6 +232,34 @@ final class Workspaces {
         }
         do { hotkeys = try hotkeyInstaller.install(keys: keys) { [weak self] in self?.perform($0) } }
         catch { disable(reason: "Could not register workspace hotkeys") }
+    }
+
+    /// Clears motion immediately, then lets native capture completions keep
+    /// the process alive before the ordinary termination cleanup. False means
+    /// the caller must defer termination until `ready` is called once.
+    func prepareToQuit(_ ready: @escaping @MainActor @Sendable () -> Void) -> Bool {
+        if quitting { return quitDeadline == nil }
+        quitting = true
+        clearStage()
+        transition += 1
+        decisions += 1
+        cancelFocusDecision()
+        catalog?.cancelPresentations()
+        hotkeys?.stop()
+        hotkeys = nil
+        guard let stage, stage.capturesPending else { return true }
+        let finish: @MainActor @Sendable () -> Void = { [weak self] in
+            guard let self, self.quitDeadline != nil else { return }
+            self.quitDeadline?.cancel()
+            self.quitDeadline = nil
+            self.stage?.onCapturesSettled = nil
+            ready()
+        }
+        // Captures normally take 15–100 ms; even a cold stage starts within
+        // about 230 ms. Allow margin without letting a stuck service hold quit.
+        quitDeadline = scheduler.main.after(milliseconds: 500, finish)
+        stage.onCapturesSettled = finish
+        return false
     }
 
     func disable(reason: String) {
@@ -526,7 +557,7 @@ final class Workspaces {
     }
 
     private func perform(_ command: WorkspaceCommand) {
-        guard status.enabled else { return }
+        guard status.enabled, !quitting else { return }
         // A command right after the user selected another window acts on it.
         if let selection = externalSelection, decisionPending {
             cancelFocusDecision()
@@ -662,7 +693,7 @@ final class Workspaces {
 
     private func render(focusing selection: UInt32?, relayout: Bool, activateDesktop: Bool = true, takeFocus: Bool = true,
                         layoutWindows: Set<UInt32> = [], instant: Bool = false) {
-        guard status.enabled, let closet else { return }
+        guard status.enabled, !quitting, let closet else { return }
         if layerEnabled, let selection, carousel.location(selection) != nil { layer.entry = .rails }
         if carouselEnabled { renderCarousel(focusing: selection, activateDesktop: activateDesktop, takeFocus: takeFocus, instant: instant); return }
         cancelFocusDecision()
@@ -1245,7 +1276,7 @@ final class Workspaces {
     private func renderCarouselInstant(focusing selection: UInt32?, activateDesktop: Bool, takeFocus: Bool,
                                        keepFocus: Bool = false, underStage: Bool = false, handoffCompleted: Bool = false) {
         if !underStage { clearStage(); decisions += 1; cancelFocusDecision() }
-        guard status.enabled, let closet else { return }
+        guard status.enabled, !quitting, let closet else { return }
         transition += 1
         let token = transition
         desktopFocusObservation = nil

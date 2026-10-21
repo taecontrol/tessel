@@ -38,4 +38,10 @@ package protocol MotionStagePort: AnyObject {
     func refresh(_ window: UInt32)
     /// Removes every stand-in; the real windows show.
     func clear()
+    /// Native capture work still outstanding, including shareable-content
+    /// fetches and refreshes from a cleared session. Clearing cannot settle it.
+    var capturesPending: Bool { get }
+    /// Called when the last outstanding capture completes or fails. The
+    /// owner clears this callback when it no longer needs to wait.
+    var onCapturesSettled: (@MainActor @Sendable () -> Void)? { get set }
 }

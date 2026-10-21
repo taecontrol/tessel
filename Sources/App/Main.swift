@@ -195,6 +195,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let workspaces else { return .terminateNow }
+        return workspaces.prepareToQuit { sender.reply(toApplicationShouldTerminate: true) }
+            ? .terminateNow : .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         workspaces?.disable(reason: "experiment off")
         server?.stop()

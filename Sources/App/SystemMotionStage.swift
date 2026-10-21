@@ -145,6 +145,11 @@ final class SystemMotionStage: MotionStagePort {
     /// Captures that arrived this session, for a move to install.
     private var ready: [UInt32: Capture] = [:]
     private var background: Task<Capture?, Never>?
+    /// Unlike the session's image tasks, this count survives `clear()`. A
+    /// cancelled Swift task does not cancel replayd's native request.
+    private var pendingCaptures = 0
+    var capturesPending: Bool { pendingCaptures > 0 }
+    var onCapturesSettled: (@MainActor @Sendable () -> Void)?
     private var refreshes: [UInt32: Int] = [:]
     private var retried = Set<UInt32>()
     private var revealing = 0
@@ -211,7 +216,7 @@ final class SystemMotionStage: MotionStagePort {
             }
         }
         if let excluding, background == nil {
-            background = Task { [weak self] in await self?.captureBackground(excluding: excluding) }
+            background = Task { [weak self] in await self?.captureBackground(excluding: excluding, session: token) }
         }
     }
 
@@ -426,6 +431,11 @@ final class SystemMotionStage: MotionStagePort {
 
     // MARK: Captures
 
+    private func captureSettled() {
+        pendingCaptures -= 1
+        if pendingCaptures == 0 { onCapturesSettled?() }
+    }
+
     private func shareable(_ id: UInt32) async -> SCWindow? {
         if let window = content?.windows.first(where: { $0.windowID == id }) { return window }
         content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
@@ -454,6 +464,9 @@ final class SystemMotionStage: MotionStagePort {
     /// stale after a resize, and ScreenCaptureKit fits the window into the
     /// output, which would draw it smaller.
     private func captureWindow(_ id: UInt32, session token: Int) async -> Capture? {
+        guard token == session else { return nil }
+        pendingCaptures += 1
+        defer { captureSettled() }
         guard let window = await shareable(id), token == session, let size = liveSize(id) else { return nil }
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let configuration = SCStreamConfiguration()
@@ -473,13 +486,16 @@ final class SystemMotionStage: MotionStagePort {
         return image
     }
 
-    private func captureBackground(excluding: Set<UInt32>) async -> Capture? {
+    private func captureBackground(excluding: Set<UInt32>, session token: Int) async -> Capture? {
+        guard token == session else { return nil }
+        pendingCaptures += 1
+        defer { captureSettled() }
         // A window opened since the last fetch would otherwise stay in the
         // backdrop, frozen where it opened.
         if content == nil || !excluding.isSubset(of: Set(content?.windows.map(\.windowID) ?? [])) {
             content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         }
-        guard let content, let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) else { return nil }
+        guard token == session, let content, let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) else { return nil }
         let floating = Int(CGWindowLevelForKey(.floatingWindow))
         // The policy excludes normal-level pinned floats as well as tiles;
         // their own stand-ins cover the tiles above this backdrop.
