@@ -183,7 +183,8 @@ workflow; it is the only check that reads the pull request description, so it
 is the only one an edit to the description reruns. The
 Acceptance job signs and builds once, then runs contracts, journeys (including
 permission denial/restart), latency, resources and the rails status-item capture.
-Resources retain their 90 s command budget. The job has a twelve-minute timeout
+Resources have a 200 s command budget: the stage's E24 put the suite at
+91 s on `xcode-27`, past the former 90 s, and the owner raised it. The job has a twelve-minute timeout
 for these suites, three optimized builds (the signed bundles, the signed-rebuild
 journey and the daily-variant argument check) and runner setup. The carousel's
 contracts, E15, E24 and larger compiles put a green run near nine and a half
