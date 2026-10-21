@@ -321,6 +321,9 @@ final class Workspaces {
             entries[id] = Entry(observation: observation, pid: pid, workspace: old?.workspace, recent: old?.recent ?? 0, manual: old?.manual)
             if observation.record.state == .fullscreen || observation.record.state == .ignored || !primary(observation) {
                 if old?.workspace != nil {
+                    // Release our hiding before giving up ownership. An
+                    // ignored window will never participate in cleanup again.
+                    if observation.record.state == .ignored, closeted.contains(id) { closet?.show([id]) }
                     detach(id)
                     closeted.remove(id)
                     needsRender = true
