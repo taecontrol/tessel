@@ -1168,7 +1168,10 @@ final class Workspaces {
         }
         let leavingFocus = applications.frontmostPID.flatMap { appFocus[$0] }
         cancelFocusDecision()
-        layerRestack = nil
+        // Cancel an old raise pass, but retain native focus still owed to
+        // this selection while its replacement stage captures. An older
+        // placement can clear expectedFocus before the stage is ready.
+        if selection == nil || layerRestack?.awaitingFocus != selection { layerRestack = nil }
         decisions += 1
         if let selection, available(selection) { remember(selection) } else { focused = nil }
         let first = staging == nil
@@ -1365,9 +1368,13 @@ final class Workspaces {
                                        keepFocus: Bool = false, underStage: Bool = false, handoffCompleted: Bool = false) {
         if !underStage { clearStage(); decisions += 1; cancelFocusDecision() }
         guard status.enabled, !quitting, let closet else { return }
+        // Geometry may supersede an unconfirmed selection without requesting
+        // focus again. Its independent restack obligation still awaits that
+        // selection, even after expectedFocus has been consumed.
+        let awaitingLayerFocus = takeFocus ? selection : layerRestack?.awaitingFocus.flatMap { $0 == selection ? $0 : nil }
         transition += 1
         let token = transition
-        layerRestack = layerNeedsRaises ? LayerRestack(token: token, awaitingFocus: takeFocus ? selection : nil) : nil
+        layerRestack = layerNeedsRaises ? LayerRestack(token: token, awaitingFocus: awaitingLayerFocus) : nil
         desktopFocusObservation = nil
         layerHandoff = nil
         if !keepFocus { expectedFocus = nil }

@@ -621,7 +621,9 @@ scenarios check the simulator's front-to-back `cg-on-screen-order` list and
 keyboard focus instead. An accepted placement whose activation is still pending
 retains its raise obligation until a fresh focus/frontmost observation confirms
 the selection. Its placement result or a later catalog publication releases the
-pass once, including after pointer interruption; no polling is added.
+pass once, including after pointer interruption. Same-selection stage retargets
+and geometry-only replacement placements retain that unconfirmed obligation
+independently of the carousel's focus intent; no polling is added.
 
 During rail motion the stage captures each visible pinned float once, excludes
 it from the background, and draws stand-ins in their at-rest stacking order:

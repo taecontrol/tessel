@@ -57,6 +57,37 @@ import Testing
 }
 
 @Suite @MainActor struct LayerStacking {
+    @Test("#19 E9: a cold stage retarget retains restacking until the selected tile's native activation", arguments: WriteOrder.allCases)
+    func retargetRetainsDeferredActivation(_ writes: WriteOrder) {
+        requireLayer(Scenario.run("cold pinned retarget during activation / \(writes)", writes: writes) { s in
+            let f = LayerStackingFixture(s, duration: 400)
+            f.press("pin layer"); f.press("focus right")
+            // The instant selection, the stage's early focus and its bounded
+            // retry are all accepted before native activation finishes.
+            for _ in 0..<3 { f.apps[1].deferNextActivation(completion: .nextRequest) }
+            // Six windows plus the backdrop's three capture units and one
+            // display frame show the stage after 232 virtual ms (ADR-0006).
+            f.mac.setStageCaptureCost(milliseconds: 24)
+            f.mac.clearMotionHistory()
+            let start = f.mac.scheduler.trace.count
+            f.tessel.press("focus right")
+            s.after(milliseconds: 10, "retarget the pending selection onto the stage") { f.tessel.press("cycle width") }
+            s.after(milliseconds: 500, "native activation finishes on the selected tile") {
+                s.expect("the background pass still waits for native focus", f.raises(since: start).allSatisfy { !f.floats.contains($0) })
+                f.apps[1].select(f.tiles[2])
+            }
+            s.settle()
+            f.stacking(focus: f.tiles[2], owner: f.apps[1].pid)
+            let raised = f.raises(since: start).filter { f.floats.contains($0) }
+            s.expect("one confirmed pass raises A and C, never the frontmost B float: \(raised)",
+                     raised == [f.floats[2], f.floats[0]])
+            s.expect("each background raise preserves the selected tile's native focus", f.mac.focusEffects.filter {
+                $0.raisedWindow.map { f.floats.contains($0) } ?? false
+            }.allSatisfy { $0.window == f.tiles[2] })
+            s.expect("the final stage clears", f.mac.stageEvents.last?.kind == .clear)
+        })
+    }
+
     @Test("#19 E9: spec gap — pinned floats restack once after deferred tile activation", arguments: WriteOrder.allCases, DeferredActivationCompletion.allCases)
     func pinnedDeferredActivation(_ writes: WriteOrder, _ completion: DeferredActivationCompletion) {
         for duration in [0, 250] {
