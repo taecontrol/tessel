@@ -942,6 +942,7 @@ final class Workspaces {
                 }
                 return
             }
+            layerPlacements[id] = nil
             entries[id]?.manual = .tiled
             entries[id]?.observation.record.state = .tiled
             entries[id]?.observation.record.reason = "moved to a rail"
@@ -1313,7 +1314,7 @@ final class Workspaces {
                     }
                     if underStage { self.staging?.placed[id] = accepted }
                 }
-                if resize, let accepted, let target {
+                if resize, floatTarget == nil, let accepted, let target {
                     // The stand-in crossfades to the window at its new size.
                     if underStage, self.staging?.shown == true { self.stage?.refresh(id) }
                     self.carouselSizing.remove(id)

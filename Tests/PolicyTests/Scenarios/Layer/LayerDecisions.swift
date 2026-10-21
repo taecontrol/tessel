@@ -71,4 +71,17 @@ import Testing
             f.visible(f.floats, mode != .single)
         })
     }
+
+    @Test("#19 E20; #19 E21: returning to a rail supersedes an unconfirmed floating placement")
+    func rapidTransferKeepsTheFinalPlacement() {
+        requireLayer(Scenario.run("two transfers before the floating placement completes") { s in
+            let f = LayerFixture(s), id = f.tiles[0]
+            f.tessel.press("toggle float")
+            f.tessel.press("toggle float")
+            s.settle()
+            f.classification(id, "tiled", "moved to a rail"); f.focus(id)
+            f.state("hidden", focused: false)
+            f.near(f.frame(id).height, f.area.height, "the final rail placement fills the available height")
+        })
+    }
 }
