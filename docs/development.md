@@ -256,7 +256,9 @@ for the private system dependency and its tradeoffs.
 Window records contain an ID, app name, bundle ID, state, reason, native tab
 count, `workspace` (1…10 or null), `visible` (CG on-screen membership), and
 `answeredAt`.
-`state` includes `fullscreen`. Titles are never queried. `status --json` adds
+`state` is `tiled`, `floats`, `minimized`, `hidden`, `fullscreen`, or `ignored`.
+Ignored surfaces have no workspace and are never placed, hidden or focused.
+Titles are never queried. `status --json` adds
 `workspaces.enabled`, `reason`, `active`, `gaps`, and the effective `keys`.
 With the experiment disabled, tessel observes without managing ordinary windows.
 
@@ -561,9 +563,75 @@ recording window includes bounce and a settled tail; final states use the usual
 review destination when requested. E21 remains pending until the owner compares
 it with the accepted prototype; generating the recording does not accept it.
 
+## Floating layer experiment (#19)
+
+`[experiments] layer = true` enables the carousel and a floating layer for each
+workspace. Existing floats start hidden in the closet while the rail keeps
+focus. If startup focus is already on a float, tessel enters the whole layer.
+The layer's visibility and pinning belong to its workspace; switching away
+hides all its windows and returning restores its selection.
+
+Option+Z (`toggle layer`) shows the workspace's floats and selects the most
+recently used one, or the first arrival before any has been used. Pressing it
+again returns to the remembered rail tile and hides the layer. Tiles retain
+their geometry and scroll position. Inside the layer, Option+H/K cycles backward
+and Option+L/J forward in arrival order, wrapping at either end. Option+R and
+Option+Shift+H/J/K/L do nothing there.
+
+Option+Shift+Z (`pin layer`) keeps the floats visible above the rails while rail
+navigation continues. Option+Z still enters and leaves the layer. Unpinning on
+the rails hides it; unpinning inside leaves it shown. During rail motion, the
+stage captures each visible pinned float once, excludes it from the background,
+and draws it above the moving tiles. No layer animation, polling or recurring
+timer is added.
+
+A new float takes focus and, when the layer was hidden, appears alone. Another
+new float replaces that single view. Closing it or pressing Option+Z returns to
+the rails; directional navigation expands to the whole layer, and pinning shows
+it all while retaining float focus. In an entered layer, closing focus selects
+the surviving most recently used float; the final close returns to the rails.
+Sheets stay with their parent and do not enter the layer independently. External
+focus on a hidden float enters the whole layer; external tile focus leaves it,
+hiding floats unless pinned. Focus moves away before a float enters the closet.
+A hidden modal can leave its app waiting until the dialog is shown again.
+
+Option+F (`toggle float`) moves a tile to the layer, centered at half the area's
+width and two thirds its height. It becomes the newest float arrival, and the
+rail closes its gap and remembers the left neighbor. Moving a resizable float
+back inserts it to the right of the remembered tile, creating a rail if needed.
+Its current width selects the nearest rail preset; a tie chooses the wider one.
+A fixed-size float bounces and stays floating. Manual choices last for that
+window's lifetime, including catalog refreshes, and reset on restart. Sending a
+float with Option+Shift+N follows it into the destination workspace's layer.
+
+The three commands are accepted and rebindable in `[keys]` even with the flag
+off, but are registered only while the layer is enabled. Toggling an empty layer
+does nothing. Disabling a layer-only config, removing it, or quitting returns
+all floats. With `carousel = true` explicitly retained and `layer = false`,
+active-workspace floats remain visible above the rails and inactive workspaces
+stay in their closet, as in the carousel experiment. Enabling the layer again
+starts hidden.
+
+With the layer enabled, `status --json` adds
+`workspaces.layer: {"state":"hidden","focused":false}`. State is `hidden`,
+`single`, `shown`, or `pinned`; `focused` says whether focus is in the layer.
+Hidden floats retain `state: "floats"`, workspace membership, null `rail` and
+`slot`, and `visible: false` in `windows --json`. Manual classifications report
+`floats` / `moved to the layer` or `tiled` / `moved to a rail`.
+
+Classification is fixed independently of the flag: tessel manages CG layer-zero
+windows with subrole `AXStandardWindow`, `AXDialog`, `AXSystemDialog`, or
+`AXFloatingWindow`. A nonzero layer is `ignored` with reason `window level <n>`,
+checked before the subrole. Other subroles are `ignored` with that subrole as
+the reason. Ignored records have null `workspace`, `rail` and `slot`; their
+appearance or removal changes neither focus history nor layouts. Native
+fullscreen remains detected through `AXFullScreen`, including a transient
+`AXUnknown` fullscreen root. The catalog reads CG levels only for the IDs it
+inspects, alongside their other facts.
+
 ## Journeys and latency (#24)
 
-`scripts/verify --journeys` runs nine journeys. The signing-and-permission
+`scripts/verify --journeys` runs eleven journeys. The signing-and-permission
 journey includes the disposable-runner-only permission steps under the guard
 described above. Foundation E11 (CLI failure) and E14 (permission restart) prove
 their timing decisions in the deterministic layer. The same journey wiring
@@ -588,6 +656,7 @@ deterministic policy layer and are not tagged in these files:
 | Send | #2 E35 |
 | Rail scroll and elevator | Wiring regression (no policy example IDs) |
 | Carousel rail change | #26 E15 |
+| Floating layer | #19 E29 |
 | Reduce Motion | Wiring check that Reduce Motion makes a carousel move instant (E18 belongs to P) |
 | Reload | File watcher wiring for save, atomic replace, chmod and delete |
 | Crash, quit and disable | #2 E28, E29, E34 |

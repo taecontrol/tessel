@@ -30,6 +30,13 @@ window captures while the windows are placed underneath, which needs Screen
 Recording; without it, or with macOS Reduce Motion, changes are instant.
 `[animation] duration` accepts 0–1000 ms. Workspace switches and sends remain instant.
 
+The optional `[experiments] layer = true` experiment enables carousel with a
+floating layer per workspace. Option+Z enters or leaves it, Option+Shift+Z pins
+it above the rails, and Option+F moves a window between rail and layer. Floats
+start hidden; a new dialog shows alone. Independently of this flag, tessel now
+ignores non-window surfaces such as popups, system alerts, widgets and
+status-level windows.
+
 Build from source with Xcode 27 using [the development guide](docs/development.md).
 
 ## Requirements
