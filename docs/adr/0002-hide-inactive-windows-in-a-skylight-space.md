@@ -24,9 +24,10 @@ also verified the operations on the macOS 27 CI runner.
 
 This private system framework is accepted only for the experiment. Its use is
 isolated behind a hide/show boundary, resolved dynamically, and gated by the
-workspaces or rails flag. Both experiments use the same hiding boundary; rail
+workspaces or carousel flag. Both experiments use the same hiding boundary; rail
 windows that are fully outside the display enter the closet instead of being
-parked off screen. Missing classes or methods disable the experiment with a
+parked off screen. The floating layer, which requires the carousel, hides the
+active workspace's floating windows through the same boundary. Missing classes or methods disable the experiment with a
 visible reason; there is no automatic alternative hiding mechanism.
 
 ## Consequences
