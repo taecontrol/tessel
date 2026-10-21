@@ -603,9 +603,9 @@ Option+Shift+Z (`pin layer`) keeps the floats visible while rail
 navigation continues. Option+Z still enters and leaves the layer. Unpinning on
 the rails hides it; unpinning inside leaves it shown.
 
-After tile-focus placement and on layer transitions, a pinned or shown layer
-raises its visible background-app floats with AXRaise alone, serially from
-least to most recently used. Untouched floats favor the first arrival. The
+After confirmed native focus on tile placements and layer transitions, a pinned
+or shown layer raises its visible background-app floats with AXRaise alone,
+serially from least to most recently used. Untouched floats favor the first arrival. The
 raise changes neither AXMain nor activation. Tessel skips frontmost-app floats:
 raising a root there can take keyboard focus from the tile, as
 [`ax-focus`](../Tests/Acceptance/ContractsAccessibility.swift) proves. The focused
@@ -618,7 +618,10 @@ pins this limit; `ax-frontmost-activation` in the same file pins activation
 bringing the app's windows forward. CG on-screen membership (`visible`) includes
 covered windows; it cannot prove stacking. The supplementary E7/E9 spec-gap
 scenarios check the simulator's front-to-back `cg-on-screen-order` list and
-keyboard focus instead.
+keyboard focus instead. An accepted placement whose activation is still pending
+retains its raise obligation until a fresh focus/frontmost observation confirms
+the selection. Its placement result or a later catalog publication releases the
+pass once, including after pointer interruption; no polling is added.
 
 During rail motion the stage captures each visible pinned float once, excludes
 it from the background, and draws stand-ins in their at-rest stacking order:
