@@ -234,11 +234,11 @@ final class Workspaces {
         catch { disable(reason: "Could not register workspace hotkeys") }
     }
 
-    /// Clears motion immediately, then lets native capture completions keep
-    /// the process alive before the ordinary termination cleanup. False means
-    /// the caller must defer termination until `ready` is called once.
-    func prepareToQuit(_ ready: @escaping @MainActor @Sendable () -> Void) -> Bool {
-        if quitting { return quitDeadline == nil }
+    /// Clears motion immediately, then calls `ready` once when captures
+    /// settle or after 500 ms, immediately if none are pending. Call before
+    /// starting application termination; repeated requests are ignored.
+    func prepareToQuit(_ ready: @escaping @MainActor @Sendable () -> Void) {
+        guard !quitting else { return }
         quitting = true
         clearStage()
         transition += 1
@@ -247,7 +247,7 @@ final class Workspaces {
         catalog?.cancelPresentations()
         hotkeys?.stop()
         hotkeys = nil
-        guard let stage, stage.capturesPending else { return true }
+        guard let stage, stage.capturesPending else { ready(); return }
         let finish: @MainActor @Sendable () -> Void = { [weak self] in
             guard let self, self.quitDeadline != nil else { return }
             self.quitDeadline?.cancel()
@@ -259,7 +259,6 @@ final class Workspaces {
         // about 230 ms. Allow margin without letting a stuck service hold quit.
         quitDeadline = scheduler.main.after(milliseconds: 500, finish)
         stage.onCapturesSettled = finish
-        return false
     }
 
     func disable(reason: String) {

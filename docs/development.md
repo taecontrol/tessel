@@ -455,12 +455,25 @@ answers `available` from its last Screen Recording preflight, which takes about
 change when motion is off. No capture or timer remains at rest; the overlay
 stays ordered in, empty and transparent, so the next show draws at once.
 
-Quit clears the stage at once, then waits for outstanding ScreenCaptureKit
-requests before returning managed windows and exiting, for at most 500 ms:
-exiting during a capture can leave replayd checking a dead client's audit token
-and showing an approval alert. Completion callbacks end the wait; the one-shot
-limit leaves margin over normal 15–100 ms captures and the measured 230 ms cold
-start, without letting a stuck capture block quit.
+SIGTERM, the Quit menu and permission relaunch clear the stage at once, then
+drain outstanding ScreenCaptureKit requests for at most 500 ms before asking
+AppKit to terminate. Cleanup then returns managed windows and exits. Exiting
+during a capture can leave replayd checking a dead client's audit token
+and showing an approval alert. The capture-settled callback or one-shot deadline,
+whichever arrives first, completes the drain exactly once; repeated quit requests
+do not extend it or repeat cleanup. The limit leaves margin over normal
+15–100 ms captures and the measured 230 ms cold start, without letting a stuck
+capture block quit.
+It bounds capture draining before cleanup, excluding window-return work.
+
+`applicationShouldTerminate` always returns `terminateNow`, including for
+external requests such as logout. Draining inside AppKit's `terminateLater`
+wait can hang: when SIGTERM calls terminate from the main dispatch queue, the
+nested modal loop cannot reenter that queue to deliver capture continuations
+or its dispatch deadline. Deterministic CarouselShutdown scenarios prove drain
+ordering, the deadline and exactly-once completion; they do not model AppKit's
+termination loop. Real-system journeys exercise SIGTERM teardown after each
+test and must confirm process exit.
 
 Fixture-only development status adds `testMotion.stageCaptures` and
 `testMotion.stageShows`. The app's real stage adapter increments them, and the

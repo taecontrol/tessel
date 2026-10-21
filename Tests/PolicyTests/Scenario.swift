@@ -75,7 +75,7 @@ enum Layout: String, CaseIterable, Sendable { case off, stack, carousel }
     var windowPublications: [PublishedRows.Publication] { rows.publications }
     func quit() {
         mac.action("quit tessel")
-        if workspaces.prepareToQuit({ [self] in finishQuit() }) { finishQuit() }
+        workspaces.prepareToQuit { [self] in finishQuit() }
     }
     private func finishQuit() {
         quitReadyAt = mac.scheduler.now

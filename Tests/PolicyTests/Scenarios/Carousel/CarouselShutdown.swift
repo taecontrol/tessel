@@ -29,6 +29,7 @@ import Testing
                 }
             }
             s.after(milliseconds: 15, "one window's reply cannot finish quit") {
+                f.tessel.quit()
                 s.expect("later window and backdrop replies still keep quit pending", f.mac.stage.capturesPending && f.tessel.quitCompletions == 0)
             }
             let windows = f.mac.stageCaptureRequests.flatMap { $0.windows }.count
@@ -43,6 +44,9 @@ import Testing
             for id in f.tiles + f.floats {
                 s.expect("window \(id) returns from the closet onto the desktop", !f.mac.isInCloset(id) && f.mac.isVisible(id) && f.mac.isFullyOnScreen(id))
             }
+            f.tessel.quit()
+            s.settle()
+            s.expect("a request after captures settle cannot repeat cleanup", f.tessel.quitCompletions == 1)
         })
     }
 
@@ -70,10 +74,15 @@ import Testing
                 s.expect("quit proceeds to cleanup at the original deadline", f.tessel.quitCompletions == 1 && f.tessel.quitReadyAt == began + 500)
                 s.expect("the native request is still outstanding", f.mac.stage.capturesPending)
                 s.expect("the deadline still returns every window", (f.tiles + f.floats).allSatisfy { !f.mac.isInCloset($0) && f.mac.isVisible($0) })
+                f.tessel.quit()
+                s.expect("repeating quit while captures remain cannot repeat cleanup", f.tessel.quitCompletions == 1 && f.tessel.quitReadyAt == began + 500)
             }
             s.settle()
             s.expect("late replies do not repeat termination", f.tessel.quitCompletions == 1 && !f.mac.stage.capturesPending)
             s.expect("late replies never restore the overlay", f.mac.stageEvents.last?.kind == .clear)
+            f.tessel.quit()
+            s.settle()
+            s.expect("a request after the deadline cannot repeat cleanup", f.tessel.quitCompletions == 1)
         })
     }
 
@@ -84,7 +93,9 @@ import Testing
             let began = f.mac.scheduler.now
             f.tessel.quit()
             s.expect("an idle quit needs no deadline", f.tessel.quitCompletions == 1 && f.tessel.quitReadyAt == began)
+            f.tessel.quit()
             s.settle()
+            s.expect("repeated idle quit completes only once", f.tessel.quitCompletions == 1 && f.tessel.quitReadyAt == began)
             s.expect("every managed window returns", (f.tiles + f.floats).allSatisfy { !f.mac.isInCloset($0) && f.mac.isVisible($0) })
         })
     }

@@ -100,7 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Harness termination and ordinary SIGTERM share the normal cleanup path.
         signal(SIGTERM, SIG_IGN)
         let termination = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-        termination.setEventHandler { NSApp.terminate(nil) }
+        termination.setEventHandler { [weak self] in self?.quit() }
         termination.resume()
         self.termination = termination
         store.markReady()
@@ -155,7 +155,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reload.target = self
         menu.addItem(withTitle: config.status.path, action: nil, keyEquivalent: "")
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Quit tessel", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quitItem = menu.addItem(withTitle: "Quit tessel", action: #selector(quit), keyEquivalent: "q")
+        quitItem.target = self
         statusItem?.menu = menu
         let label = config.status.error.map { "Configuration error (line \($0.line))" }
             ?? (workspace.enabled ? "Workspace \(workspace.active)" + (workspace.layout == "carousel" ? ", rail \(workspace.rail ?? 0) of \(workspace.railCount)" : "") : "Workspaces disabled: \(workspace.reason)")
@@ -167,6 +168,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func reloadConfig() { config?.reload() }
+
+    @objc private func quit() {
+        guard let workspaces else { NSApp.terminate(nil); return }
+        // Return to the main queue while draining. AppKit's terminateLater
+        // wait cannot reenter the queue running the SIGTERM handler.
+        workspaces.prepareToQuit { NSApp.terminate(nil) }
+    }
 
     @objc private func openSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
@@ -185,7 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         arguments.append(Bundle.main.bundleURL.path)
         if LaunchOptions.fixtureOnly { arguments += ["--args", "--test-fixture-only"] }
         process.arguments = arguments
-        do { try process.run(); NSApp.terminate(nil) }
+        do { try process.run(); quit() }
         catch {
             // Leave a useful menu if LaunchServices cannot relaunch the bundle.
             let alert = NSAlert()
@@ -196,9 +204,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let workspaces else { return .terminateNow }
-        return workspaces.prepareToQuit { sender.reply(toApplicationShouldTerminate: true) }
-            ? .terminateNow : .terminateLater
+        // Owned quit sources drain before asking AppKit; logout and other
+        // external termination requests must proceed without a modal wait.
+        .terminateNow
     }
 
     func applicationWillTerminate(_ notification: Notification) {
