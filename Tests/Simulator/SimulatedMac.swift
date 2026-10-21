@@ -98,6 +98,7 @@ package final class SimulatedMac: @unchecked Sendable {
     var usedAssumptions: Set<Assumption> = []
     var foundation = FoundationState()
     var motion = MotionState()
+    var stageState = StageState()
 
     struct AppState {
         let pid: Int32, alias: String, bundleID: String
@@ -115,6 +116,7 @@ package final class SimulatedMac: @unchecked Sendable {
         var activationPending = false
         var activationCompletion = DeferredActivationCompletion.focusWrite
         var activationOrderDelay = 0
+        var keyRestorationDelay = 0
     }
     struct Window {
         let id: UInt32, pid: Int32
@@ -343,13 +345,18 @@ package final class SimulatedMac: @unchecked Sendable {
     }
     func applySize(_ id: UInt32, _ size: CGSize) {
         guard let spec = windows[id]?.spec else { return }
-        var maximumWidth = spec.maximumSize.width
+        var maximumWidth = spec.maximumSize.width, maximumHeight = spec.maximumSize.height
         if spec.positionAcceptance == .screenEdges && spec.frame.minX > geometry.frame.minX {
             assume(.axResizeAnchoring)
             maximumWidth = min(maximumWidth, geometry.frame.maxX - spec.frame.minX)
         }
+        if spec.positionAcceptance == .screenEdges {
+            // The current top bounds the height the same way.
+            assume(.axResizeAnchoring)
+            maximumHeight = min(maximumHeight, geometry.frame.maxY - spec.frame.minY)
+        }
         let accepted = CGSize(width: max(spec.minimumSize.width, min(maximumWidth, size.width)),
-                              height: max(spec.minimumSize.height, min(spec.maximumSize.height, size.height)))
+                              height: max(spec.minimumSize.height, min(maximumHeight, size.height)))
         for member in groupMembers(id) { windows[member]?.spec.frame.size = accepted }
         notify(.resized, node: .window(id))
     }

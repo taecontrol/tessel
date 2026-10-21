@@ -58,8 +58,18 @@ struct Desktop {
     }
 
     func expectShown(_ id: UInt32, gap: Double = 10) throws {
-        try requireFinalState("fixture \(id) visible, filled and focused") {
-            try shown(id, in: observe(focusedOnly: true), gap: gap)
+        // A timeout names the last observation so a CI-only failure is diagnosable.
+        var last = "no observation"
+        do {
+            try requireFinalState("fixture \(id) visible, filled and focused") {
+                let observation = try observe(focusedOnly: true)
+                let window = observation.windows.first { $0.id == id }
+                last = "area \(observation.area), " + (window.map { "frame \($0.frame), visible \($0.visible), main \($0.main), focused \($0.focused)" } ?? "window absent")
+                return shown(id, in: observation, gap: gap)
+            }
+        } catch {
+            let foreground = (try? harness.observer.command("contract", ["operation": "foreground"]).contract?.foreground)?.joined(separator: ", ") ?? "unknown"
+            throw HarnessError("\(error); last observation: \(last); foreground: \(foreground)")
         }
     }
 
@@ -172,7 +182,17 @@ struct Desktop {
         try activate(firstSession, key: "w0")
         try requireFinalState("every rail setup window listed") { Set(try harness.rows().map(\.id)) == Set(ids) }
         try configure(carousel + "[animation]\nduration = \(duration)\n", layout: "carousel")
-        try expectShown(ids[0])
+        // The focused first window keeps its width at the rail's left end.
+        var last = "no observation"
+        do {
+            try requireFinalState("fixture \(ids[0]) focused at the rail's left end") {
+                let observation = try observe(focusedOnly: true), area = observation.area
+                last = "area \(area), " + observation.windows.map { "\($0.id): \($0.frame) visible \($0.visible) focused \($0.focused)" }.joined(separator: "; ")
+                return focused(ids[0], in: observation) && observation.windows.contains {
+                    $0.id == ids[0] && abs($0.frame[0] - (area[0] + 10)) <= 1 && abs($0.frame[3] - (area[3] - 20)) <= 1
+                }
+            }
+        } catch { throw HarnessError("\(error); last observation: \(last)") }
         try requireFinalState("initial rail sizing and membership") {
             let observation = try observe(), rows = try harness.rows()
             return ids.enumerated().allSatisfy { index, id in

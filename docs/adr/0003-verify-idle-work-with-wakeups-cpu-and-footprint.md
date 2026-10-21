@@ -3,6 +3,9 @@
 Date: 2026-10-17
 Status: Accepted
 
+Amended 2026-10-20: the owner raised the resources budget to 200 seconds
+after the carousel stage put the suite at 91 seconds on CI.
+
 ## Context
 
 tessel promises to do nothing while nothing changes. The former CPU-only check

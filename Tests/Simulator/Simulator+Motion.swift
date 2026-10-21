@@ -5,7 +5,6 @@ import Ports
 extension SimulatedMac {
     package struct GeometryWrite: Sendable {
         package let at: Int
-        package let frame: Int
         package let window: UInt32
         package let attribute: AXAttribute
         package let requested: AXValue
@@ -17,18 +16,9 @@ extension SimulatedMac {
         package let windows: [UInt32]
         package let showing: Bool
     }
-    package struct DisplaySample: Sendable {
-        package let time: TimeInterval
-        package let frames: [UInt32: CGRect]
-        package let visible: [UInt32]
-        package let frontmost: Int32?
-    }
     struct MotionState {
         var writes: [GeometryWrite] = []
         var visibility: [VisibilityChange] = []
-        var samples: [DisplaySample] = []
-        var requests = 0
-        var framesAvailable = true
         var reduced = false
         var preferences: [WeakPreference] = []
         var pointers: [WeakPointer] = []
@@ -45,7 +35,6 @@ extension SimulatedMac {
         init(_ receive: @escaping @MainActor @Sendable (Bool) -> Void) { self.receive = receive }
     }
 
-    @MainActor package var displayFrames: any DisplayFramePort { DisplayFrames(mac: self) }
     @MainActor package var motionPreferences: any MotionPreferencePort { Preferences(mac: self) }
     @MainActor package var pointerActivity: any PointerActivityPort { PointerActivity(mac: self) }
     @MainActor func pressPointer() {
@@ -54,14 +43,6 @@ extension SimulatedMac {
     }
     @MainActor package var geometryWrites: [GeometryWrite] { motion.writes }
     @MainActor package var visibilityChanges: [VisibilityChange] { motion.visibility }
-    @MainActor package var displaySamples: [DisplaySample] { motion.samples }
-    @MainActor package var displayFrameRequests: Int { motion.requests }
-    /// Failure injection: a requested native callback need not arrive when its
-    /// display becomes unavailable. This adds no delivery guarantee to the port.
-    @MainActor package func setDisplayFramesAvailable(_ available: Bool) {
-        action("display frames available=\(available)")
-        motion.framesAvailable = available
-    }
     @MainActor package func setScreen(_ geometry: ScreenGeometry) { self.geometry = geometry }
     @MainActor package func setReduceMotion(_ enabled: Bool) {
         assume(.reduceMotionNotifications)
@@ -74,7 +55,7 @@ extension SimulatedMac {
         }
     }
     @MainActor package func clearMotionHistory() {
-        motion.writes.removeAll(); motion.visibility.removeAll(); motion.samples.removeAll(); motion.requests = 0
+        motion.writes.removeAll(); motion.visibility.removeAll(); stageState.events.removeAll()
     }
     func isCloseted(_ id: UInt32) -> Bool {
         guard let spaces = windows[id]?.spaces else { return false }
@@ -82,7 +63,7 @@ extension SimulatedMac {
     }
     func recordGeometry(_ id: UInt32, attribute: AXAttribute, requested: AXValue) -> Int {
         let index = motion.writes.count
-        motion.writes.append(GeometryWrite(at: scheduler.now, frame: motion.samples.count, window: id, attribute: attribute,
+        motion.writes.append(GeometryWrite(at: scheduler.now, window: id, attribute: attribute,
                                            requested: requested, hidden: isCloseted(id), accepted: windows[id]!.spec.frame))
         return index
     }
@@ -91,27 +72,6 @@ extension SimulatedMac {
     }
     func recordVisibility(_ ids: [UInt32], showing: Bool) {
         motion.visibility.append(VisibilityChange(at: scheduler.now, windows: ids, showing: showing))
-    }
-    @MainActor private struct DisplayFrames: DisplayFramePort {
-        let mac: SimulatedMac
-        var now: TimeInterval { Double(mac.scheduler.now) / 1_000 }
-        func requestFrame(_ receive: @escaping @MainActor @Sendable (TimeInterval) -> Void) -> any ScheduledWork {
-            mac.assume(.displayFrameDemand)
-            mac.scheduler.call("DisplayFramePort.requestFrame")
-            mac.motion.requests += 1
-            // The scheduler uses integer milliseconds. Delivery rounds up by <1 ms;
-            // timestamps remain on the exact 120 Hz display lattice, never 8 ms polling.
-            let tick = floor(Double(mac.scheduler.now) * 120 / 1_000) + 1
-            let timestamp = tick / 120
-            let due = Int(ceil(timestamp * 1_000))
-            return mac.scheduler.main.after(milliseconds: due - mac.scheduler.now) {
-                guard mac.motion.framesAvailable else { return }
-                mac.scheduler.note("display frame \(Int(tick))")
-                mac.motion.samples.append(DisplaySample(time: timestamp,
-                    frames: mac.windows.mapValues(\.spec.frame), visible: mac.visibleIDs(), frontmost: mac.front))
-                receive(timestamp)
-            }
-        }
     }
     @MainActor private struct Preferences: MotionPreferencePort {
         let mac: SimulatedMac

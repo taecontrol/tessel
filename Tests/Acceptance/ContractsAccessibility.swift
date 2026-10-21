@@ -115,6 +115,11 @@ extension Acceptance.Contracts {
     func axSizeConstraints() throws {
         let id = try fixture.open(kind: "maxWidth")
         _ = try window(id)
+        // AX bounds a size by the current top against the screen bottom
+        // (ax-resize-anchoring); start at the area's top so only the
+        // fixture's own limits apply.
+        let area = try #require(try native("screen").axVisibleFrame)
+        try #require(try write(id, "AXPosition", [100, area[1] + 10]) == 0)
         try #require(try write(id, "AXSize", [650, 400]) == 0)
         // A timeout names the last observed AX frame so a CI-only failure is diagnosable.
         var last = "no observation"

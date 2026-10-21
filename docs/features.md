@@ -59,7 +59,7 @@ parked in a strip. TileMyMac uses Paneru's engine and exposes numbered rows.
 | Per-app rules (workspace, floating) | Yes | Exclude an app | Yes (Paneru) | Yes | Feasible | Idea |
 | Gaps | Yes | — | — | Yes, with a toggle | Feasible | #2 |
 | Active window border | — | — | — | Gradient border | Needs its own overlay | Idea |
-| Layout animations | — | 460 ms, drawn from snapshots | — | Bezier curves | AX geometry stepped on demand-driven display frames | Carousel: 80 ms spring, configurable; vertical cards (#26, ADR 0005) |
+| Layout animations | — | 460 ms, drawn from snapshots | — | Bezier curves | Window captures on tessel's own overlay; needs Screen Recording | Carousel: 250 ms, configurable; rails slide as one sheet (#26, ADR 0006) |
 | Overview of everything | — | Yes | — | — | Needs Screen Recording | Idea |
 | Saved views | — | Nine | — | Saved window width | Feasible | Idea |
 | Layout survives restarts | — | Yes | Yes (Paneru) | Per workspace | Feasible | Idea |

@@ -29,12 +29,11 @@ extension Acceptance {
             let screen: [Double]
             let area: [Double]
             func width(_ preset: Double) -> Double { preset * (area[2] + 10) - 10 }
-            func frames(_ ids: [UInt32], widths: [Double], camera: Double = 0, expanded: Int? = nil) -> [UInt32: [Double]] {
+            func frames(_ ids: [UInt32], widths: [Double], camera: Double = 0) -> [UInt32: [Double]] {
                 var x = area[0] - camera
-                if let expanded { x = area[0] - widths.prefix(expanded).reduce(0) { $0 + $1 + 10 } }
                 var result: [UInt32: [Double]] = [:]
                 for (index, id) in ids.enumerated() {
-                    let width = expanded == index ? area[2] : widths[index]
+                    let width = widths[index]
                     let frame = [x, area[1], width, area[3]]
                     if x < screen[0] + screen[2] - 0.01 && x + width > screen[0] + 0.01 { result[id] = frame }
                     else if abs(x + width - screen[0]) < 0.01 { result[id] = [screen[0] - width, area[1], width, area[3]] }
@@ -172,17 +171,15 @@ extension Acceptance {
                 var ids = scene.ids, half = scene.width(0.5)
                 var journey = Journey(example: "E1", duration: ms, screen: scene.screen, area: scene.area, windows: ids)
                 try duration(ms)
-                for (code, label, camera, expanded, focus) in [
-                    (kVK_ANSI_L, "L · [1 | 2], focus 2", 0.0, nil as Int?, 1),
-                    (kVK_ANSI_L, "L · [2 | 3], focus 3", half + 10, nil, 2),
-                    (kVK_ANSI_L, "L · expand 3", 0, 2, 2),
-                    (kVK_ANSI_L, "L · right bounce", 0, 2, 2),
-                    (kVK_ANSI_H, "H · [2 | 3], focus 2", half + 10, nil, 1),
-                    (kVK_ANSI_H, "H · [1 | 2], focus 1", 0, nil, 0),
-                    (kVK_ANSI_H, "H · expand 1", 0, 0, 0),
-                    (kVK_ANSI_H, "H · left bounce", 0, 0, 0)] {
+                for (code, label, camera, focus) in [
+                    (kVK_ANSI_L, "L · [1 | 2], focus 2", 0.0, 1),
+                    (kVK_ANSI_L, "L · [2 | 3], focus 3", half + 10, 2),
+                    (kVK_ANSI_L, "L · right bounce", half + 10, 2),
+                    (kVK_ANSI_H, "H · [2 | 3], focus 2", half + 10, 1),
+                    (kVK_ANSI_H, "H · [1 | 2], focus 1", 0, 0),
+                    (kVK_ANSI_H, "H · left bounce", 0, 0)] {
                     try key(code, label: label, in: &journey,
-                        frames: scene.frames(ids, widths: Array(repeating: half, count: 3), camera: camera, expanded: expanded), focus: ids[focus])
+                        frames: scene.frames(ids, widths: Array(repeating: half, count: 3), camera: camera), focus: ids[focus])
                 }
                 journeys.append(journey); try save()
 
@@ -201,16 +198,15 @@ extension Acceptance {
                     (starts[3], 3, "L · window 4 complete"), (starts[4] + widths[4] - scene.area[2], 4, "L · window 5 meets right edge")] {
                     try key(kVK_ANSI_L, label: label, in: &journey, frames: scene.frames(ids, widths: widths, camera: camera), focus: ids[focus])
                 }
-                for label in ["L · expand 5", "L · right bounce"] {
-                    try key(kVK_ANSI_L, label: label, in: &journey, frames: scene.frames(ids, widths: widths, expanded: 4), focus: ids[4])
-                }
+                try key(kVK_ANSI_L, label: "L · right bounce", in: &journey,
+                    frames: scene.frames(ids, widths: widths, camera: starts[4] + widths[4] - scene.area[2]), focus: ids[4])
                 journeys.append(journey); try save()
 
                 scene = try prepare([1.0/3, 0.5, 1]); ids = scene.ids
                 var cycleWidths = [1.0/3, 0.5, 1].map(scene.width)
                 journey = Journey(example: "E7", duration: ms, screen: scene.screen, area: scene.area, windows: ids)
                 try duration(ms)
-                for (preset, label) in [(0.5, "R · expanded nominal third → half"), (2.0/3, "R · half → two thirds"),
+                for (preset, label) in [(0.5, "R · third → half"), (2.0/3, "R · half → two thirds"),
                     (1.0, "R · two thirds → full"), (1.0/3, "R · full → third")] {
                     cycleWidths[0] = scene.width(preset)
                     try key(kVK_ANSI_R, label: label, in: &journey, frames: scene.frames(ids, widths: cycleWidths), focus: ids[0])
@@ -252,7 +248,7 @@ extension Acceptance {
                 try desktop.post(kVK_ANSI_J, shift: true)
                 try settle(scene.frames(bottom, widths: [half, half]), among: ids, focus: ids[4])
                 try desktop.post(kVK_ANSI_L)
-                let bottomFrames = scene.frames(bottom, widths: [half, half], expanded: 1)
+                let bottomFrames = scene.frames(bottom, widths: [half, half])
                 try settle(bottomFrames, among: ids, focus: ids[4])
                 let topFrames = scene.frames(top, widths: [half, half, half], camera: half + 10)
                 try desktop.post(kVK_ANSI_K)
@@ -264,9 +260,9 @@ extension Acceptance {
                 try settle(topFrames, among: ids, focus: ids[2])
                 journey = Journey(example: "E14", duration: ms, screen: scene.screen, area: scene.area, windows: ids)
                 try duration(ms)
-                for (code, label, frames, focus) in [(kVK_ANSI_J, "J · incoming card covers the remembered top pair", bottomFrames, ids[4]),
-                    (kVK_ANSI_K, "K · leaving card uncovers [2 | 3]", topFrames, ids[2]), (kVK_ANSI_K, "K · top rail bounce", topFrames, ids[2]),
-                    (kVK_ANSI_J, "J · expanded window 5 is remembered", bottomFrames, ids[4]), (kVK_ANSI_J, "J · bottom rail bounce", bottomFrames, ids[4])] {
+                for (code, label, frames, focus) in [(kVK_ANSI_J, "J · both rails slide up as one sheet", bottomFrames, ids[4]),
+                    (kVK_ANSI_K, "K · both rails slide down to [2 | 3]", topFrames, ids[2]), (kVK_ANSI_K, "K · top rail bounce", topFrames, ids[2]),
+                    (kVK_ANSI_J, "J · focus on window 5 is remembered", bottomFrames, ids[4]), (kVK_ANSI_J, "J · bottom rail bounce", bottomFrames, ids[4])] {
                     try key(code, label: label, in: &journey, frames: frames, focus: focus)
                 }
                 journeys.append(journey); try save()

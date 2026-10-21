@@ -48,6 +48,7 @@ struct Status: Decodable {
         let active: Int
         let layout: String?
         let animationDuration: Int
+        let motion: String?
         let rail: Int?
         let gaps: Gaps
         let keys: [String: String]
@@ -332,10 +333,12 @@ final class Harness {
         guard try finalState({ try invoke("status", "--json").status == 0 }) else {
             throw HarnessError("signed development app did not expose its status endpoint")
         }
-        // The effective duration is zero exactly when tessel reads Reduce Motion.
+        // Motion is off for Reduce Motion exactly when tessel reads it; it can
+        // also be off for a missing Screen Recording grant.
         guard try finalState({
             let status = try status()
-            return status.workspaces?.animationDuration == (reduceMotion ? 0 : status.config.effective.animation.duration)
+            return (status.workspaces?.motion == "off: Reduce Motion") == reduceMotion
+                || status.config.effective.animation.duration == 0
         }) else { throw HarnessError("tessel did not take the harness's Reduce Motion: \(try motionGiven())") }
         guard fixtureReady else { return }
         // Socket readiness does not prove that startup AX subscriptions exist.
@@ -384,21 +387,22 @@ final class Harness {
         return String(paths[0].dropFirst())
     }
 
-    /// Fixture-only status instrumentation. This counter observes the app's
-    /// real display-link adapter, not the observer's sampling display link.
-    func displayFrames() throws -> UInt64 {
+    /// Fixture-only status instrumentation: the app's real stage adapter
+    /// counts its window captures and shown motions.
+    func stageWork() throws -> UInt64 {
         let reply = try invoke("status", "--json")
         let object = try JSONSerialization.jsonObject(with: reply.outputData) as? [String: Any]
-        guard let motion = object?["testMotion"] as? [String: Any], let frames = (motion["displayFrames"] as? NSNumber)?.uint64Value else {
-            throw HarnessError("fixture-only status must expose testMotion display frame instrumentation")
+        guard let motion = object?["testMotion"] as? [String: Any], let captures = (motion["stageCaptures"] as? NSNumber)?.uint64Value,
+              let shows = (motion["stageShows"] as? NSNumber)?.uint64Value else {
+            throw HarnessError("fixture-only status must expose testMotion stage instrumentation")
         }
-        return frames
+        return captures + shows
     }
 
     /// States the motion Given, so a failed motion example explains itself.
     func motionGiven() throws -> String {
         let status = try status()
-        return "effective animation duration \(status.workspaces.map { "\($0.animationDuration) ms" } ?? "unknown")"
+        return "effective animation duration \(status.workspaces.map { "\($0.animationDuration) ms, motion \($0.motion ?? "unknown")" } ?? "unknown")"
             + " (configured \(status.config.effective.animation.duration) ms); Reduce Motion: tessel \(appReduceMotion ? "on" : "off")"
             + " (set by the harness), desktop \(desktopReduceMotion ? "on" : "off")"
     }

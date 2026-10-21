@@ -18,7 +18,7 @@ extension Acceptance {
             let footprintBytes: UInt64
         }
 
-        private func verifyIdleResources(_ example: String, displayFramesBefore: UInt64? = nil) throws {
+        private func verifyIdleResources(_ example: String, stageWorkBefore: UInt64? = nil) throws {
             let budget = try JSONDecoder().decode(Budget.self, from: Data(contentsOf: root.appending(path: "Tests/Acceptance/resource-budget.json")))
             let before = try resources(harness.appPID)
             print(String(format: "%@: start footprint %.2f MB (limit < %.2f MB)", example,
@@ -37,8 +37,8 @@ extension Acceptance {
             try #require(wakeups <= budget.interruptWakeups, "Interrupt wakeups exceeded the wakeup limit")
             try #require(cpu <= budget.cpuNanoseconds, "CPU time exceeded the CPU limit")
             try #require(after.footprintBytes < budget.footprintBytes, "End footprint must be below the footprint limit")
-            if let displayFramesBefore {
-                try #require(try harness.displayFrames() == displayFramesBefore, "The app must receive zero display frames while idle")
+            if let stageWorkBefore {
+                try #require(try harness.stageWork() == stageWorkBefore, "The app must capture and show nothing while idle")
             }
         }
 
@@ -72,14 +72,19 @@ extension Acceptance {
             sleep(seconds: 1)
             try verifyIdleResources("E36")
         }
-        @Test("#26 E24: carousel receives zero idle display frames and keeps the resource budget") func carouselAcrossWorkspacesKeepsTheIdleResourceBudget() throws {
+        @Test("#26 E24: carousel does no stage work at rest and keeps the resource budget") func carouselAcrossWorkspacesKeepsTheIdleResourceBudget() throws {
             try harness.reset()
-            try desktop.configure("[experiments]\ncarousel = true\n", layout: "carousel")
-            let setupFramesStart = try harness.displayFrames()
+            // Thirty setup changes run instantly: each animated one costs a
+            // capture, and the suite must fit its CI budget. One animated
+            // change at the default duration loads the stage before the idle
+            // window.
+            try desktop.configure("[experiments]\ncarousel = true\n[animation]\nduration = 0\n", layout: "carousel")
+            var last: UInt32 = 0
             for index in 0..<20 {
                 let id = try fixture.open(kind: index.isMultiple(of: 2) ? "heavyText" : "web", key: "idle\(index)", ["widthFraction": 0.4])
                 if index == 0 { try desktop.activate(key: "idle\(index)") }
                 try desktop.expectFocus(id)
+                last = id
                 // Native focus can precede the catalog's new-window arrival.
                 // Finish each setup command before opening the next fixture.
                 try requireFinalState("the resource fixture assigned to the active workspace") {
@@ -104,11 +109,20 @@ extension Acceptance {
                 let rows = try harness.rows()
                 return rows.count == 20 && Set(rows.compactMap(\.workspace)).count == 5 && rows.contains { ($0.rail ?? 0) > 1 }
             }
+            try desktop.configure("[experiments]\ncarousel = true\n", layout: "carousel")
+            let setupWorkStart = try harness.stageWork()
+            let rail = try #require(try harness.row(last)?.rail)
+            try desktop.post(38, shift: true)
+            try desktop.expectFocus(last)
+            try requireFinalState("the animated change moved the last fixture down a rail") { try harness.row(last)?.rail == rail + 1 }
             sleep(seconds: 1)
-            let frames = try harness.displayFrames()
+            let work = try harness.stageWork()
             let given = try harness.motionGiven()
-            try #require(frames > setupFramesStart, "The display counter must increase during setup motion before it can prove idle zero frames; \(given)")
-            try verifyIdleResources("Carousel E24", displayFramesBefore: frames)
+            // The counter proves idle zero work only once it has counted the animated change.
+            if try harness.status().workspaces?.motion == "on" {
+                try #require(work > setupWorkStart, "The stage counter must increase during the animated change before it can prove idle zero work; \(given)")
+            }
+            try verifyIdleResources("Carousel E24", stageWorkBefore: work)
         }
     }
 }

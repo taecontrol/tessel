@@ -26,6 +26,14 @@ extension SimulatedApp {
         mac.apps[pid]?.deferredActivations += 1
         mac.apps[pid]?.activationCompletion = completion
     }
+    /// Its next AX activation names it frontmost at once, but AppKit finishes
+    /// it `milliseconds` later, past the main and raise writes that follow:
+    /// a selection in the closet then loses key to the previous key window.
+    @MainActor package func restoreKeyOverClosetOnNextActivation(afterMilliseconds milliseconds: Int = 30) {
+        mac.assume(.activationKeyRestoration)
+        mac.action("\(alias) finish its next AX activation after \(milliseconds) ms, keying its previous window over a closeted selection")
+        mac.apps[pid]?.keyRestorationDelay = milliseconds
+    }
     @MainActor package func delayNextActivationOrder(milliseconds: Int) {
         mac.assume(.axFrontmostActivation)
         mac.action("\(alias) delay its next AX activation window order by \(milliseconds) ms")
@@ -73,7 +81,23 @@ extension SimulatedApp {
 
 extension SimulatedMac {
     func activateFromAX(_ pid: Int32) {
-        if apps[pid]!.deferredActivations > 0 {
+        if let delay = apps[pid]?.keyRestorationDelay, delay > 0 {
+            assume(.activationKeyRestoration)
+            apps[pid]?.keyRestorationDelay = 0
+            let previous = apps[pid]?.key
+            front = pid
+            orderActivatedWindows(pid)
+            _ = scheduler.main.after(milliseconds: delay) { [self] in
+                guard apps[pid]?.terminated == false else { return }
+                func closeted(_ id: UInt32) -> Bool {
+                    guard let spaces = windows[id]?.spaces else { return false }
+                    return !spaces.isEmpty && spaces.allSatisfy { $0 >= 2 && $0 < 10_000 }
+                }
+                if let key = apps[pid]?.key, closeted(key), let previous, previous != key,
+                   windows[previous]?.closed == false, !closeted(previous) { focus(previous, activating: false) }
+                post(.activated, pid: pid)
+            }
+        } else if apps[pid]!.deferredActivations > 0 {
             assume(.deferredAXActivation)
             apps[pid]?.deferredActivations -= 1
             apps[pid]?.activationPending = true

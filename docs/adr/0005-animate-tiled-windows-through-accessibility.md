@@ -1,7 +1,11 @@
 # ADR-0005: Animate tiled windows through Accessibility
 
 Date: 2026-10-19
-Status: Accepted
+Status: Superseded in part by [ADR-0006](0006-move-carousel-windows-through-captures-on-a-stage.md)
+
+ADR-0006 replaces this decision's AX stepping on display frames and its
+vertical cards with captures moving on a stage. The native findings about AX
+clamps, closet identity, resize anchoring and pointer interruption still hold.
 
 ## Context
 

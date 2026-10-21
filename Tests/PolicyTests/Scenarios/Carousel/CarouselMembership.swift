@@ -4,6 +4,21 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct CarouselMembership {
+    @Test("a command right after an external selection in the same app acts on the selected window", arguments: [0, 250], [60, 90])
+    func commandRightAfterExternalSelection(duration: Int, delay: Int) {
+        requireCarousel(Scenario.run("command after external selection duration=\(duration) delay=\(delay)") { s in
+            let f = CarouselFixture(s, duration: duration), a = f.ids[0], b = f.ids[1]
+            f.select(a)
+            f.app.select(b)
+            // AX reports the selection about 45 ms later; tessel follows it
+            // 50 ms after that.
+            s.after(milliseconds: delay, "transfer the selected window") { f.tessel.pressKey("alt-shift-j") }
+            s.settle()
+            s.expect("the selected window moved to the new rail", f.tessel.windows.first { $0.id == b }?.rail == 2)
+            s.expect("the other window stayed", f.tessel.windows.first { $0.id == a }?.rail == 1)
+        })
+    }
+
     @Test("#26 E10: opening after the focused right half reveals the new half with minimal scrolling")
     func newHalfInsertsAfterFocus() {
         requireCarousel(Scenario.run("open after visible pair") { s in
@@ -16,9 +31,9 @@ import Testing
         })
     }
 
-    @Test("#26 E11: opening at an expanded start restores its nominal half beside the arrival")
-    func openingLeavesExpansion() {
-        requireCarousel(Scenario.run("open at expanded start") { s in
+    @Test("#26 E11: opening at the start keeps its nominal half beside the arrival")
+    func openingAtTheStart() {
+        requireCarousel(Scenario.run("open at the start") { s in
             let f = CarouselFixture(s), a = f.ids[0]
             let id = f.open()
             f.order([a, id, f.ids[1], f.ids[2]]); f.pair(a, id, focused: id)
@@ -61,7 +76,11 @@ import Testing
             f.press("alt-shift-l"); f.order([b,c,a]); f.focus(a)
             let before = f.snapshot(); f.mac.clearMotionHistory()
             f.press("alt-shift-l"); f.order([b,c,a]); f.focus(a); f.unchanged(before)
-            s.expect("a blocked swap visibly bounces before returning", f.mac.displaySamples.count >= 2 && f.mac.geometryWrites.contains { $0.window == a && $0.accepted != before[a] })
+            let moves = f.mac.stageEvents.compactMap { if case .move(let rects, _) = $0.kind { rects[a] } else { nil } }
+            s.expect("a blocked swap visibly recoils from the wall and returns on the stage",
+                     moves.count == 2 && moves[0] != before[a] && moves[1] == before[a]
+                     && f.mac.stageEvents.last?.kind == .clear)
+            s.expect("the bounce moves no real window", f.mac.geometryWrites.isEmpty)
             f.press("alt-shift-j"); f.order([a], rail: 2); f.focus(a)
             f.press("alt-k"); f.select(b); f.press("alt-shift-j"); f.order([a,b], rail: 2)
             f.press("alt-h"); f.focus(a)
@@ -83,11 +102,11 @@ import Testing
             let before = f.snapshot(), focus = f.mac.focusedWindow, rail = f.tessel.status.rail
             s.expect("floating geometry remains untouched", f.frame(dialog) == original)
             f.mac.clearMotionHistory(); f.press("alt-2")
-            s.expect("workspace switching requests zero display frames", f.mac.displayFrameRequests == 0)
+            s.expect("workspace switching does not use the stage", f.mac.stageEvents.isEmpty)
             f.press("alt-1"); f.unchanged(before)
             s.expect("workspace restores remembered rail and focus", f.tessel.status.rail == rail && f.mac.focusedWindow == focus)
             f.select(b); f.mac.clearMotionHistory(); f.press("alt-shift-2")
-            s.expect("send follows instantly without frames", f.mac.displayFrameRequests == 0 && f.tessel.status.active == 2)
+            s.expect("send follows instantly without the stage", f.mac.stageEvents.isEmpty && f.tessel.status.active == 2)
             s.expect("floating windows receive no carousel geometry writes", !f.mac.geometryWrites.contains { $0.window == dialog })
             f.near(f.frame(dialog).width, original.width, "floating width stays")
             f.near(f.frame(dialog).minX, original.minX, "floating position stays")

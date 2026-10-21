@@ -4,23 +4,34 @@ import Simulator
 import Testing
 
 @Suite @MainActor struct MotionSimulation {
-    @Test("display frames use a demand-driven 120 Hz virtual clock and cancel cleanly")
-    func demandDrivenFrames() {
+    @Test("the stage captures serially, shows a frame after its captures, settles early, and a clear drops late work")
+    func stageSimulation() {
         let mac = SimulatedMac(); defer { mac.shutdown() }
-        var times: [Double] = []
-        let clock = mac.displayFrames
-        clock.requestFrame { time in
-            times.append(time)
-            clock.requestFrame { times.append($0) }
-        }
+        let app = mac.launch(); let a = app.open(), b = app.open()
+        let stage = mac.stage
+        #expect(stage.available)
+        var shown: [Bool] = [], settled = 0
+        stage.capture([a, b], background: [a, b])
+        stage.show([a: .zero, b: .zero]) { shown.append($0) }
         mac.settle()
-        #expect(times.count == 2)
-        #expect(abs(times[0] - 1.0/120) < 1e-9 && abs(times[1] - 2.0/120) < 1e-9)
-        let cancelled = clock.requestFrame { _ in Issue.record("Cancelled frame was delivered") }
-        cancelled.cancel(); mac.settle()
-        mac.scheduler.main.after(milliseconds: 1_000) {}
+        // Two windows then the background, 14 ms each; the overlay draws a frame later.
+        #expect(mac.stageEvents.map(\.at) == [14, 28, 70, 86])
+        #expect(shown == [true])
+        stage.move([a: CGRect(x: 10, y: 0, width: 1, height: 1)], entering: [:], duration: 0.25) { settled += 1 }
         mac.settle()
-        #expect(mac.displaySamples.count == 2)
+        #expect(settled == 1 && mac.stageEvents.last?.kind == .settled && mac.stageEvents.last?.at == 86 + 175)
+        stage.capture([b], background: nil)
+        stage.refresh(a)
+        stage.clear()
+        mac.settle()
+        #expect(mac.stageEvents.last?.kind == .clear)
+        mac.failCapture(of: a)
+        stage.capture([a], background: nil)
+        stage.show([a: .zero]) { shown.append($0) }
+        mac.settle()
+        #expect(shown == [true, false])
+        mac.setScreenRecording(false)
+        #expect(!stage.available)
     }
     @Test("Reduce Motion reads native state and change notifications stop with token lifetime")
     func motionPreferenceNotifications() {

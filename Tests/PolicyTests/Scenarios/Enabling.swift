@@ -84,8 +84,10 @@ import Testing
                 } else {
                     let rows = tessel.windows.sorted { ($0.slot ?? 0) < ($1.slot ?? 0) }
                     scenario.expect("one rail keeps arrival order", rows.map(\.id) == [first, second] && rows.map(\.rail) == [1, 1] && rows.map(\.slot) == [1, 2])
-                    scenario.expect("the initial selected edge window fills the area", mac.frame(first) == area)
-                    scenario.expect("the next tile is hidden until the carousel advances", !mac.isVisible(second))
+                    // The first window keeps its width; nothing expands at a rail end.
+                    let frame = mac.frame(first) ?? .zero
+                    scenario.expect("the initial selected window starts complete at the area's left edge",
+                                    frame.minX == area.minX && frame.minY == area.minY && mac.isFullyOnScreen(first) && frame.width < area.width)
                 }
             })
         }

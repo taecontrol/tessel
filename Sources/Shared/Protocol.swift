@@ -47,7 +47,7 @@ struct Configuration: Codable, Sendable, Equatable {
 }
 
 struct Animation: Codable, Sendable, Equatable {
-    var duration: Int = 80
+    var duration: Int = 250
 }
 
 struct Gaps: Codable, Sendable, Equatable {
@@ -59,7 +59,9 @@ struct WorkspaceStatus: Codable, Sendable, Equatable {
     var reason = "experiment off"
     var active = 1
     var layout = "stack"
-    var animationDuration: Int = 80
+    var animationDuration: Int = 250
+    /// Why carousel changes animate or not: "on", or "off: " and the reason.
+    var motion = "on"
     var rail: Int? = nil
     var railCount = 0
     var gaps = Gaps()
@@ -93,7 +95,9 @@ struct AppStatus: Codable, Sendable {
     /// Raw monotonic seconds (`CLOCK_MONOTONIC_RAW`) when tessel produced this answer.
     var answeredAt: Double? = nil
     #if TESSEL_DEVELOPMENT
-    struct TestMotion: Codable, Sendable { var displayFrames: UInt64 = 0 }
+    /// Stage work in a fixture-only development build: window captures and
+    /// shown motions. Both stay unchanged at rest.
+    struct TestMotion: Codable, Sendable { var stageCaptures: UInt64 = 0; var stageShows: UInt64 = 0 }
     var testMotion: TestMotion? = nil
     #endif
 }

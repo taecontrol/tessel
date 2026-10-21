@@ -42,9 +42,17 @@ extension Acceptance.Contracts {
         try requireFinalState("the unhidden list recovers every live root") { Set(try sample().roots.map(\.id)) == Set([a, b]) }
         for minimized in [true, false] {
             try fixture.command(minimized ? "minimize" : "restore", ["key": "b", "waitForTransition": false])
-            try requireFinalState("the minimize transition returns a modeled list and final flag") {
-                try sample().roots.first { $0.id == b }?.minimized == minimized && fixture.command("ping").transitionCount == 0
-            }
+            // A timeout names the last observation so a CI-only failure is diagnosable.
+            var last = "no observation"
+            do {
+                try requireFinalState("the minimize transition returns a modeled list and final flag") {
+                    let state = try sample(), transitions = try fixture.command("ping").transitionCount
+                    let root = state.roots.first { $0.id == b }
+                    last = "listError \(state.listError ?? 0), roots \(state.roots.map(\.id)), minimized \(String(describing: root?.minimized)) "
+                        + "error \(String(describing: root?.minimizedError)), transitions \(String(describing: transitions))"
+                    return root?.minimized == minimized && transitions == 0
+                }
+            } catch { throw HarnessError("\(error); minimized=\(minimized), last observation: \(last)") }
         }
         for fullscreen in [true, false] {
             try desktop.activate(key: "b")

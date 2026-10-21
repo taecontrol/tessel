@@ -50,15 +50,15 @@ jobs:
           path: .work/latency.json
           if-no-files-found: ignore
       # Run even when a journey or latency check fails, so each run reports resources.
-      - name: Resource acceptance suite (90 second budget)
+      - name: Resource acceptance suite (200 second budget)
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        timeout-minutes: 2
+        timeout-minutes: 4
         run: |
           SECONDS=0
           scripts/verify --resources
-          echo "Resources suite elapsed: ${SECONDS} s (limit <= 90 s)"
-          if (( SECONDS > 90 )); then
-            echo "Resources suite exceeded the 90 second limit" >&2
+          echo "Resources suite elapsed: ${SECONDS} s (limit <= 200 s)"
+          if (( SECONDS > 200 )); then
+            echo "Resources suite exceeded the 200 second limit" >&2
             exit 1
           fi
       - name: Capture rails status item for review

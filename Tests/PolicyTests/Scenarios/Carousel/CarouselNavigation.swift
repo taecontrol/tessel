@@ -4,19 +4,17 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct CarouselNavigation {
-    @Test("#26 E1: half-width traversal expands both ends and never wraps", arguments: WriteOrder.allCases)
+    @Test("#26 E1: half-width traversal stops at both ends without changing a width, and never wraps", arguments: WriteOrder.allCases)
     func halfWidthStopsAndEnds(order: WriteOrder) {
         requireCarousel(Scenario.run("half-width stops and ends", writes: order) { s in
             let f = CarouselFixture(s), a = f.ids[0], b = f.ids[1], c = f.ids[2]
-            f.expanded(a)
+            f.pair(a, b, focused: a)
             f.press("alt-l"); f.pair(a, b, focused: b)
             f.press("alt-l"); f.pair(b, c, focused: c)
-            f.press("alt-l"); f.expanded(c)
-            let end = f.snapshot(); f.press("alt-l"); f.expanded(c); f.unchanged(end)
+            let end = f.snapshot(); f.press("alt-l"); f.pair(b, c, focused: c); f.unchanged(end)
             f.press("alt-h"); f.pair(b, c, focused: b)
             f.press("alt-h"); f.pair(a, b, focused: a)
-            f.press("alt-h"); f.expanded(a)
-            let start = f.snapshot(); f.press("alt-h"); f.expanded(a); f.unchanged(start)
+            let start = f.snapshot(); f.press("alt-h"); f.pair(a, b, focused: a); f.unchanged(start)
         })
     }
 
@@ -28,7 +26,7 @@ import Testing
             let before = f.snapshot(); f.mac.clearMotionHistory()
             f.press("alt-h"); f.pair(b, c, focused: b); f.unchanged(before)
             s.expect("a focus-only command performs no geometry writes", f.mac.geometryWrites.isEmpty)
-            s.expect("a focus-only command requests no display frames", f.mac.displayFrameRequests == 0)
+            s.expect("a focus-only command leaves the stage untouched", f.mac.stageEvents.isEmpty)
         })
         requireCarousel(Scenario.run("focus chooses the nearest of several complete thirds") { s in
             let f = CarouselFixture(s, presets: Array(repeating: 1.0/3, count: 5)), ids = f.ids
@@ -36,7 +34,7 @@ import Testing
             let before = f.snapshot(); f.mac.clearMotionHistory()
             f.press("alt-l"); f.focus(ids[2]); f.unchanged(before)
             f.press("alt-h"); f.focus(ids[1]); f.unchanged(before)
-            s.expect("crossing complete thirds neither writes geometry nor requests frames", f.mac.geometryWrites.isEmpty && f.mac.displayFrameRequests == 0)
+            s.expect("crossing complete thirds neither writes geometry nor uses the stage", f.mac.geometryWrites.isEmpty && f.mac.stageEvents.isEmpty)
         })
     }
 
@@ -47,7 +45,7 @@ import Testing
             let widths = [0.5, 1.0/3, 1.0/3, 1, 0.5].map(f.width)
             var starts: [Double] = [], x = 0.0
             for w in widths { starts.append(x); x += w + 10 }
-            // Two commands from expanded start reach E3's stated precondition.
+            // Two commands from the start reach E3's stated precondition.
             f.press("alt-l"); f.press("alt-l")
             f.focus(ids[2]); f.near(f.frame(ids[2]).maxX, f.area.maxX, "third right edge in the precondition")
             f.near(f.frame(ids[0]).maxX - f.area.minX, widths[0] - (starts[2] + widths[2] - f.area.width), "first window's exposed portion")
@@ -59,7 +57,6 @@ import Testing
                     f.near(f.frame(ids[i]).minX, f.area.minX + starts[i] - camera, "stop \(camera), window \(ids[i])")
                 }
             }
-            f.press("alt-l"); f.expanded(ids[4])
             let end = f.snapshot(); f.press("alt-l"); f.focus(ids[4]); f.unchanged(end)
         })
     }
@@ -99,7 +96,6 @@ import Testing
     func shortRailStretchPreservesNominalWidths(presets: [Double]) {
         requireCarousel(Scenario.run("proportional short rail") { s in
             let f = CarouselFixture(s, presets: presets), a = f.ids[0], b = f.ids[1]
-            f.press("alt-l") // Leave the workspace-start expansion before observing C.
             let scale = (f.area.width-10)/(f.width(presets[0])+f.width(presets[1]))
             f.near(f.frame(a).width, f.width(presets[0])*scale, "first width stretches proportionally")
             f.near(f.frame(b).width, f.width(presets[1])*scale, "second width stretches proportionally")
@@ -111,10 +107,9 @@ import Testing
         })
         if presets == [1.0/3, 1.0/3] {
             requireCarousel(Scenario.run("short rail redistributes a capped peer's width") { s in
-                let f = CarouselFixture(s, presets: presets, duration: 0), a = f.ids[0], b = f.ids[1]
+                // A maximum known from the start: no rail end ever resizes a window.
+                let f = CarouselFixture(s, presets: presets, duration: 0, maximumFractions: [0: 0.4]), a = f.ids[0], b = f.ids[1]
                 let cap = f.area.width * 0.4
-                f.app.limitSize(a, maximum: CGSize(width: cap, height: 100_000))
-                f.press("alt-l")
                 f.near(f.frame(a).width, cap, "the capped tile retains its maximum")
                 f.near(f.frame(b).minX, f.frame(a).maxX + 10, "the remaining tile follows the capped peer")
                 f.near(f.frame(b).maxX, f.area.maxX, "the remaining tile fills the area")
