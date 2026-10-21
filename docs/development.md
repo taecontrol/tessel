@@ -87,8 +87,9 @@ With no arguments, `scripts/verify` runs every real-system suite except the
 disposable-runner permission steps. `--journeys` includes those steps on CI;
 `--permission` selects just those steps. The signing-and-permission journey has
 separate signing and permission tests so the default can skip only the latter. Captures
-run only with their opt-in flag: `TESSEL_CAPTURE_WORKSPACES=1` for AppKit views
-or `TESSEL_CAPTURE_CAROUSEL=1` for E21 geometry recordings. Select a suite or pass a test
+run only with their opt-in flag: `TESSEL_CAPTURE_WORKSPACES=1` for AppKit views,
+`TESSEL_CAPTURE_CAROUSEL=1` for E21 geometry recordings, or
+`TESSEL_CAPTURE_LAYER=1` for layer recordings and owner-session preparation. Select a suite or pass a test
 name fragment, such as `scripts/verify switchWorkspaces`. Empty selections fail
 before a GUI session starts. The script sets `TESSEL_ACCEPTANCE=1`; a direct
 `TESSEL_ACCEPTANCE=1 swift build --build-tests` compiles these suites without
@@ -158,7 +159,9 @@ that child QoS changes cannot lift. Interrupting verification removes the job.
 
 `Resources.swift` keeps foundation E22's twenty default-config windows, workspace
 E36's twenty windows across ten workspaces, and carousel E24's twenty windows
-across five workspaces and multiple rails. Each retains its setup and one-second
+across five workspaces and multiple rails, plus one hidden float with the layer
+experiment enabled (also #19 E28). The two IDs share one resource test and the
+same budgets and observation window. Each retains its setup and one-second
 settle, then observes one 20-second idle window from outside the app with
 `proc_pid_rusage` (`rusage_info_v0`). Interrupt wakeups must be at most 11;
 user + system CPU must be at most 100 ms, converting Mach ticks with
@@ -626,7 +629,7 @@ failed sample index. No window listings or titles reach the artifact.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2 and #26.
+This table is the maintained example-to-layer map for issues #1, #2, #19 and #26.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -712,6 +715,38 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #2 E36 | R |
 | #2 E37 | X |
 | #2 U-switch-budget | L |
+| #19 E1 | P |
+| #19 E2 | P |
+| #19 E3 | P |
+| #19 E4 | P |
+| #19 E5 | P |
+| #19 E6 | P |
+| #19 E7 | P |
+| #19 E8 | P |
+| #19 E9 | P |
+| #19 E10 | P |
+| #19 E11 | X |
+| #19 E12 | P |
+| #19 E13 | P |
+| #19 E14 | P |
+| #19 E15 | P |
+| #19 E16 | P |
+| #19 E17 | P |
+| #19 E18 | P |
+| #19 E19 | P |
+| #19 E20 | P |
+| #19 E21 | P |
+| #19 E22 | P |
+| #19 E23 | P |
+| #19 E24 | P |
+| #19 E25 | P |
+| #19 E26 | P |
+| #19 E27 | P |
+| #19 E28 | R |
+| #19 E29 | J |
+| #19 E30 | X |
+| #19 E31 | P |
+| #19 E32 | X |
 | #26 E1 | P |
 | #26 E2 | P |
 | #26 E3 | P |

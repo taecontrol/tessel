@@ -337,6 +337,15 @@ final class FixtureContracts: NSObject {
         let idError = fixtureWindowID(window, &number)
         if number != 0, handles[number] == nil { handles[number] = window }
         let role = read(window, kAXRoleAttribute), subrole = read(window, kAXSubroleAttribute)
+        let cg = number == 0 ? nil : (CGWindowListCopyWindowInfo(.optionIncludingWindow, number) as? [[String: Any]])?.first
+        var owner: pid_t = 0
+        let ownerError = AXUIElementGetPid(window, &owner)
+        let layer = cg.flatMap { info -> Int? in
+            guard ownerError == .success,
+                  (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == owner,
+                  (info[kCGWindowNumber as String] as? NSNumber)?.uint32Value == number else { return nil }
+            return (info[kCGWindowLayer as String] as? NSNumber)?.intValue
+        }
         let position = read(window, kAXPositionAttribute), size = read(window, kAXSizeAttribute)
         let minimized = read(window, kAXMinimizedAttribute), fullscreen = read(window, "AXFullScreen"), main = read(window, kAXMainAttribute)
         var settable = DarwinBoolean(false)
@@ -355,6 +364,7 @@ final class FixtureContracts: NSObject {
         return ["id": number, "idError": idError.rawValue,
                 "role": role.value as? String as Any? ?? NSNull(), "roleError": role.error.rawValue,
                 "subrole": subrole.value as? String as Any? ?? NSNull(), "subroleError": subrole.error.rawValue,
+                "layer": layer as Any? ?? NSNull(),
                 "frame": frame(position: position.value, size: size.value), "frameError": position.error.rawValue,
                 "minimized": minimized.value as? Bool as Any? ?? NSNull(), "minimizedError": minimized.error.rawValue,
                 "fullscreen": fullscreen.value as? Bool as Any? ?? NSNull(), "fullscreenError": fullscreen.error.rawValue,

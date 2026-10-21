@@ -14,11 +14,14 @@ enum Layout: String, CaseIterable, Sendable { case off, stack, carousel }
     let rows: PublishedRows
     let keys = PressedKeys()
     private(set) var configurationPublications: [(at: Int, status: ConfigStatus)] = []
-    private let input = ConfigurationInput()
+    private let input: ConfigurationInput
     private let mac: SimulatedMac
 
-    init(on mac: SimulatedMac, configuration: Layout = .off) {
+    init(on mac: SimulatedMac, configuration: Layout = .off, text: String? = nil) {
         self.mac = mac
+        let input = ConfigurationInput()
+        self.input = input
+        input.data = text.map { Data($0.utf8) }
         rows = PublishedRows(now: { mac.scheduler.now })
         config = ConfigManager(path: "/scenario/tessel.toml", main: mac.scheduler.main, load: { [input] in
             if input.unreadable { throw CocoaError(.fileReadNoPermission) }
@@ -139,8 +142,8 @@ struct ScenarioResult {
         mac.scheduler.writeOrder = writes
         schedule = [name, "writes=\(writes.rawValue)"]
     }
-    func startTessel(_ configuration: Layout = .off) -> Tessel {
-        let tessel = Tessel(on: mac, configuration: configuration)
+    func startTessel(_ configuration: Layout = .off, text: String? = nil) -> Tessel {
+        let tessel = Tessel(on: mac, configuration: configuration, text: text)
         tessels.append(tessel)
         return tessel
     }

@@ -10,6 +10,9 @@ package enum MinimizedRaiseReply: String, CaseIterable, Sendable { case success,
 package struct WindowSpec: Sendable {
     package var frame: CGRect
     package var subrole: String
+    package var cgLayer: Int
+    /// A native child popup remains an AX root, unlike an attached sheet.
+    package var popupParent: UInt32?
     package var resizable: Bool
     package var minimumSize: CGSize
     package var maximumSize: CGSize
@@ -22,8 +25,9 @@ package struct WindowSpec: Sendable {
                  resizable: Bool = true, minimumSize: CGSize = CGSize(width: 1, height: 1),
                  maximumSize: CGSize = CGSize(width: 100_000, height: 100_000), parent: UInt32? = nil,
                  positionAcceptance: PositionAcceptance = .rightEdgeStrip, offDisplayMembership: OffDisplayMembership = .included,
-                 minimizedRaiseReply: MinimizedRaiseReply = .success) {
+                 minimizedRaiseReply: MinimizedRaiseReply = .success, cgLayer: Int = 0, popupParent: UInt32? = nil) {
         self.frame = frame; self.subrole = subrole; self.resizable = resizable
+        self.cgLayer = cgLayer; self.popupParent = popupParent
         self.minimumSize = minimumSize; self.maximumSize = maximumSize; self.parent = parent
         self.positionAcceptance = positionAcceptance
         self.offDisplayMembership = offDisplayMembership
@@ -186,6 +190,7 @@ package final class SimulatedMac: @unchecked Sendable {
 
     @MainActor @discardableResult func open(_ pid: Int32, spec: WindowSpec, background: Bool = false) -> UInt32 {
         assume(.axApplicationWindows)
+        if spec.cgLayer != 0 || spec.popupParent != nil { assume(.windowLevels) }
         nextWindow += 1
         let id = nextWindow
         windows[id] = Window(id: id, pid: pid, spec: spec, spaces: [active])

@@ -54,6 +54,10 @@ struct SystemScreen: ScreenPort {
 
 @MainActor
 struct SystemWindowOrder: WindowOrderPort {
+    // The acceptance-first change exposes the seam; the native read arrives
+    // with the catalog behavior that consumes it.
+    nonisolated func windowLevels() -> [UInt32: Int] { [:] }
+
     func onScreenOrder() -> [UInt32] {
         // Drain bridge temporaries without waiting for AppKit's next input event.
         autoreleasepool {

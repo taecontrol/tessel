@@ -2,6 +2,25 @@ import Foundation
 import Testing
 
 extension Acceptance.Contracts {
+    @Test("window-levels: CG layers distinguish ordinary roots, borderless child popups and status-bar windows", contract(.windowLevels))
+    func windowLevels() throws {
+        let reply = try fixture.command("windowLevels")
+        let ordinary = try #require(reply.windows["ordinary"]), dialog = try #require(reply.windows["dialog"])
+        let popup = try #require(reply.windows["popup"]), status = try #require(reply.windows["status"])
+        // One native setup and one final-state observation, with no sleeps or
+        // repeated transitions; this contract is intended to cost about 1 s.
+        try requireFinalState("the independent observer reads each native layer and AX root") {
+            let roots = try native().roots
+            guard let a = roots.first(where: { $0.id == ordinary }), let b = roots.first(where: { $0.id == dialog }),
+                  let child = roots.first(where: { $0.id == popup }), let high = roots.first(where: { $0.id == status }) else { return false }
+            return a.layer == 0 && a.subrole == "AXStandardWindow" && b.layer == 0 && b.subrole == "AXDialog"
+                && child.layer == 0 && child.subrole == "AXUnknown" && child.role == "AXWindow"
+                && high.layer.map { $0 != 0 } == true
+                && [a, b, child, high].allSatisfy { $0.subroleError == 0 && $0.roleError == 0 }
+                && !a.sheets.contains { $0.id == popup }
+        }
+    }
+
     @Test("transient-window-lists: native transitions stay within the modeled AX outcomes", contract(.transientWindowLists))
     func transientWindowLists() throws {
         let a = try fixture.open(key: "a"), b = try fixture.open(key: "b")

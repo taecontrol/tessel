@@ -42,4 +42,8 @@ package struct ScreenGeometry: Sendable {
 package protocol ScreenPort { var primaryScreen: ScreenGeometry? { get } }
 
 @MainActor
-package protocol WindowOrderPort { func onScreenOrder() -> [UInt32] }
+package protocol WindowOrderPort {
+    func onScreenOrder() -> [UInt32]
+    /// CG window layers, including windows outside the active Space.
+    nonisolated func windowLevels() -> [UInt32: Int]
+}

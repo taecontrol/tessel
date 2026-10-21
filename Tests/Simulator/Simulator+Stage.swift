@@ -28,6 +28,7 @@ extension SimulatedMac {
         var busyUntil = 0
         var captured: [UInt32: Int] = [:]
         var backgroundReady: Int?
+        var backgroundExclusions: [Set<UInt32>] = []
         var shown = false
         var failing = Set<UInt32>()
         /// Counts moves, reveals and clears: a later one cancels an earlier
@@ -37,6 +38,7 @@ extension SimulatedMac {
 
     @MainActor package var stage: any MotionStagePort { Stage(mac: self) }
     @MainActor package var stageEvents: [StageEvent] { stageState.events }
+    @MainActor package var stageBackgroundExclusions: [Set<UInt32>] { stageState.backgroundExclusions }
     /// Screen Recording, which the stage needs.
     @MainActor package func setScreenRecording(_ granted: Bool) {
         action("Screen Recording=\(granted)")
@@ -76,6 +78,7 @@ extension SimulatedMac {
         func capture(_ windows: Set<UInt32>, background excluding: Set<UInt32>?) {
             mac.assume(.stageWholeWindowCapture)
             mac.scheduler.call("MotionStagePort.capture")
+            if let excluding { mac.stageState.backgroundExclusions.append(excluding) }
             let session = mac.stageState.session
             for id in windows.sorted() where mac.stageState.captured[id] == nil {
                 let done = max(mac.scheduler.now, mac.stageState.busyUntil) + mac.stageState.captureCost

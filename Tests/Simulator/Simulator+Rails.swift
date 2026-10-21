@@ -135,6 +135,7 @@ extension SimulatedMac {
         } else { order() }
     }
     func selectFromAX(_ id: UInt32, raising: Bool = false) -> AXStatus {
+        motion.focusRequests.append(FocusRequest(window: id, hidden: isCloseted(id)))
         if windows[id]?.minimized == true {
             assume(.minimizeFocusInterruption)
             guard raising else { return .success }

@@ -52,6 +52,8 @@ struct Status: Decodable {
         let rail: Int?
         let gaps: Gaps
         let keys: [String: String]
+        struct Layer: Decodable { let state: String; let focused: Bool }
+        let layer: Layer?
         struct Gaps: Decodable { let outer: Double }
     }
 }

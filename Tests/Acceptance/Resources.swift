@@ -72,13 +72,13 @@ extension Acceptance {
             sleep(seconds: 1)
             try verifyIdleResources("E36")
         }
-        @Test("#26 E24: carousel does no stage work at rest and keeps the resource budget") func carouselAcrossWorkspacesKeepsTheIdleResourceBudget() throws {
+        @Test("#26 E24; #19 E28: carousel and a hidden layer do no stage work at rest and keep the resource budget") func carouselAcrossWorkspacesKeepsTheIdleResourceBudget() throws {
             try harness.reset()
             // Thirty setup changes run instantly: each animated one costs a
             // capture, and the suite must fit its CI budget. One animated
             // change at the default duration loads the stage before the idle
             // window.
-            try desktop.configure("[experiments]\ncarousel = true\n[animation]\nduration = 0\n", layout: "carousel")
+            try desktop.configure("[experiments]\nlayer = true\n[animation]\nduration = 0\n", layout: "carousel")
             var last: UInt32 = 0
             for index in 0..<20 {
                 let id = try fixture.open(kind: index.isMultiple(of: 2) ? "heavyText" : "web", key: "idle\(index)", ["widthFraction": 0.4])
@@ -109,7 +109,13 @@ extension Acceptance {
                 let rows = try harness.rows()
                 return rows.count == 20 && Set(rows.compactMap(\.workspace)).count == 5 && rows.contains { ($0.rail ?? 0) > 1 }
             }
-            try desktop.configure("[experiments]\ncarousel = true\n", layout: "carousel")
+            let hiddenFloat = try fixture.open(kind: "normalPanel", key: "hiddenFloat", ["background": true])
+            try requireFinalState("the idle layer fixture is catalogued") { try harness.row(hiddenFloat)?.state == "floats" }
+            try desktop.activate(key: "idle19")
+            try requireFinalState("the idle float is hidden natively and in the CLI") {
+                try harness.row(hiddenFloat)?.visible == false && !desktop.observe().visibleIDs.contains(hiddenFloat)
+            }
+            try desktop.configure("[experiments]\nlayer = true\n", layout: "carousel")
             let setupWorkStart = try harness.stageWork()
             let rail = try #require(try harness.row(last)?.rail)
             try desktop.post(38, shift: true)
@@ -122,7 +128,7 @@ extension Acceptance {
             if try harness.status().workspaces?.motion == "on" {
                 try #require(work > setupWorkStart, "The stage counter must increase during the animated change before it can prove idle zero work; \(given)")
             }
-            try verifyIdleResources("Carousel E24", stageWorkBefore: work)
+            try verifyIdleResources("Carousel E24 / Layer E28", stageWorkBefore: work)
         }
     }
 }

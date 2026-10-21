@@ -56,6 +56,7 @@ struct NativeContractReply: Codable {
         let roleError: Int32
         let subrole: String?
         let subroleError: Int32
+        let layer: Int?
         let frame: [Double]
         let frameError: Int32
         let minimized: Bool?
