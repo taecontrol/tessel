@@ -14,6 +14,17 @@ struct WindowObservation: Sendable {
 
 enum CatalogChange: Sendable, Equatable { case snapshot, activation, focus, restored }
 
+struct WindowFocusObservation: Sendable {
+    let window: UInt32?
+    let frontmost: Bool
+}
+
+struct RailPresentationResult: Sendable {
+    var frame: CGRect?
+    /// Nil when presentation stopped before publishing a fresh native read.
+    var focus: WindowFocusObservation?
+}
+
 @MainActor
 final class WindowCatalog {
     private let workspaces: Workspaces
@@ -75,8 +86,8 @@ final class WindowCatalog {
     }
 
     func presentRail(pid: Int32, id: UInt32, frame: CGRect?, position: Bool, resize: Bool, focus: Bool, screenRight: CGFloat,
-                     completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
-        guard let app = apps[pid] else { completion(nil); return }
+                     completion: @escaping @MainActor @Sendable (RailPresentationResult) -> Void) {
+        guard let app = apps[pid] else { completion(RailPresentationResult()); return }
         app.presentRail(id:id,target:frame,position:position,resize:resize,focus:focus,screenRight:screenRight,completion:completion)
     }
 
@@ -493,7 +504,8 @@ private final class AppWindows: @unchecked Sendable {
         })
     }
 
-    private func publishSnapshot(replacing replacements: [UInt32: UInt32] = [:]) {
+    @discardableResult
+    private func publishSnapshot(replacing replacements: [UInt32: UInt32] = [:]) -> WindowFocusObservation {
         var focused = focusedWindow()
         if change == .activation, let awaited = awaitedActivation {
             awaited.expiry.cancel()
@@ -523,6 +535,7 @@ private final class AppWindows: @unchecked Sendable {
         publish(observations, focused == 0 ? nil : focused, frontmost, change, activationToken)
         change = .snapshot
         activationToken = nil
+        return WindowFocusObservation(window: focused == 0 ? nil : focused, frontmost: frontmost)
     }
 
     private func focusedWindow() -> UInt32 {
@@ -600,7 +613,7 @@ private final class AppWindows: @unchecked Sendable {
     }
 
     func presentRail(id: UInt32, target: CGRect?, position: Bool, resize: Bool, focus: Bool, screenRight: CGFloat,
-                     completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
+                     completion: @escaping @MainActor @Sendable (RailPresentationResult) -> Void) {
         let token = presentationLock.withLock { presentation }
         queue.async { [self] in
             presentRail(id:id,target:target,position:position,resize:resize,focus:focus,screenRight:screenRight,token:token,failures:0,completion:completion)
@@ -608,10 +621,14 @@ private final class AppWindows: @unchecked Sendable {
     }
 
     private func presentRail(id: UInt32, target: CGRect?, position: Bool, resize: Bool, focus: Bool, screenRight: CGFloat, token: UUID,
-                             failures: Int, completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
+                             failures: Int, completion: @escaping @MainActor @Sendable (RailPresentationResult) -> Void) {
         var accepted: CGRect?, retrying = false
+        var observedFocus: WindowFocusObservation?
         defer {
-            if !retrying { let result = accepted; scheduler.main.async { completion(result) } }
+            if !retrying {
+                let result = RailPresentationResult(frame: accepted, focus: observedFocus)
+                scheduler.main.async { completion(result) }
+            }
         }
         guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
         do {
@@ -687,7 +704,7 @@ private final class AppWindows: @unchecked Sendable {
                 }
                 railActivationCheck = (token,check)
             }
-            publishSnapshot()
+            observedFocus = publishSnapshot()
         } catch AXReadError.unresponsive where target != nil && accepted == nil && failures < 4 {
             // A busy or briefly hung app can time out every write of the
             // render that moved it, leaving a stale frame over its

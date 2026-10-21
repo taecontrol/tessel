@@ -83,7 +83,13 @@ final class Workspaces {
     private var layers: [Int: FloatingLayer] = [:]
     private var layerPlacements: [UInt32: CGRect] = [:]
     private var desktopFocusObservation: (any ApplicationObservation)?
-    private var layerHandoff: (token: UInt64, selection: UInt32)?
+    private struct LayerHandoff {
+        let token: UInt64
+        var selection: UInt32
+        let underStage: Bool
+        var awaitingObservation = false
+    }
+    private var layerHandoff: LayerHandoff?
     private var layer: FloatingLayer {
         get { layers[status.active] ?? FloatingLayer() }
         set { layers[status.active] = newValue }
@@ -471,16 +477,19 @@ final class Workspaces {
                 externalSelection = (pid, reportedFocus)
             }
         }
-        finishLayerHandoff()
+        finishLayerHandoff(observedFocus: reportedFocus, pid: pid)
         publish()
     }
 
-    private func finishLayerHandoff() {
-        guard let handoff = layerHandoff, handoff.token == transition, status.enabled, layerEnabled,
+    private func finishLayerHandoff(observedFocus: UInt32?, pid: Int32) {
+        guard let handoff = layerHandoff, handoff.awaitingObservation,
+              handoff.token == transition, status.enabled, layerEnabled,
               available(handoff.selection), entries[handoff.selection]?.workspace == status.active,
-              applications.frontmostPID.flatMap({ appFocus[$0] }) == handoff.selection else { return }
+              entries[handoff.selection]?.pid == pid, applications.frontmostPID == pid,
+              observedFocus == handoff.selection else { return }
         layerHandoff = nil
-        render(focusing: handoff.selection, relayout: false, takeFocus: false, instant: true)
+        renderCarouselInstant(focusing: handoff.selection, activateDesktop: false, takeFocus: false,
+                              underStage: handoff.underStage, handoffCompleted: true)
     }
 
     private var decisionPending: Bool { focusDecision != nil && externalSelection != nil }
@@ -768,6 +777,7 @@ final class Workspaces {
         if let size = carouselSizes.removeValue(forKey: previous) { carouselSizes[id] = size }
         if focused == previous { focused = id }
         if expectedFocus == previous { expectedFocus = id }
+        if layerHandoff?.selection == previous { layerHandoff?.selection = id }
         // Hide intent follows membership and focus history. A new CG window
         // still needs its own move; do not inherit the old ID's completed move.
         closeted.remove(previous)
@@ -1155,7 +1165,8 @@ final class Workspaces {
     /// The real windows replace their stand-ins once the motion has settled,
     /// every placement is confirmed, and WindowServer shows them in place.
     private func finishStage() {
-        guard var staging, staging.settled, !staging.revealing, !staging.covering, carouselPresentation?.pending.isEmpty != false, let stage else { return }
+        guard var staging, staging.settled, !staging.revealing, !staging.covering, layerHandoff == nil,
+              carouselPresentation?.pending.isEmpty != false, let stage else { return }
         staging.revealing = true
         self.staging = staging
         let generation = staging.generation, revision = staging.revision
@@ -1232,7 +1243,7 @@ final class Workspaces {
     /// Places every window at once. Under the stage it runs once per motion
     /// change and keeps the focus the stage already requested.
     private func renderCarouselInstant(focusing selection: UInt32?, activateDesktop: Bool, takeFocus: Bool,
-                                       keepFocus: Bool = false, underStage: Bool = false) {
+                                       keepFocus: Bool = false, underStage: Bool = false, handoffCompleted: Bool = false) {
         if !underStage { clearStage(); decisions += 1; cancelFocusDecision() }
         guard status.enabled, let closet else { return }
         transition += 1
@@ -1261,17 +1272,31 @@ final class Workspaces {
         // A modal can keep its app waiting in the closet, but it must first
         // relinquish keyboard focus. Show and focus the destination before
         // committing the hide, including a workspace switch from the layer.
-        if layerEnabled, let front = applications.frontmostPID, let native = appFocus[front], hide.contains(native) {
+        // A native selection can precede its queued catalog notification.
+        // Any newly hidden window of the front app may own keyboard focus.
+        let newlyHidden = hide.subtracting(closeted)
+        if layerEnabled, !handoffCompleted, let front = applications.frontmostPID,
+           newlyHidden.contains(where: { entries[$0]?.pid == front }) {
             if let selection, show.contains(selection), let candidate = entries[selection] {
                 expectedFocus = selection
-                layerHandoff = (token, selection)
+                layerHandoff = LayerHandoff(token: token, selection: selection, underStage: underStage)
                 let target = newlyShown.contains(selection) ? frames[selection] : nil
                 catalog?.presentRail(pid: candidate.pid, id: selection, frame: target, position: target != nil,
-                                     resize: target != nil, focus: true, screenRight: screenRight) { [weak self] _ in
+                                     resize: target != nil, focus: true, screenRight: screenRight) { [weak self] result in
                     guard let self, self.status.enabled, self.transition == token else { return }
-                    // Activation can still be unconfirmed at completion. Its
-                    // later catalog publication completes the same handoff.
-                    self.finishLayerHandoff()
+                    // The worker and main queues preserve order: publications
+                    // after this completion were read after the focus attempt.
+                    // A skipped or failed attempt must not trust cached focus.
+                    self.layerHandoff?.awaitingObservation = true
+                    if let observation = result.focus, observation.frontmost {
+                        let observed = observation.window.map { self.entries[$0]?.observation.parent ?? $0 }
+                        self.finishLayerHandoff(observedFocus: observed, pid: candidate.pid)
+                    } else if let replacement = self.layerHandoff?.selection, replacement != selection {
+                        // The native successor can have published before the
+                        // old target rejected presentation. Give it the intent.
+                        self.renderCarouselInstant(focusing: replacement, activateDesktop: activateDesktop,
+                                                   takeFocus: true, underStage: underStage)
+                    }
                     self.publish()
                 }
             } else if activateDesktop {
@@ -1316,8 +1341,9 @@ final class Workspaces {
             let position = positions.contains(id) || resize
             let target = floatTarget ?? (position || resize ? frames[id] : nil)
             guard target != nil || takeFocus && id == focused else { continue }
-            catalog?.presentRail(pid:candidate.pid,id:id,frame:target,position:position,resize:resize,focus:takeFocus && id == focused, screenRight: screenRight) { [weak self] accepted in
+            catalog?.presentRail(pid:candidate.pid,id:id,frame:target,position:position,resize:resize,focus:takeFocus && id == focused, screenRight: screenRight) { [weak self] result in
                 guard let self, self.status.enabled, self.carouselEnabled, self.transition == token else { return }
+                let accepted = result.frame
                 if let accepted {
                     self.carouselPresentation?.pending.remove(id)
                     if floatTarget != nil {
@@ -1341,6 +1367,7 @@ final class Workspaces {
             }
         }
         if focused == nil && activateDesktop && takeFocus { activateFinderDesktop() }
+        if underStage { finishStage() }
         scheduler.main.after(milliseconds: 50) { [weak self] in
             guard let self, self.transition == token, self.status.enabled else { return }
             if !hide.intersection(self.onScreen()).isEmpty { self.disable(reason:"SkyLight could not hide a window") }
