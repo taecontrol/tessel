@@ -86,7 +86,7 @@ import Testing
         })
     }
 
-    @Test("#19 E27: entering and leaving move each float once without tile AX writes or captures; a new single moves none")
+    @Test("#19 E27: entering and leaving move each float once with at most N float raises, no tile AX writes or captures; a new single moves none")
     func layerOperationCounts() {
         requireLayer(Scenario.run("layer operation count budget") { s in
             let specs = (0..<4).map { _ in WindowSpec(subrole: "AXFloatingWindow") }
@@ -99,6 +99,7 @@ import Testing
             s.expect("entry makes no closet entries", f.closetMoves(showing: false).isEmpty)
             let writes = LayerFixture.axWrites(in: Array(f.mac.scheduler.trace.dropFirst(start)))
             s.expect("entry makes zero AX writes to tiles", writes.allSatisfy { write in !f.tiles.contains { write.contains("window \($0) ") } })
+            s.expect("entry makes at most N AXRaise calls to floats", writes.filter { $0.contains("perform AXRaise") }.count <= f.floats.count)
             s.expect("entry requests zero window, background or refresh captures", f.captureRequests.isEmpty)
             f.mac.clearMotionHistory()
             f.press("toggle layer")

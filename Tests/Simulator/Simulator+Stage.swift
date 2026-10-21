@@ -5,6 +5,7 @@ import Ports
 extension SimulatedMac {
     package enum StageEventKind: Sendable, Equatable {
         case capture(UInt32)
+        case order([UInt32])
         case background
         case show([UInt32: CGRect])
         case move([UInt32: CGRect], duration: Int)
@@ -25,7 +26,6 @@ extension SimulatedMac {
         package let at: Int
         package let windows: Set<UInt32>
         package let backgroundExcluding: Set<UInt32>?
-        package let foreground: Set<UInt32>
         package let refreshing: Bool
     }
     struct StageState {
@@ -110,10 +110,15 @@ extension SimulatedMac {
             }
         }
 
-        func capture(_ windows: Set<UInt32>, background excluding: Set<UInt32>?, foreground: Set<UInt32>) {
+        func order(_ windows: [UInt32]) {
+            mac.scheduler.call("MotionStagePort.order")
+            mac.recordStage(.order(windows))
+        }
+
+        func capture(_ windows: Set<UInt32>, background excluding: Set<UInt32>?) {
             mac.assume(.stageWholeWindowCapture)
             mac.stageState.captureRequests.append(StageCaptureRequest(at: mac.scheduler.now, windows: windows,
-                backgroundExcluding: excluding, foreground: foreground, refreshing: false))
+                backgroundExcluding: excluding, refreshing: false))
             mac.scheduler.call("MotionStagePort.capture")
             let session = mac.stageState.session
             for id in windows.sorted() where mac.stageState.captured[id] == nil {
@@ -196,7 +201,7 @@ extension SimulatedMac {
         func refresh(_ window: UInt32) {
             mac.assume(.stageWholeWindowCapture)
             mac.stageState.captureRequests.append(StageCaptureRequest(at: mac.scheduler.now, windows: [window],
-                backgroundExcluding: nil, foreground: [], refreshing: true))
+                backgroundExcluding: nil, refreshing: true))
             mac.scheduler.call("MotionStagePort.refresh")
             let session = mac.stageState.session
             mac.scheduler.main.after(milliseconds: 17) { [self, mac] in

@@ -13,8 +13,11 @@ package protocol MotionStagePort: AnyObject {
     /// Starts capturing whole windows, wherever they are, including the
     /// closet. With `background`, also captures what lies under the area
     /// without those windows. A window already captured for this stage is not
-    /// captured again. Foreground stand-ins stay above all moving tiles.
-    func capture(_ windows: Set<UInt32>, background excluding: Set<UInt32>?, foreground: Set<UInt32>)
+    /// captured again.
+    func capture(_ windows: Set<UInt32>, background excluding: Set<UInt32>?)
+    /// Front-to-back order of the stand-ins at rest. Retargeting can change
+    /// this order without requesting another capture.
+    func order(_ windows: [UInt32])
     /// Shows every captured stand-in at its rect in one frame, once all
     /// requested captures have arrived. False when a capture failed or the
     /// stage was cleared meanwhile.

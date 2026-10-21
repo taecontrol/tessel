@@ -134,7 +134,8 @@ extension SimulatedMac {
                 if case .window(let id) = handle.node { status = mac.selectFromAX(id, raising: true) }
                 else { mac.scheduler.failUnmodeled("AccessibilityPort.perform \(action.rawValue) \(mac.name(handle.node))"); status = .cannotComplete }
             }
-            mac.recordFocusEffect()
+            let raisedWindow: UInt32? = if case .window(let id) = handle.node { id } else { nil }
+            mac.recordFocusEffect(raisedWindow: raisedWindow)
             finish(handle, operation: "perform \(action.rawValue)", status: status)
             return status
         }

@@ -22,7 +22,9 @@ import Testing
         tiles = [a.open(tile), a.open(tile), b.open(tile)]
         floats = [a, b, c].map { $0.open(WindowSpec(subrole: "AXDialog"), background: true) }
         a.select(tiles[0])
-        tessel = s.startTessel(text: LayerFixture.config + "[animation]\nduration = \(duration)\n")
+        tessel = s.startTessel()
+        s.settle()
+        tessel.changeConfig(LayerFixture.config + "[animation]\nduration = \(duration)\n")
         s.settle()
         s.expect("all three tiles are CG-visible", Set(tiles).isSubset(of: Set(mac.windowOrder.onScreenOrder())))
     }
@@ -55,6 +57,29 @@ import Testing
 }
 
 @Suite @MainActor struct LayerStacking {
+    @Test("#19 E27: entry raises at most N floats and a pinned tile placement raises each visible background float once", arguments: WriteOrder.allCases)
+    func backgroundRaiseBudget(_ writes: WriteOrder) {
+        requireLayer(Scenario.run("layer raise budget / \(writes)", writes: writes) { s in
+            let f = LayerStackingFixture(s)
+            f.mac.clearMotionHistory()
+            var start = f.mac.scheduler.trace.count
+            f.press("toggle layer")
+            let exits = f.mac.visibilityChanges.filter(\.showing).flatMap(\.windows)
+            s.expect("entry makes N closet exits", exits.count == f.floats.count && Set(exits) == Set(f.floats))
+            s.expect("entry raises at most N floats, including its focused float", f.raises(since: start).count <= f.floats.count)
+            let entryWrites = LayerFixture.axWrites(in: Array(f.mac.scheduler.trace.dropFirst(start)))
+            s.expect("entry makes no AX writes to tiles", entryWrites.allSatisfy { write in !f.tiles.contains { write.contains("window \($0) ") } })
+            s.expect("entry captures nothing", f.mac.stageCaptureRequests.isEmpty)
+            f.press("pin layer"); f.press("toggle layer")
+            start = f.mac.scheduler.trace.count
+            f.mac.clearMotionHistory()
+            f.press("focus right")
+            let raisedFloats = f.raises(since: start).filter { f.floats.contains($0) }
+            s.expect("one raise per visible background-app float and none to a frontmost-app float", raisedFloats.count == 2 && Set(raisedFloats) == Set(f.floats.dropFirst()))
+            f.stacking(focus: f.tiles[1], owner: f.apps[0].pid)
+        })
+    }
+
     @Test("#19 E9: spec gap — pinned tile placements raise background floats in CG order without changing focus", arguments: WriteOrder.allCases, [0, 250])
     func pinnedCGStacking(_ writes: WriteOrder, _ duration: Int) {
         requireLayer(Scenario.run("pinned CG stacking / \(writes) / \(duration)", writes: writes) { s in
@@ -74,9 +99,9 @@ import Testing
                 f.press(command)
                 f.stacking(focus: f.tiles[index], owner: f.apps[owner].pid)
                 s.expect("tile placement never raises a frontmost-app float", !f.raises(since: start).contains(f.floats[owner]))
-                s.expect("extra raises never select a float", f.mac.focusEffects.allSatisfy { effect in
-                    effect.window.map { !f.floats.contains($0) } ?? true
-                })
+                s.expect("extra raises never change keyboard focus", f.mac.focusEffects.filter { effect in
+                    effect.raisedWindow.map { f.floats.contains($0) } ?? false
+                }.allSatisfy { $0.window == f.tiles[index] })
             }
         })
     }

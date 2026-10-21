@@ -96,6 +96,11 @@ final class WindowCatalog {
         app.windowIsGone(id: id, completion: completion)
     }
 
+    func raiseBackground(pid: Int32, id: UInt32, completion: @escaping @MainActor @Sendable () -> Void) {
+        guard let app = apps[pid] else { completion(); return }
+        app.raiseBackground(id: id, completion: completion)
+    }
+
     func returnInside(ids: Set<UInt32>, area: CGRect) { apps.keys.sorted().compactMap { apps[$0] }.forEach { $0.returnInside(ids:ids,area:area) } }
 
     func cancelPresentations(invalidatingFocus: Bool = true) {
@@ -609,6 +614,21 @@ private final class AppWindows: @unchecked Sendable {
                 }
                 publishSnapshot()
             } catch { /* Keep the last complete classification when the app is busy. */ }
+        }
+    }
+
+    /// AXRaise on a frontmost app's root may select it (ax-focus). A background
+    /// raise only reorders below the active window (ax-raise-across-applications).
+    func raiseBackground(id: UInt32, completion: @escaping @MainActor @Sendable () -> Void) {
+        let token = presentationLock.withLock { presentation }
+        queue.async { [self] in
+            defer { scheduler.main.async { completion() } }
+            guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
+            do {
+                guard try canPresent(window, id: id), try value(application, .frontmost)?.bool == false,
+                      presentationLock.withLock({ presentation == token }) else { return }
+                try check(ax.perform(.raise, on: window))
+            } catch { /* A busy or newly frontmost app keeps its native order. */ }
         }
     }
 

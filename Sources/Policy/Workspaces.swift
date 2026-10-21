@@ -92,6 +92,7 @@ final class Workspaces {
         var awaitingObservation = false
     }
     private var layerHandoff: LayerHandoff?
+    private var layerRaiseTransition: UInt64?
     private var layer: FloatingLayer {
         get { layers[status.active] ?? FloatingLayer() }
         set { layers[status.active] = newValue }
@@ -952,6 +953,69 @@ final class Workspaces {
         }
     }
 
+    /// Oldest use first, newest use last. For untouched floats the first
+    /// arrival wins, as it does when entering the layer for the first time.
+    private var layerRaiseOrder: [UInt32] {
+        floatingOrder(in: status.active).enumerated().sorted {
+            let a = entries[$0.element]?.recent ?? 0, b = entries[$1.element]?.recent ?? 0
+            return a == b ? $0.offset > $1.offset : a < b
+        }.map(\.element)
+    }
+
+    private var layerNeedsRaises: Bool { layerEnabled && (layer.pinned || layer.entry == .all) }
+
+    private func restackLayer(token: UInt64) {
+        guard transition == token else { return }
+        guard layerNeedsRaises else { layerRaiseTransition = nil; return }
+        layerRaiseTransition = token
+        let visible = onScreen(), front = applications.frontmostPID
+        let ids = layerRaiseOrder.filter { visible.contains($0) && !closeted.contains($0) && available($0) && entries[$0]?.pid != front }
+        raiseLayerFloats(ids[...], token: token)
+    }
+
+    /// Serial across app workers as well as within one app: concurrent AXRaise
+    /// replies cannot preserve a cross-app MRU order. A new render cancels it.
+    private func raiseLayerFloats(_ ids: ArraySlice<UInt32>, token: UInt64) {
+        guard transition == token, status.enabled, !quitting, layerNeedsRaises else { return }
+        guard let id = ids.first else {
+            layerRaiseTransition = nil
+            orderStage()
+            finishStage()
+            return
+        }
+        guard let entry = entries[id], available(id), !closeted.contains(id), entry.pid != applications.frontmostPID,
+              let catalog else { raiseLayerFloats(ids.dropFirst(), token: token); return }
+        catalog.raiseBackground(pid: entry.pid, id: id) { [weak self] in
+            self?.raiseLayerFloats(ids.dropFirst(), token: token)
+        }
+    }
+
+    /// Predict only the contracted writes still to come: activation brings the
+    /// app forward, focus selects its root, and background raises stay below
+    /// that root. Once placement finishes this starts from the real CG order.
+    private func orderStage() {
+        guard let staging, let stage else { return }
+        // A placement may still be confirming this intent while the stage is
+        // shown. Never temporarily fall back to the previous key's order.
+        let selection = focused
+        let ids = Set(staging.rects.keys)
+        var order = windowOrder.onScreenOrder()
+        order.append(contentsOf: ids.subtracting(order).sorted())
+        let front = selection.flatMap { entries[$0]?.pid } ?? applications.frontmostPID
+        let key = selection ?? front.flatMap { appFocus[$0] }.map { entries[$0]?.observation.parent ?? $0 }
+        if let selection, let front {
+            let owned = order.filter { entries[$0]?.pid == front && $0 != selection }
+            order.removeAll { entries[$0]?.pid == front }
+            order.insert(contentsOf: [selection] + owned, at: 0)
+        }
+        for id in layerRaiseOrder where ids.contains(id) && entries[id]?.pid != front {
+            order.removeAll { $0 == id }
+            let index = key.flatMap { order.firstIndex(of: $0) }.map { $0 + 1 } ?? 0
+            order.insert(id, at: index)
+        }
+        stage.order(order.filter { ids.contains($0) })
+    }
+
     private func reconcileLayer(in workspace: Int) {
         if floatingOrder(in: workspace).isEmpty { layers[workspace] = FloatingLayer() }
         else if case .single(let id) = layers[workspace]?.entry,
@@ -1133,8 +1197,9 @@ final class Workspaces {
         // focus look changes when the real window replaces its stand-in.
         let focusChanges = takeFocus && focused != nil && focused != leavingFocus
         if first || !toCapture.isEmpty {
-            stage.capture(toCapture, background: first ? Set(starts.keys).union(to.keys) : nil, foreground: Set(pinned.keys))
+            stage.capture(toCapture, background: first ? Set(starts.keys).union(to.keys) : nil)
         }
+        orderStage()
         expectedFocus = takeFocus ? focused : nil
         let shown = starts.filter { seen.contains($0.key) }
         if first {
@@ -1196,7 +1261,7 @@ final class Workspaces {
     /// every placement is confirmed, and WindowServer shows them in place.
     private func finishStage() {
         guard var staging, staging.settled, !staging.revealing, !staging.covering, layerHandoff == nil,
-              carouselPresentation?.pending.isEmpty != false, let stage else { return }
+              carouselPresentation?.pending.isEmpty != false, layerRaiseTransition != transition, let stage else { return }
         staging.revealing = true
         self.staging = staging
         let generation = staging.generation, revision = staging.revision
@@ -1230,7 +1295,8 @@ final class Workspaces {
         let offset = Dictionary(uniqueKeysWithValues: seen.map { id, rect in
             (id, frames[id] == nil ? rect : rect.offsetBy(dx: wall.x * area.width * 0.03, dy: wall.y * area.height * 0.03))
         })
-        stage.capture(Set(seen.keys), background: Set(all.keys), foreground: Set(seen.keys.filter { floating($0) }))
+        stage.capture(Set(seen.keys), background: Set(all.keys))
+        orderStage()
         // A command during the bounce retargets it like any motion.
         func bouncing() -> Bool { staging?.generation == generation && staging?.revision == 0 }
         stage.show(seen) { [weak self] ok in
@@ -1278,6 +1344,7 @@ final class Workspaces {
         guard status.enabled, !quitting, let closet else { return }
         transition += 1
         let token = transition
+        layerRaiseTransition = layerNeedsRaises ? token : nil
         desktopFocusObservation = nil
         layerHandoff = nil
         if !keepFocus { expectedFocus = nil }
@@ -1392,10 +1459,12 @@ final class Workspaces {
                     }
                 }
                 if self.transition == token && id == focused { self.expectedFocus = nil }
+                if self.transition == token && id == focused && takeFocus { self.restackLayer(token: token) }
                 if underStage { self.finishStage() }
                 self.publish()
             }
         }
+        if !takeFocus || focused == nil { restackLayer(token: token) }
         if focused == nil && activateDesktop && takeFocus { activateFinderDesktop() }
         if underStage { finishStage() }
         scheduler.main.after(milliseconds: 50) { [weak self] in

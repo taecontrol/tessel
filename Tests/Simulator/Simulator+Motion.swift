@@ -25,6 +25,8 @@ extension SimulatedMac {
         package let at: Int
         package let window: UInt32?
         package let hidden: Bool
+        /// The AXRaise target, when this effect followed that action.
+        package let raisedWindow: UInt32?
     }
     struct MotionState {
         var writes: [GeometryWrite] = []
@@ -74,9 +76,9 @@ extension SimulatedMac {
         motion.writes.removeAll(); motion.visibility.removeAll(); motion.focusRequests.removeAll(); motion.focusEffects.removeAll()
         clearStageHistory()
     }
-    func recordFocusEffect() {
+    func recordFocusEffect(raisedWindow: UInt32? = nil) {
         let window = front.flatMap { apps[$0]?.key }
-        motion.focusEffects.append(NativeFocus(at: scheduler.now, window: window, hidden: window.map(isCloseted) ?? false))
+        motion.focusEffects.append(NativeFocus(at: scheduler.now, window: window, hidden: window.map(isCloseted) ?? false, raisedWindow: raisedWindow))
     }
     func isCloseted(_ id: UInt32) -> Bool {
         guard let spaces = windows[id]?.spaces else { return false }
