@@ -51,6 +51,38 @@ struct LayerFidelity {
         }
     }
 
+    private func select(_ key: String, id: UInt32) throws {
+        do {
+            try desktop.activate(fixture, key: key)
+            try desktop.expectFocus(id)
+        } catch {
+            throw HarnessError("E30 selecting \(key) (fixture window \(id)): \(error)")
+        }
+    }
+
+    /// Membership is published before AX placement. Finish the native rail
+    /// transition before another external selection can race its queued focus.
+    private func expectRail(_ rail: Int, focus: UInt32, tiles: [UInt32], area: [Double]) throws {
+        try desktop.expectFocus(focus)
+        try requireFinalState("E30 rail \(rail) placed and focused before the next selection") {
+            let observation = try desktop.observe(), rows = try harness.rows()
+            guard try harness.status().workspaces?.rail == rail,
+                  observation.frontmostFixturePID == fixture.pid, desktop.focused(focus, in: observation),
+                  observation.windows.contains(where: {
+                      $0.id == focus && $0.frame[0] >= area[0] - 1 && $0.frame[0] + $0.frame[2] <= area[0] + area[2] + 1
+                  }) else { return false }
+            return tiles.allSatisfy { id in
+                guard let row = rows.first(where: { $0.id == id }) else { return false }
+                if row.rail != rail { return !observation.visibleIDs.contains(id) }
+                // Partially visible rail tiles need not be entirely inside
+                // the area; every visible tile must have its accepted height.
+                return !observation.visibleIDs.contains(id) || observation.windows.contains {
+                    $0.id == id && abs($0.frame[1] - area[1]) <= 1 && abs($0.frame[3] - area[3]) <= 1
+                }
+            }
+        }
+    }
+
     private func prepare() throws -> Scene {
         try desktop.clear()
         let screen = try desktop.observe().area
@@ -72,15 +104,22 @@ struct LayerFidelity {
             try fixture.command("move", ["key": key, "frame": scene.absolute(frames[key]!)])
         }
         try requireFinalState("E30's floats reach the catalog in arrival order") { Set(try harness.rows().map(\.id)) == Set(ids.values) }
-        try desktop.activate(key: "w0")
+        let tiles = (0..<5).map { ids["w\($0)"]! }
+        try select("w0", id: ids["w0"]!)
         try desktop.configure(desktop.carousel + "[animation]\nduration = 0\n", layout: "carousel")
+        try expectRail(1, focus: ids["w0"]!, tiles: tiles, area: area)
         for key in ["w3", "w4"] {
-            try desktop.activate(key: key)
+            try select(key, id: ids[key]!)
             try desktop.post(kVK_ANSI_J, shift: true)
             try requireFinalState("E30 \(key) reaches the second rail") { try harness.row(ids[key]!)?.rail == 2 }
+            try expectRail(2, focus: ids[key]!, tiles: tiles, area: area)
         }
-        try desktop.activate(key: "w3") // The second rail remembers its first tile.
-        try desktop.activate(key: "w0")
+        // Select the remembered tile through tessel, as the passing rail
+        // journey does, then finish the native return before enabling layer.
+        try desktop.post(kVK_ANSI_H)
+        try desktop.expectFocus(ids["w3"]!)
+        try select("w0", id: ids["w0"]!)
+        try expectRail(1, focus: ids["w0"]!, tiles: tiles, area: area)
         try desktop.configure("[experiments]\nlayer = true\n[animation]\nduration = 0\n", layout: "carousel")
         try requireFinalState("E30 starts hidden on the first tile") {
             let observation = try desktop.observe(), layer = try harness.status().workspaces?.layer
@@ -241,15 +280,15 @@ struct LayerFidelity {
 
     private mutating func externalFocusAndFixedSize() throws {
         var scene = try prepare()
-        try desktop.activate(key: "f0")
+        try select("f0", id: scene.ids["f0"]!)
         try check("Mouse and Cmd-Tab / external float focus", scene, focus: "f0", state: "shown", inLayer: true, visible: scene.floats)
         try desktop.post(kVK_ANSI_L)
         try check("Mouse and Cmd-Tab / alt-l", scene, focus: "f1", state: "shown", inLayer: true, visible: scene.floats)
-        try desktop.activate(key: "w1")
+        try select("w1", id: scene.ids["w1"]!)
         try check("Mouse and Cmd-Tab / external tile focus", scene, focus: "w1", state: "hidden", inLayer: false, visible: [])
 
         scene = try prepare()
-        try desktop.activate(key: "f0")
+        try select("f0", id: scene.ids["f0"]!)
         try check("Fixed size / external float focus", scene, focus: "f0", state: "shown", inLayer: true, visible: scene.floats, frames: scene.initialFrames)
         try desktop.post(kVK_ANSI_F)
         try check("Fixed size / alt-f keeps the float", scene, focus: "f0", state: "shown", inLayer: true, visible: scene.floats, frames: scene.initialFrames)
