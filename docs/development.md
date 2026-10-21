@@ -603,10 +603,16 @@ Option+Shift+Z (`pin layer`) keeps the floats visible while rail
 navigation continues. Option+Z still enters and leaves the layer. Unpinning on
 the rails hides it; unpinning inside leaves it shown.
 
-After confirmed native focus on tile placements and layer transitions, a pinned
-or shown layer raises its visible background-app floats with AXRaise alone,
-serially from least to most recently used. Untouched floats favor the first arrival. The
-raise changes neither AXMain nor activation. Tessel skips frontmost-app floats:
+A pinned or shown layer raises its visible background-app floats with AXRaise
+alone, serially from least to most recently used. Untouched floats favor the
+first arrival. The raise changes neither AXMain nor activation. The pass is a
+function of observed state rather than of the render that preceded it: one is
+owed after every placement and whenever the native frontmost app differs from
+the one the last pass was computed for, including an app with no managed
+window. It runs once tessel's own focus write has answered and native focus is
+not on another managed window, since that means a selection is still on its
+way. Every catalog publication and focus result re-checks this; with nothing
+owed and the same frontmost app the check does nothing. Tessel skips frontmost-app floats:
 raising a root there can take keyboard focus from the tile, as
 [`ax-focus`](../Tests/Acceptance/ContractsAccessibility.swift) proves. The focused
 float is selected normally when entering or navigating the layer.
@@ -618,12 +624,8 @@ pins this limit; `ax-frontmost-activation` in the same file pins activation
 bringing the app's windows forward. CG on-screen membership (`visible`) includes
 covered windows; it cannot prove stacking. The supplementary E7/E9 spec-gap
 scenarios check the simulator's front-to-back `cg-on-screen-order` list and
-keyboard focus instead. An accepted placement whose activation is still pending
-retains its raise obligation until a fresh focus/frontmost observation confirms
-the selection. Its placement result or a later catalog publication releases the
-pass once, including after pointer interruption. Same-selection stage retargets
-and geometry-only replacement placements retain that unconfirmed obligation
-independently of the carousel's focus intent; no polling is added.
+keyboard focus instead. A seeded sweep replays command sequences under
+deferred activation and stage retargets and checks that rule after each settle.
 
 During rail motion the stage captures each visible pinned float once, excludes
 it from the background, and draws stand-ins in their at-rest stacking order:

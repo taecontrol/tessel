@@ -57,6 +57,38 @@ import Testing
 }
 
 @Suite @MainActor struct LayerStacking {
+    @Test("#19 E9: spec gap — a frontmost change that needs no placement still restacks the pinned layer", arguments: WriteOrder.allCases)
+    func unmanagedFrontmostRestacks(_ writes: WriteOrder) {
+        requireLayer(Scenario.run("pinned layer under an unmanaged frontmost app / \(writes)", writes: writes) { s in
+            let f = LayerStackingFixture(s)
+            // A launcher whose only window is above the normal level: tessel
+            // ignores it, so activating it selects nothing to place.
+            let launcher = f.mac.launch()
+            let panel = launcher.open(WindowSpec(subrole: "AXSystemDialog", cgLayer: 8), background: true)
+            s.settle()
+            f.press("pin layer"); f.press("focus right")
+            f.stacking(focus: f.tiles[1], owner: f.apps[0].pid)
+            var start = f.mac.scheduler.trace.count
+            f.mac.clearMotionHistory()
+            s.step("select the launcher") { launcher.select(panel) }
+            s.settle()
+            s.expect("the launcher owns keyboard focus", f.mac.frontmostApp == launcher.pid && f.mac.focusedWindow == panel)
+            s.expect("every managed app is in the background, so every float is compared", f.restingOrder("launcher frontmost"))
+            let raised = f.raises(since: start).filter { f.floats.contains($0) }
+            s.expect("one pass raises every visible float, least recently used first: \(raised)",
+                     raised == [f.floats[2], f.floats[1], f.floats[0]])
+            s.expect("background raises keep the launcher's keyboard focus", f.mac.focusEffects.filter {
+                $0.raisedWindow.map { f.floats.contains($0) } ?? false
+            }.allSatisfy { $0.window == panel })
+            start = f.mac.scheduler.trace.count
+            s.step("select A's tile again") { f.apps[0].select(f.tiles[1]) }
+            s.settle()
+            f.stacking(focus: f.tiles[1], owner: f.apps[0].pid)
+            let returned = f.raises(since: start).filter { f.floats.contains($0) }
+            s.expect("returning to A raises only the other apps' floats: \(returned)", returned == [f.floats[2], f.floats[1]])
+        })
+    }
+
     @Test("#19 E9: spec gap — pinning before a deferred layer entry activates still restacks once B is frontmost", arguments: WriteOrder.allCases)
     func pinDuringDeferredEntry(_ writes: WriteOrder) {
         requireLayer(Scenario.run("pin during deferred layer entry / \(writes)", writes: writes) { s in

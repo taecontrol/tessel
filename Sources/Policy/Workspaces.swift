@@ -51,6 +51,8 @@ final class Workspaces {
         var revealing = false
         /// Placement waits for the stage to cover the real windows again.
         var covering = false
+        /// A retarget's real windows have not been placed under the stage yet.
+        var awaitsPlacement = false
         init(generation: UInt64, rects: [UInt32: CGRect], rail: UInt64?, railIndex: Int) {
             self.generation = generation; self.rects = rects; self.starts = rects; self.rail = rail; self.railIndex = railIndex
         }
@@ -92,11 +94,17 @@ final class Workspaces {
         var awaitingObservation = false
     }
     private var layerHandoff: LayerHandoff?
-    private struct LayerRestack {
-        let token: UInt64
-        var awaitingFocus: UInt32?
+    /// Restacking follows observed state instead of being carried through
+    /// renders: every placement owes a pass, and so does a change of the
+    /// native frontmost app. See `restackLayer`.
+    private enum LayerRestack: Equatable {
+        case owed
+        case running(UInt64)
+        /// The last pass was computed for this frontmost app.
+        case done(front: Int32?)
     }
-    private var layerRestack: LayerRestack?
+    private var layerRestack = LayerRestack.done(front: nil)
+    private var restackPasses: UInt64 = 0
     private var layer: FloatingLayer {
         get { layers[status.active] ?? FloatingLayer() }
         set { layers[status.active] = newValue }
@@ -245,7 +253,7 @@ final class Workspaces {
     func prepareToQuit(_ ready: @escaping @MainActor @Sendable () -> Void) {
         guard !quitting else { return }
         quitting = true
-        layerRestack = nil
+        layerRestack = .done(front: nil)
         clearStage()
         transition += 1
         decisions += 1
@@ -268,7 +276,7 @@ final class Workspaces {
     }
 
     func disable(reason: String) {
-        layerRestack = nil
+        layerRestack = .done(front: nil)
         clearStage()
         transition += 1
         decisions += 1
@@ -515,23 +523,8 @@ final class Workspaces {
             }
         }
         finishLayerHandoff(observedFocus: reportedFocus, pid: pid)
-        if frontmost { confirmLayerRestack(reportedFocus, pid: pid) }
+        restackLayer()
         publish()
-    }
-
-    /// Placement can finish before native activation. Either its fresh result
-    /// or a later catalog publication confirms focus and releases one raise
-    /// pass; ordinary snapshots cannot repeat an already consumed obligation.
-    private func confirmLayerRestack(_ observedFocus: UInt32?, pid: Int32) {
-        guard let pending = layerRestack, pending.token == transition,
-              let selection = pending.awaitingFocus, status.enabled, !quitting,
-              let observedFocus else { return }
-        let id = entries[observedFocus]?.observation.parent ?? observedFocus
-        guard selection == id, focused == id, available(id),
-              entries[id]?.workspace == status.active, entries[id]?.pid == pid,
-              applications.frontmostPID == pid else { return }
-        layerRestack?.awaitingFocus = nil
-        restackLayer(token: pending.token)
     }
 
     private func finishLayerHandoff(observedFocus: UInt32?, pid: Int32) {
@@ -831,7 +824,6 @@ final class Workspaces {
         if focused == previous { focused = id }
         if expectedFocus == previous { expectedFocus = id }
         if layerHandoff?.selection == previous { layerHandoff?.selection = id }
-        if layerRestack?.awaitingFocus == previous { layerRestack?.awaitingFocus = id }
         // Hide intent follows membership and focus history. A new CG window
         // still needs its own move; do not inherit the old ID's completed move.
         closeted.remove(previous)
@@ -987,29 +979,63 @@ final class Workspaces {
 
     private var layerNeedsRaises: Bool { layerEnabled && (layer.pinned || layer.entry == .all) }
 
-    private func restackLayer(token: UInt64) {
-        guard transition == token, layerRestack?.token == token,
-              layerRestack?.awaitingFocus == nil else { return }
-        guard layerNeedsRaises else { layerRestack = nil; return }
-        let visible = onScreen(), front = applications.frontmostPID
+    /// One idempotent pass, computed from the current frontmost app and the
+    /// current visible floats. It is owed after each placement and whenever
+    /// the native frontmost app differs from the last pass's, and runs once
+    /// focus has settled: an activation still in flight would make the app
+    /// about to lose focus look foreground and skip its floats. Called after
+    /// placements, focus results and every catalog publication; with nothing
+    /// owed and the same frontmost app it does nothing.
+    private func restackLayer() {
+        guard layerNeedsRaises, status.enabled, !quitting else { return }
+        let front = applications.frontmostPID
+        switch layerRestack {
+        case .running: return
+        case .done(let last): if last == front { return }; layerRestack = .owed
+        case .owed: break
+        }
+        guard staging?.awaitsPlacement != true, focusSettled else { return }
+        restackPasses += 1
+        layerRestack = .running(restackPasses)
+        let visible = onScreen()
         let ids = layerRaiseOrder.filter { visible.contains($0) && !closeted.contains($0) && available($0) && entries[$0]?.pid != front }
-        raiseLayerFloats(ids[...], token: token)
+        raiseLayerFloats(ids[...], token: restackPasses, front: front)
+    }
+
+    /// Tessel's own focus write has answered (its activation reorders the
+    /// app's windows, and a layer handoff waits on it too), and native focus
+    /// is not on a managed window other than the selection, which would mean
+    /// a selection, tessel's or the user's, is still on its way. Focus on
+    /// nothing tessel manages, such as an ignored panel, cannot become one.
+    private var focusSettled: Bool {
+        guard !pendingFocus else { return false }
+        guard let focused, let front = applications.frontmostPID, let native = appFocus[front], native != focused else { return true }
+        return !(available(native) && entries[native]?.workspace != nil)
+    }
+
+    private var layerRestackPending: Bool {
+        guard layerNeedsRaises else { return false }
+        if case .done = layerRestack { return false }
+        return true
     }
 
     /// Serial across app workers as well as within one app: concurrent AXRaise
-    /// replies cannot preserve a cross-app MRU order. A new render cancels it.
-    private func raiseLayerFloats(_ ids: ArraySlice<UInt32>, token: UInt64) {
-        guard transition == token, layerRestack?.token == token, status.enabled, !quitting, layerNeedsRaises else { return }
+    /// replies cannot preserve a cross-app MRU order. A new placement cancels it.
+    private func raiseLayerFloats(_ ids: ArraySlice<UInt32>, token: UInt64, front: Int32?) {
+        guard layerRestack == .running(token), status.enabled, !quitting, layerNeedsRaises else { return }
         guard let id = ids.first else {
-            layerRestack = nil
+            layerRestack = .done(front: front)
+            // The frontmost app can change while the pass runs.
+            restackLayer()
+            guard !layerRestackPending else { return }
             orderStage()
             finishStage()
             return
         }
         guard let entry = entries[id], available(id), !closeted.contains(id), entry.pid != applications.frontmostPID,
-              let catalog else { raiseLayerFloats(ids.dropFirst(), token: token); return }
+              let catalog else { raiseLayerFloats(ids.dropFirst(), token: token, front: front); return }
         catalog.raiseBackground(pid: entry.pid, id: id) { [weak self] in
-            self?.raiseLayerFloats(ids.dropFirst(), token: token)
+            self?.raiseLayerFloats(ids.dropFirst(), token: token, front: front)
         }
     }
 
@@ -1104,7 +1130,6 @@ final class Workspaces {
 
     private func interruptCarousel() {
         guard staging != nil else { return }
-        let unconfirmedFocus = layerRestack?.awaitingFocus ?? (pendingFocus ? focused : nil)
         clearStage()
         catalog?.cancelPresentations()
         transition += 1
@@ -1112,10 +1137,9 @@ final class Workspaces {
         expectedFocus = nil
         interruptedSizing.formUnion(carouselSizing)
         // The stage can be interrupted after its early tile-focus placement,
-        // before placeUnderStage would restore the visible floats' order. A
-        // native activation already requested can still arrive after cancel.
-        layerRestack = layerNeedsRaises ? LayerRestack(token: transition, awaitingFocus: unconfirmedFocus) : nil
-        restackLayer(token: transition)
+        // before placeUnderStage would restore the visible floats' order.
+        layerRestack = .owed
+        restackLayer()
         publish()
     }
 
@@ -1168,10 +1192,9 @@ final class Workspaces {
         }
         let leavingFocus = applications.frontmostPID.flatMap { appFocus[$0] }
         cancelFocusDecision()
-        // Cancel an old raise pass, but retain native focus still owed to
-        // this selection while its replacement stage captures. An older
-        // placement can clear expectedFocus before the stage is ready.
-        if selection == nil || layerRestack?.awaitingFocus != selection { layerRestack = nil }
+        // An old raise pass is superseded; the placement under the stage
+        // owes a new one.
+        layerRestack = .owed
         decisions += 1
         if let selection, available(selection) { remember(selection) } else { focused = nil }
         let first = staging == nil
@@ -1215,6 +1238,7 @@ final class Workspaces {
         // The previous move's settle and linger no longer apply.
         stagingNow.settled = false; stagingNow.revealing = false; stagingNow.revision += 1
         stagingNow.linger?.cancel(); stagingNow.linger = nil
+        stagingNow.awaitsPlacement = true
         staging = stagingNow
         // Every seen window is captured at once, and focus is requested. The
         // focus look changes when the real window replaces its stand-in.
@@ -1284,7 +1308,7 @@ final class Workspaces {
     /// every placement is confirmed, and WindowServer shows them in place.
     private func finishStage() {
         guard var staging, staging.settled, !staging.revealing, !staging.covering, layerHandoff == nil,
-              carouselPresentation?.pending.isEmpty != false, layerRestack?.token != transition, let stage else { return }
+              carouselPresentation?.pending.isEmpty != false, !layerRestackPending, let stage else { return }
         staging.revealing = true
         self.staging = staging
         let generation = staging.generation, revision = staging.revision
@@ -1352,6 +1376,7 @@ final class Workspaces {
             guard let self, self.transition == token else { return }
             // A superseded request's confirmation must not release a newer one.
             if self.expectedFocus == id, self.appFocus[entry.pid] == id, self.applications.frontmostPID == entry.pid { self.expectedFocus = nil }
+            self.restackLayer()
             self.publish()
         }
     }
@@ -1368,13 +1393,10 @@ final class Workspaces {
                                        keepFocus: Bool = false, underStage: Bool = false, handoffCompleted: Bool = false) {
         if !underStage { clearStage(); decisions += 1; cancelFocusDecision() }
         guard status.enabled, !quitting, let closet else { return }
-        // Geometry may supersede an unconfirmed selection without requesting
-        // focus again. Its independent restack obligation still awaits that
-        // selection, even after expectedFocus has been consumed.
-        let awaitingLayerFocus = takeFocus ? selection : layerRestack?.awaitingFocus.flatMap { $0 == selection ? $0 : nil }
         transition += 1
         let token = transition
-        layerRestack = layerNeedsRaises ? LayerRestack(token: token, awaitingFocus: awaitingLayerFocus) : nil
+        layerRestack = .owed
+        if underStage { staging?.awaitsPlacement = false }
         desktopFocusObservation = nil
         layerHandoff = nil
         if !keepFocus { expectedFocus = nil }
@@ -1488,16 +1510,12 @@ final class Workspaces {
                         self.render(focusing: self.focused, relayout: false, takeFocus: false)
                     }
                 }
-                if self.transition == token && id == focused { self.expectedFocus = nil }
-                if self.transition == token && id == focused && takeFocus,
-                   let observation = result.focus, observation.frontmost {
-                    self.confirmLayerRestack(observation.window, pid: candidate.pid)
-                }
+                if self.transition == token && id == focused { self.expectedFocus = nil; self.restackLayer() }
                 if underStage { self.finishStage() }
                 self.publish()
             }
         }
-        if !takeFocus || focused == nil { restackLayer(token: token) }
+        restackLayer()
         if focused == nil && activateDesktop && takeFocus { activateFinderDesktop() }
         if underStage { finishStage() }
         scheduler.main.after(milliseconds: 50) { [weak self] in
