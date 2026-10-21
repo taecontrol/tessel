@@ -504,6 +504,10 @@ closeted one off screen, then fades into them over 40 ms.
 
 The stage contracts need Screen Recording granted to the signed fixture
 observer; without it they fail and say so.
+ScreenCaptureKit can also show a separate capture acknowledgement even with
+that grant. See [Screen capture permission diagnosis](screen-capture-permissions.md)
+for the evidence, the remaining consent decision and the bounded confirmation
+commands. A preflight alone does not settle that acknowledgement.
 The Reduce Motion contract changes the preference through HIServices' private
 setter, which affects only the observer's own process: it pins how NSWorkspace
 reads and announces the interface preference, not a desktop-wide change.
