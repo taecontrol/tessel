@@ -35,6 +35,9 @@ final class Workspaces {
         /// seen by this motion started.
         var rects: [UInt32: CGRect]
         var starts: [UInt32: CGRect] = [:]
+        /// Requests belong to the stage session. A retarget only captures
+        /// newly seen windows, including while earlier requests are pending.
+        var requestedCaptures = Set<UInt32>()
         var rail: UInt64?
         var railIndex: Int
         var shown = false
@@ -1073,6 +1076,8 @@ final class Workspaces {
         let starts = stagingNow.rects.merging(entering) { current, _ in current }
         stagingNow.starts.merge(entering) { current, _ in current }
         let seen = Set(to.keys.filter { id in [starts[id], to[id]].contains { $0.map { Self.onScreen($0, bounds) } == true } && available(id) })
+        let toCapture = seen.subtracting(stagingNow.requestedCaptures)
+        stagingNow.requestedCaptures.formUnion(toCapture)
         stagingNow.rects = to; stagingNow.rail = rail; stagingNow.railIndex = index
         // A retarget may stop the stage fading into the real windows; they
         // move again only once it covers them.
@@ -1084,7 +1089,9 @@ final class Workspaces {
         // Every seen window is captured at once, and focus is requested. The
         // focus look changes when the real window replaces its stand-in.
         let focusChanges = takeFocus && focused != nil && focused != leavingFocus
-        stage.capture(seen, background: first ? Set(starts.keys).union(to.keys) : nil, foreground: Set(pinned.keys))
+        if first || !toCapture.isEmpty {
+            stage.capture(toCapture, background: first ? Set(starts.keys).union(to.keys) : nil, foreground: Set(pinned.keys))
+        }
         expectedFocus = takeFocus ? focused : nil
         let shown = starts.filter { seen.contains($0.key) }
         if first {
@@ -1175,6 +1182,7 @@ final class Workspaces {
         stageGeneration += 1
         let generation = stageGeneration
         staging = Staging(generation: generation, rects: all, rail: carouselPresentation?.rail, railIndex: carouselPresentation?.railIndex ?? 0)
+        staging?.requestedCaptures = Set(seen.keys)
         let offset = Dictionary(uniqueKeysWithValues: seen.map { id, rect in
             (id, frames[id] == nil ? rect : rect.offsetBy(dx: wall.x * area.width * 0.03, dy: wall.y * area.height * 0.03))
         })
