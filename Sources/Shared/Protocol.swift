@@ -1,7 +1,7 @@
 import Foundation
 
 enum WindowState: String, Codable, Sendable {
-    case tiled, floats, minimized, hidden, fullscreen
+    case tiled, floats, minimized, hidden, fullscreen, ignored
 }
 
 struct WindowRecord: Codable, Sendable {

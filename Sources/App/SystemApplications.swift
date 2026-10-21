@@ -54,9 +54,19 @@ struct SystemScreen: ScreenPort {
 
 @MainActor
 struct SystemWindowOrder: WindowOrderPort {
-    // The acceptance-first change exposes the seam; the native read arrives
-    // with the catalog behavior that consumes it.
-    nonisolated func windowLevels() -> [UInt32: Int] { [:] }
+    nonisolated func windowLevels(_ windows: Set<UInt32>) -> [UInt32: Int] {
+        guard !windows.isEmpty else { return [:] }
+        return autoreleasepool {
+            var pointers: [UnsafeRawPointer?] = windows.sorted().map { UnsafeRawPointer(bitPattern: UInt($0)) }
+            let array = CFArrayCreate(nil, &pointers, pointers.count, nil)
+            let descriptions = CGWindowListCreateDescriptionFromArray(array) as? [[String: Any]] ?? []
+            return Dictionary(uniqueKeysWithValues: descriptions.compactMap { row in
+                guard let id = row[kCGWindowNumber as String] as? UInt32,
+                      let level = row[kCGWindowLayer as String] as? Int else { return nil }
+                return (id, level)
+            })
+        }
+    }
 
     func onScreenOrder() -> [UInt32] {
         // Drain bridge temporaries without waiting for AppKit's next input event.

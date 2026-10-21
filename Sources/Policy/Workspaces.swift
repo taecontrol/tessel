@@ -286,7 +286,7 @@ final class Workspaces {
             let id = observation.record.id
             let old = entries[id]
             entries[id] = Entry(observation: observation, pid: pid, workspace: old?.workspace, recent: old?.recent ?? 0)
-            if observation.record.state == .fullscreen || !primary(observation) {
+            if observation.record.state == .fullscreen || observation.record.state == .ignored || !primary(observation) {
                 if old?.workspace != nil {
                     detach(id)
                     closeted.remove(id)
@@ -680,7 +680,7 @@ final class Workspaces {
     }
 
     private func assign(_ id: UInt32, to workspace: Int) {
-        guard let entry = entries[id], entry.observation.record.state != .fullscreen, primary(entry.observation) else { return }
+        guard let entry = entries[id], ![.fullscreen, .ignored].contains(entry.observation.record.state), primary(entry.observation) else { return }
         entries[id]?.workspace = workspace
         if !(arrival[workspace] ?? []).contains(id) { arrival[workspace, default: []].append(id) }
     }

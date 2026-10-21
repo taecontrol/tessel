@@ -8,6 +8,7 @@ struct WindowObservation: Sendable {
     var record: WindowRecord
     let frame: CGRect
     let parent: UInt32?
+    var resizable = true
     var replaces: UInt32? = nil
 }
 
@@ -19,15 +20,17 @@ final class WindowCatalog {
     private let fixtureBundleID: String?
     private let applications: any ApplicationPort
     private let ax: any AccessibilityPort
+    private let windowOrder: any WindowOrderPort
     private let scheduler: any SchedulingPort
     private var lifecycle: (any ApplicationObservation)?
     private var apps: [Int32: AppWindows] = [:]
 
-    init(workspaces: Workspaces, applications: any ApplicationPort, ax: any AccessibilityPort,
+    init(workspaces: Workspaces, applications: any ApplicationPort, ax: any AccessibilityPort, windowOrder: any WindowOrderPort,
          scheduler: any SchedulingPort, fixtureBundleID: String? = nil) {
         self.workspaces = workspaces
         self.applications = applications
         self.ax = ax
+        self.windowOrder = windowOrder
         self.scheduler = scheduler
         self.fixtureBundleID = fixtureBundleID
         lifecycle = applications.observe { [weak self] event, app in self?.appChanged(event, app: app) }
@@ -41,7 +44,7 @@ final class WindowCatalog {
         if let existing = apps[pid] { existing.refresh(hidden: app.hidden); return }
         let generation = UUID()
         let worker = AppWindows(pid: pid, name: app.name ?? "Application", bundleId: app.bundleID ?? "",
-                                hidden: app.hidden, generation: generation, ax: ax, scheduler: scheduler) { [weak self, scheduler] rows, focused, frontmost, change, activation in
+                                hidden: app.hidden, generation: generation, ax: ax, windowOrder: windowOrder, scheduler: scheduler) { [weak self, scheduler] rows, focused, frontmost, change, activation in
             scheduler.main.async {
                 guard let self, let worker = self.apps[pid], worker.generation == generation else { return }
                 // An activation can wait behind a newer keyboard selection in
@@ -96,6 +99,7 @@ private struct WindowFacts {
     let minimized: Bool
     var fullscreen: Bool
     let subrole: String
+    let level: Int
     let resizable: Bool
     let tabs: Int
     var frame: CGRect
@@ -109,13 +113,19 @@ private struct WindowFacts {
     func record(app: String, bundleId: String, hidden: Bool) -> WindowRecord {
         let state: WindowState
         var reason: String
-        if fullscreen { state = .fullscreen; reason = "native fullscreen" }
+        if level != 0 { state = .ignored; reason = "window level \(level)" }
+        // AXFullScreen remains authoritative while a native transition exposes
+        // a temporary root with an unknown subrole.
+        else if fullscreen { state = .fullscreen; reason = "native fullscreen" }
+        else if !["AXStandardWindow", "AXDialog", "AXSystemDialog", "AXFloatingWindow"].contains(subrole) {
+            state = .ignored; reason = subrole
+        }
         else if minimized { state = .minimized; reason = "minimized" }
         else if hidden { state = .hidden; reason = "application hidden" }
         else if subrole != "AXStandardWindow" { state = .floats; reason = subrole }
         else if !resizable { state = .floats; reason = "fixed size" }
         else { state = .tiled; reason = "standard window" }
-        if tabs > 1 { reason += "; \(tabs) native tabs" }
+        if tabs > 1 && state != .ignored { reason += "; \(tabs) native tabs" }
         return WindowRecord(id: id, app: app, bundleId: bundleId, state: state, reason: reason, tabs: tabs)
     }
 }
@@ -129,6 +139,7 @@ private final class AppWindows: @unchecked Sendable {
     private let bundleId: String
     private let queue: any SerialLane
     private let ax: any AccessibilityPort
+    private let windowOrder: any WindowOrderPort
     private let scheduler: any SchedulingPort
     private let publish: @Sendable ([WindowObservation], UInt32?, Bool, CatalogChange, UUID?) -> Void
     // All mutable state below belongs to queue, including AX handles.
@@ -173,7 +184,7 @@ private final class AppWindows: @unchecked Sendable {
     private var validations: [UInt32: Validation] = [:]
 
     init(pid: Int32, name: String, bundleId: String, hidden: Bool, generation: UUID,
-         ax: any AccessibilityPort, scheduler: any SchedulingPort,
+         ax: any AccessibilityPort, windowOrder: any WindowOrderPort, scheduler: any SchedulingPort,
          publish: @escaping @Sendable ([WindowObservation], UInt32?, Bool, CatalogChange, UUID?) -> Void) {
         self.pid = pid
         self.name = name
@@ -183,6 +194,7 @@ private final class AppWindows: @unchecked Sendable {
         self.generation = generation
         self.publish = publish
         self.ax = ax
+        self.windowOrder = windowOrder
         self.scheduler = scheduler
         presentationLock = scheduler.makeLock()
         application = ax.application(pid)
@@ -429,8 +441,11 @@ private final class AppWindows: @unchecked Sendable {
         var visited = 0
         let tabs = try chrome(window, depth: 0, visited: &visited, sheets: &sheets, groups: &tabGroups)
         let frame = try frame(window)
+        // Reinspection owns this native fact, rather than layout reconciliation.
+        // A missing CG description is an incomplete read, never layer zero.
+        guard let level = windowOrder.windowLevels([id])[id] else { throw AXReadError.changed }
         handles[id] = window
-        result.append(WindowFacts(id: id, minimized: minimized, fullscreen: fullscreen, subrole: subrole,
+        result.append(WindowFacts(id: id, minimized: minimized, fullscreen: fullscreen, subrole: subrole, level: level,
                                   resizable: resizable.value ?? false, tabs: max(1, tabs), frame: frame, parent: parent, nativeTabGroups: tabGroups))
         elements.append(contentsOf: tabGroups)
         for sheet in sheets { try inspect(sheet, into: &result, elements: &elements, handles: &handles, parent: id) }
@@ -500,7 +515,7 @@ private final class AppWindows: @unchecked Sendable {
                 record.state = .floats
                 record.reason = "cannot fill the screen"
             }
-            return WindowObservation(record: record, frame: fact.frame, parent: fact.parent, replaces: replacements[fact.id])
+            return WindowObservation(record: record, frame: fact.frame, parent: fact.parent, resizable: fact.resizable, replaces: replacements[fact.id])
         }
         publish(observations, focused == 0 ? nil : focused, frontmost, change, activationToken)
         change = .snapshot
@@ -732,7 +747,8 @@ private final class AppWindows: @unchecked Sendable {
     /// Native hide, minimize, and fullscreen can begin between a snapshot and a
     /// queued write. Never let an old presentation undo the user's operation.
     private func canPresent(_ window: AXElement, id: UInt32) throws -> Bool {
-        guard !hidden, try value(application, .hidden)?.bool != true,
+        guard facts.first(where: { $0.id == id })?.record(app: name, bundleId: bundleId, hidden: hidden).state != .ignored,
+              !hidden, try value(application, .hidden)?.bool != true,
               try value(window, .minimized)?.bool != true,
               try value(window, .fullscreen)?.bool != true else { return false }
         return isNativeFront(window, id: id)

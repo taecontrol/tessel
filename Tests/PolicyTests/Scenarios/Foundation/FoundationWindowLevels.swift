@@ -16,7 +16,7 @@ import Testing
                 let id = app.open(WindowSpec(subrole: subrole, cgLayer: level), background: true)
                 let frame = s.mac.frame(id)
                 s.settle()
-                s.expect("CG reports the supplied native layer", s.mac.windowOrder.windowLevels()[id] == level)
+                s.expect("CG reports the supplied native layer", s.mac.windowOrder.windowLevels([id])[id] == level)
                 let row = t.windows.first { $0.id == id }
                 s.expect("level \(level) is ignored with its exact reason", row?.state.rawValue == "ignored" && row?.reason == "window level \(level)")
                 s.expect("ignored windows have no workspace, rail or slot", row?.workspace == nil && row?.rail == nil && row?.slot == nil)
@@ -104,7 +104,7 @@ import Testing
             let t = s.startTessel(.stack); s.settle()
             for (id, item) in zip(ids, cases) {
                 FoundationProof.row(id, in: t, state: .floats, reason: item.1, scenario: s)
-                s.expect("ordinary/dialog windows are on CG layer zero", s.mac.windowOrder.windowLevels()[id] == 0)
+                s.expect("ordinary/dialog windows are on CG layer zero", s.mac.windowOrder.windowLevels([id])[id] == 0)
             }
         })
     }

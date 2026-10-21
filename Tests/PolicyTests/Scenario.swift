@@ -32,7 +32,7 @@ enum Layout: String, CaseIterable, Sendable { case off, stack, carousel }
                                 windowOrder: mac.windowOrder, scheduler: mac.scheduler, hotkeys: keys,
                                 fixtureOnly: true, motionPreferences: mac.motionPreferences, stage: mac.stage,
                                 pointerActivity: mac.pointerActivity) { mac.closetPort }
-        catalog = WindowCatalog(workspaces: workspaces, applications: mac.applications, ax: mac.ax, scheduler: mac.scheduler)
+        catalog = WindowCatalog(workspaces: workspaces, applications: mac.applications, ax: mac.ax, windowOrder: mac.windowOrder, scheduler: mac.scheduler)
         workspaces.catalog = catalog
         configurationPublications.append((mac.scheduler.now, config.status))
         config.onChange = { [weak self] status in

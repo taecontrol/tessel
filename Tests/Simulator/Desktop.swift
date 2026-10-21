@@ -69,10 +69,10 @@ extension SimulatedMac {
             mac.scheduler.call("WindowOrderPort.onScreenOrder")
             return mac.visibleIDs()
         }
-        nonisolated func windowLevels() -> [UInt32: Int] {
+        nonisolated func windowLevels(_ windows: Set<UInt32>) -> [UInt32: Int] {
             mac.assume(.windowLevels)
             mac.scheduler.call("WindowOrderPort.windowLevels")
-            return Dictionary(uniqueKeysWithValues: mac.windows.keys.sorted().compactMap { id in
+            return Dictionary(uniqueKeysWithValues: windows.sorted().compactMap { id in
                 guard let window = mac.windows[id], !window.closed else { return nil }
                 return (id, window.spec.cgLayer)
             })
