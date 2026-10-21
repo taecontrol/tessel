@@ -1087,6 +1087,9 @@ final class Workspaces {
         decisions += 1
         expectedFocus = nil
         interruptedSizing.formUnion(carouselSizing)
+        // The stage can be interrupted after its early tile-focus placement,
+        // before placeUnderStage would restore the visible floats' order.
+        restackLayer(token: transition)
         publish()
     }
 

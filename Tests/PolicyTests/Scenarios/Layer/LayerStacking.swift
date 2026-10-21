@@ -57,6 +57,29 @@ import Testing
 }
 
 @Suite @MainActor struct LayerStacking {
+    @Test("#19 E9: spec gap — interrupting the stage after tile focus still raises visible background floats", arguments: WriteOrder.allCases)
+    func interruptedStageRestacksAfterTileFocus(_ writes: WriteOrder) {
+        requireLayer(Scenario.run("interrupted pinned tile focus / \(writes)", writes: writes) { s in
+            let f = LayerStackingFixture(s, duration: 250)
+            f.press("pin layer"); f.press("cycle width"); f.press("focus right")
+            f.mac.clearMotionHistory()
+            f.tessel.press("focus right")
+            let held = f.mac.pause(after: .read(f.apps[1]))
+            if case .paused = held {} else { s.expect("the focused destination's publication is held: \(held)", false) }
+            s.expect("the new app already owns keyboard focus", f.mac.focusedWindow == f.tiles[2] && f.mac.frontmostApp == f.apps[1].pid)
+            s.expect("the stage has not drawn before the pointer press", !f.mac.stageEvents.contains { if case .show = $0.kind { true } else { false } })
+            // A pointer press interrupts without having to change focus. Use
+            // the existing drag action at the same point: no geometry changes.
+            f.apps[0].drag(f.tiles[0], to: f.mac.frame(f.tiles[0])!.origin)
+            s.settle()
+            s.expect("the cancelled stage never draws", !f.mac.stageEvents.contains { if case .show = $0.kind { true } else { false } })
+            f.stacking(focus: f.tiles[2], owner: f.apps[1].pid)
+            s.expect("every extra float raise keeps the new tile's keyboard focus", f.mac.focusEffects.filter {
+                $0.raisedWindow.map { f.floats.contains($0) } ?? false
+            }.allSatisfy { $0.window == f.tiles[2] })
+        })
+    }
+
     @Test("#19 E27: entry raises at most N floats and a pinned tile placement raises each visible background float once", arguments: WriteOrder.allCases)
     func backgroundRaiseBudget(_ writes: WriteOrder) {
         requireLayer(Scenario.run("layer raise budget / \(writes)", writes: writes) { s in
