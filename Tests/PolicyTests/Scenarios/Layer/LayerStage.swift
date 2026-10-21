@@ -4,6 +4,56 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct LayerStage {
+    @Test("#19 E10: a failed background raise keeps the pinned stand-in below every tile that still covers it", arguments: WriteOrder.allCases)
+    func failedRaiseKeepsObservedOrder(_ writes: WriteOrder) {
+        requireLayer(Scenario.run("honest failed raise / \(writes)", writes: writes) { s in
+            let f = LayerStackingFixture(s, duration: 250)
+            f.press("pin layer"); f.press("focus right"); f.press("focus right")
+            f.apps[2].hang()
+            f.press("focus left")
+            f.mac.clearMotionHistory()
+            f.press("cycle width")
+            let order = f.mac.windowOrder.onScreenOrder(), float = f.floats[2], tile = f.tiles[2]
+            s.expect("the failed raise really leaves a float covered by a background tile", order.firstIndex(of: tile)! < order.firstIndex(of: float)!)
+            let orders = f.mac.stageEvents.compactMap { event -> [UInt32]? in
+                if case .order(let ids) = event.kind { return ids }; return nil
+            }
+            s.expect("the stage draws the failed raise honestly throughout motion", !orders.isEmpty && orders.allSatisfy {
+                $0.firstIndex(of: tile)! < $0.firstIndex(of: float)!
+            })
+        })
+    }
+
+    @Test("#19 E10: the final stage order observes delayed native activation instead of replaying raises", arguments: WriteOrder.allCases)
+    func delayedActivationOrderBeforeReveal(_ writes: WriteOrder) {
+        requireLayer(Scenario.run("honest delayed CG activation / \(writes)", writes: writes) { s in
+            let f = LayerStackingFixture(s, duration: 250)
+            f.press("pin layer")
+            f.press("move down"); f.press("focus up"); f.press("move down"); f.press("focus up")
+            s.expect("the source rail focuses the other app's tile", f.mac.focusedWindow == f.tiles[2])
+            // ax-frontmost-activation explicitly allows CG order to lag AX.
+            // 200 virtual ms places that completion between stage placement
+            // and settling; it is an input, never a real-system deadline.
+            f.apps[0].delayNextActivationOrder(milliseconds: 200)
+            f.mac.clearMotionHistory()
+            f.press("focus down")
+            let rest = f.mac.windowOrder.onScreenOrder()
+            let orders = f.mac.stageEvents.compactMap { event -> [UInt32]? in
+                if case .order(let ids) = event.kind { return ids }; return nil
+            }
+            s.expect("the rail change reaches reveal", f.mac.stageEvents.contains { if case .revealed = $0.kind { true } else { false } })
+            s.expect("both frontmost tiles are visible at rest", f.tiles.prefix(2).allSatisfy { rest.contains($0) })
+            if let last = orders.last {
+                for float in f.floats {
+                    for tile in f.tiles where rest.contains(tile) {
+                        s.expect("final stand-ins \(last) match delayed CG \(rest) for float \(float), tile \(tile)",
+                                 (last.firstIndex(of: float)! < last.firstIndex(of: tile)!) == (rest.firstIndex(of: float)! < rest.firstIndex(of: tile)!))
+                    }
+                }
+            } else { s.expect("the stage supplies an order", false) }
+        })
+    }
+
     @Test("#19 E10: pinned stand-ins keep their at-rest CG order above background tiles and below the frontmost tile", arguments: WriteOrder.allCases, [0, 1])
     func pinnedStandInsMatchRestingOrder(_ writes: WriteOrder, _ owner: Int) {
         requireLayer(Scenario.run("honest pinned stage / \(writes) / app \(owner)", writes: writes) { s in
@@ -52,7 +102,7 @@ import Testing
             let orders = f.mac.stageEvents.compactMap { event -> [UInt32]? in
                 if case .order(let ids) = event.kind { return ids }; return nil
             }
-            s.expect("stage orders \(orders) never elevate pinned floats over their frontmost app's focused tile \(f.tiles[2])", !orders.isEmpty && orders.allSatisfy { order in
+            s.expect("stage orders \(orders) never elevate pinned floats over their frontmost app's focused tile \(f.tiles[2])", (!pinned || !orders.isEmpty) && orders.allSatisfy { order in
                 local.filter { order.contains($0) }.allSatisfy { order.firstIndex(of: f.tiles[2])! < order.firstIndex(of: $0)! }
             })
             if pinned {

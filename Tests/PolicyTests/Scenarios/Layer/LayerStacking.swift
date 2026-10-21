@@ -69,6 +69,13 @@ import Testing
             s.expect("entry raises at most N floats, including its focused float", f.raises(since: start).count <= f.floats.count)
             let entryWrites = LayerFixture.axWrites(in: Array(f.mac.scheduler.trace.dropFirst(start)))
             s.expect("entry makes no AX writes to tiles", entryWrites.allSatisfy { write in !f.tiles.contains { write.contains("window \($0) ") } })
+            let background = Array(f.floats.dropFirst())
+            s.expect("background floats receive AXRaise only, never AXMain or geometry writes", entryWrites.filter { write in
+                background.contains { write.contains("window \($0) ") }
+            }.allSatisfy { $0.contains("perform AXRaise") })
+            s.expect("raising never activates a background app", entryWrites.allSatisfy { write in
+                !write.contains("AXFrontmost") || !f.apps.dropFirst().contains { write.contains("pid=\($0.pid)") }
+            })
             s.expect("entry captures nothing", f.mac.stageCaptureRequests.isEmpty)
             f.press("pin layer"); f.press("toggle layer")
             start = f.mac.scheduler.trace.count

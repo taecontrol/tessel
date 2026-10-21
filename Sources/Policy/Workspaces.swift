@@ -990,29 +990,19 @@ final class Workspaces {
         }
     }
 
-    /// Predict only the contracted writes still to come: activation brings the
-    /// app forward, focus selects its root, and background raises stay below
-    /// that root. Once placement finishes this starts from the real CG order.
+    /// Visible windows keep their observed relative order, including native
+    /// panels and failed raises. Only an unseen destination tile needs a
+    /// provisional slot until placement: before the currently visible tiles,
+    /// preserving floats already above those tiles. Reveal reads CG again.
     private func orderStage() {
-        guard let staging, let stage else { return }
-        // A placement may still be confirming this intent while the stage is
-        // shown. Never temporarily fall back to the previous key's order.
-        let selection = focused
+        guard layerEnabled, layer.pinned, let staging, let stage else { return }
         let ids = Set(staging.rects.keys)
         var order = windowOrder.onScreenOrder()
+        if let focused, ids.contains(focused), !order.contains(focused), carousel.location(focused) != nil {
+            let index = order.firstIndex { carousel.location($0) != nil } ?? order.endIndex
+            order.insert(focused, at: index)
+        }
         order.append(contentsOf: ids.subtracting(order).sorted())
-        let front = selection.flatMap { entries[$0]?.pid } ?? applications.frontmostPID
-        let key = selection ?? front.flatMap { appFocus[$0] }.map { entries[$0]?.observation.parent ?? $0 }
-        if let selection, let front {
-            let owned = order.filter { entries[$0]?.pid == front && $0 != selection }
-            order.removeAll { entries[$0]?.pid == front }
-            order.insert(contentsOf: [selection] + owned, at: 0)
-        }
-        for id in layerRaiseOrder where ids.contains(id) && entries[id]?.pid != front {
-            order.removeAll { $0 == id }
-            let index = key.flatMap { order.firstIndex(of: $0) }.map { $0 + 1 } ?? 0
-            order.insert(id, at: index)
-        }
         stage.order(order.filter { ids.contains($0) })
     }
 
@@ -1267,7 +1257,10 @@ final class Workspaces {
         let generation = staging.generation, revision = staging.revision
         let placed = staging.placed.filter { !closeted.contains($0.key) }
         let hidden = Set(staging.rects.keys).intersection(closeted)
-        stage.reveal(placed, hidden: hidden) { [weak self] in
+        stage.reveal(placed, hidden: hidden, willReveal: { [weak self] in
+            guard let self, self.staging?.generation == generation, self.staging?.revision == revision else { return }
+            self.orderStage()
+        }) { [weak self] in
             guard let self, self.staging?.generation == generation, self.staging?.revision == revision else { return }
             self.clearStage()
             self.publish()

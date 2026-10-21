@@ -341,7 +341,8 @@ final class SystemMotionStage: MotionStagePort {
         check()
     }
 
-    func reveal(_ frames: [UInt32: CGRect], hidden: Set<UInt32>, revealed: @escaping @MainActor @Sendable () -> Void) {
+    func reveal(_ frames: [UInt32: CGRect], hidden: Set<UInt32>, willReveal: @escaping @MainActor @Sendable () -> Void,
+                revealed: @escaping @MainActor @Sendable () -> Void) {
         revealing += 1
         let token = revealing, session = self.session
         func check() {
@@ -359,6 +360,7 @@ final class SystemMotionStage: MotionStagePort {
             // The stage fades into the real windows, now in place under it:
             // the curve's last points, the shadows and the focus look change
             // over a few frames instead of in one.
+            willReveal()
             CATransaction.begin(); CATransaction.setDisableActions(true)
             CATransaction.setCompletionBlock {
                 MainActor.assumeIsolated { if token == self.revealing, session == self.session { revealed() } }

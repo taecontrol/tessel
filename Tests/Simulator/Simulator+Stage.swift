@@ -184,13 +184,15 @@ extension SimulatedMac {
             }
         }
 
-        func reveal(_ frames: [UInt32: CGRect], hidden: Set<UInt32>, revealed: @escaping @MainActor @Sendable () -> Void) {
+        func reveal(_ frames: [UInt32: CGRect], hidden: Set<UInt32>, willReveal: @escaping @MainActor @Sendable () -> Void,
+                    revealed: @escaping @MainActor @Sendable () -> Void) {
             mac.assume(.stageOverlay)
             mac.scheduler.call("MotionStagePort.reveal")
             mac.stageState.motion += 1
             let motion = mac.stageState.motion
             // The simulated WindowServer shows an accepted placement at once;
             // the stage then fades into it.
+            willReveal()
             mac.scheduler.main.after(milliseconds: 40) { [mac] in
                 guard mac.stageState.motion == motion else { return }
                 mac.recordStage(.revealed)
