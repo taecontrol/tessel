@@ -102,8 +102,13 @@ import Testing
             let orders = f.mac.stageEvents.compactMap { event -> [UInt32]? in
                 if case .order(let ids) = event.kind { return ids }; return nil
             }
-            s.expect("stage orders \(orders) never elevate pinned floats over their frontmost app's focused tile \(f.tiles[2])", (!pinned || !orders.isEmpty) && orders.allSatisfy { order in
-                local.filter { order.contains($0) }.allSatisfy { order.firstIndex(of: f.tiles[2])! < order.firstIndex(of: $0)! }
+            let rest = f.mac.windowOrder.onScreenOrder()
+            s.expect("stage orders \(orders) preserve at-rest CG \(rest) for the pinned floats and focused tile", (!pinned || !orders.isEmpty) && orders.allSatisfy { order in
+                local.filter { order.contains($0) }.allSatisfy { float in
+                    guard let tileIndex = order.firstIndex(of: f.tiles[2]), let floatIndex = order.firstIndex(of: float),
+                          let nativeTile = rest.firstIndex(of: f.tiles[2]), let nativeFloat = rest.firstIndex(of: float) else { return false }
+                    return (tileIndex < floatIndex) == (nativeTile < nativeFloat)
+                }
             })
             if pinned {
                 s.expect("pinned floats are excluded from every background request", !exclusions.isEmpty && exclusions.allSatisfy { Set(local).isSubset(of: $0) })
