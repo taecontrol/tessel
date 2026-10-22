@@ -151,6 +151,32 @@ import Testing
         })
     }
 
+    @Test("#33 E11; #33 E12; #33 E13; #33 E14: a delayed drag notification and failed release read retain mouse geometry", arguments: ["right", "left", "height", "first-left"])
+    func failedReleaseReadRetainsMouseGeometry(_ edge: String) {
+        requireCarousel(Scenario.run("failed first release read after \(edge) drag") { s in
+            let f = CarouselFixture(s, duration: 0), id = f.ids[edge == "first-left" ? 0 : 1]
+            if edge != "first-left" { f.press("alt-l") }
+            let start = f.frame(id)
+            f.mac.pointerDown()
+            if edge == "left" { f.app.drag(id, to: CGPoint(x: start.minX - 100, y: start.minY)) }
+            if edge == "first-left" { f.app.drag(id, to: CGPoint(x: start.minX + 100, y: start.minY)) }
+            f.app.resize(id, to: CGSize(width: start.width + (edge == "height" ? 0 : edge == "first-left" ? -100 : 100), height: start.height - 40))
+            let released = f.frame(id)
+            // Mouse-up precedes the debounced final publication. The first
+            // fresh read times out; only a later retry can know this width.
+            f.app.busy(forMilliseconds: 100)
+            f.mac.clearMotionHistory(); f.mac.pointerUp(); s.settle()
+            f.near(f.frame(id).width, released.width, "a fresh successful snapshot adopts the accepted mouse width")
+            f.near(f.frame(id).minX, edge == "first-left" ? f.area.minX : released.minX, "the released left edge survives")
+            f.near(f.frame(id).height, f.area.height, "release restores rail height")
+            for tile in f.ids {
+                for attribute in [AXAttribute.size, .position] {
+                    s.expect("release reconciles each attribute once", f.mac.geometryWrites.filter { $0.window == tile && $0.attribute == attribute }.count <= 1)
+                }
+            }
+        })
+    }
+
     @Test("#33 E12: release follows the tile selected by the drag before the first key")
     func dragSelectionOwnsTheNextKey() {
         requireCarousel(Scenario.run("drag selects a previously unfocused tile") { s in
