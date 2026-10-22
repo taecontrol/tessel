@@ -106,6 +106,10 @@ final class Workspaces {
     }
     private var layerRestack = LayerRestack.done(front: nil)
     private var restackPasses: UInt64 = 0
+    /// Apps whose floats the last pass left unraised, because an activation
+    /// tessel requested may still be pending there. The app's first
+    /// publication with that activation resolved owes another pass.
+    private var restackAwaitingActivation = Set<Int32>()
     private var layer: FloatingLayer {
         get { layers[status.active] ?? FloatingLayer() }
         set { layers[status.active] = newValue }
@@ -312,7 +316,8 @@ final class Workspaces {
         scheduler.main.after(milliseconds: 30) { [weak self] in self?.publish() }
     }
 
-    func update(pid: Int32, observations: [WindowObservation], focused rawFocus: UInt32?, frontmost: Bool, change: CatalogChange) {
+    func update(pid: Int32, observations: [WindowObservation], focused rawFocus: UInt32?, frontmost: Bool,
+                activationPending: Bool = false, change: CatalogChange) {
         let incoming = Set(observations.map { $0.record.id })
         var replacements = Set<UInt32>()
         var hiddenReplacements = Set<UInt32>()
@@ -526,6 +531,7 @@ final class Workspaces {
             }
         }
         finishLayerHandoff(observedFocus: reportedFocus, pid: pid)
+        if !activationPending, restackAwaitingActivation.remove(pid) != nil { layerRestack = .owed }
         restackLayer()
         publish()
     }
@@ -988,7 +994,9 @@ final class Workspaces {
     /// focus has settled: an activation still in flight would make the app
     /// about to lose focus look foreground and skip its floats. Called after
     /// placements, focus results and every catalog publication; with nothing
-    /// owed and the same frontmost app it does nothing.
+    /// owed and the same frontmost app it does nothing. A worker declines
+    /// floats of an app with an unresolved activation, which owes another
+    /// pass once that app publishes it resolved.
     private func restackLayer() {
         guard layerNeedsRaises, status.enabled, !quitting else { return }
         let front = applications.frontmostPID
@@ -1000,6 +1008,7 @@ final class Workspaces {
         guard staging?.awaitsPlacement != true, focusSettled else { return }
         restackPasses += 1
         layerRestack = .running(restackPasses)
+        restackAwaitingActivation.removeAll()
         let visible = onScreen()
         let ids = layerRaiseOrder.filter { visible.contains($0) && !closeted.contains($0) && available($0) && entries[$0]?.pid != front }
         raiseLayerFloats(ids[...], token: restackPasses, front: front)
@@ -1037,8 +1046,10 @@ final class Workspaces {
         }
         guard let entry = entries[id], available(id), !closeted.contains(id), entry.pid != applications.frontmostPID,
               let catalog else { raiseLayerFloats(ids.dropFirst(), token: token, front: front); return }
-        catalog.raiseBackground(pid: entry.pid, id: id) { [weak self] in
-            self?.raiseLayerFloats(ids.dropFirst(), token: token, front: front)
+        catalog.raiseBackground(pid: entry.pid, id: id) { [weak self] result in
+            guard let self else { return }
+            if result == .awaitingActivation, self.layerRestack == .running(token) { self.restackAwaitingActivation.insert(entry.pid) }
+            self.raiseLayerFloats(ids.dropFirst(), token: token, front: front)
         }
     }
 

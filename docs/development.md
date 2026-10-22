@@ -617,6 +617,22 @@ raising a root there can take keyboard focus from the tile, as
 [`ax-focus`](../Tests/Acceptance/ContractsAccessibility.swift) proves. The focused
 float is selected normally when entering or navigating the layer.
 
+A background raise must not finish an activation either.
+[`deferred-ax-activation`](../Tests/Acceptance/ContractsScenarios.swift)
+allows AX to accept AXFrontmost while the app is not yet active. A main or
+raise write can then complete that activation. A newer selection cancels the
+focus writes that follow a request, but it does not cancel the request. Each
+app worker therefore remembers its latest request until it is resolved. A
+request is resolved when tessel's own AXMain and AXRaise have followed it and
+the app is later read frontmost. It is also resolved when the frontmost read
+taken where its focus writes stopped already finds the app active. The
+contract does not say whether activating the app another way, such as with
+Cmd-Tab, consumes the request, so that does not resolve it. While a request
+is unresolved, the worker declines to raise that app's floats and reports the
+raise as deferred. The app's first publication after resolution owes another
+pass. After a request whose focus writes never ran, that app's floats wait
+for tessel's next selection in it.
+
 This is best effort on macOS 27. Every raised float is above background apps'
 tiles, but the frontmost app's focused window can remain above another app's
 float. [`ax-raise-across-applications`](../Tests/Acceptance/ContractsMotion.swift)

@@ -19,6 +19,13 @@ struct WindowFocusObservation: Sendable {
     let frontmost: Bool
 }
 
+enum BackgroundRaise: Sendable, Equatable {
+    case finished
+    /// The app may still hold an activation tessel requested; raising it now
+    /// could complete that activation (deferred-ax-activation).
+    case awaitingActivation
+}
+
 struct RailPresentationResult: Sendable {
     var frame: CGRect?
     /// Nil when presentation stopped before publishing a fresh native read.
@@ -55,13 +62,14 @@ final class WindowCatalog {
         if let existing = apps[pid] { existing.refresh(hidden: app.hidden); return }
         let generation = UUID()
         let worker = AppWindows(pid: pid, name: app.name ?? "Application", bundleId: app.bundleID ?? "",
-                                hidden: app.hidden, generation: generation, ax: ax, windowOrder: windowOrder, scheduler: scheduler) { [weak self, scheduler] rows, focused, frontmost, change, activation in
+                                hidden: app.hidden, generation: generation, ax: ax, windowOrder: windowOrder, scheduler: scheduler) { [weak self, scheduler] rows, focused, frontmost, activationPending, change, activation in
             scheduler.main.async {
                 guard let self, let worker = self.apps[pid], worker.generation == generation else { return }
                 // An activation can wait behind a newer keyboard selection in
                 // either queue. Its facts remain valid; its old intent does not.
                 let received: CatalogChange = change == .activation && !worker.ownsFocusIntent(activation) ? .snapshot : change
-                self.workspaces.update(pid: pid, observations: rows, focused: focused, frontmost: frontmost, change: received)
+                self.workspaces.update(pid: pid, observations: rows, focused: focused, frontmost: frontmost,
+                                       activationPending: activationPending, change: received)
             }
         }
         apps[pid] = worker
@@ -101,8 +109,8 @@ final class WindowCatalog {
         app.refreshFrame(id: id, completion: completion)
     }
 
-    func raiseBackground(pid: Int32, id: UInt32, completion: @escaping @MainActor @Sendable () -> Void) {
-        guard let app = apps[pid] else { completion(); return }
+    func raiseBackground(pid: Int32, id: UInt32, completion: @escaping @MainActor @Sendable (BackgroundRaise) -> Void) {
+        guard let app = apps[pid] else { completion(.finished); return }
         app.raiseBackground(id: id, completion: completion)
     }
 
@@ -165,7 +173,7 @@ private final class AppWindows: @unchecked Sendable {
     private let ax: any AccessibilityPort
     private let windowOrder: any WindowOrderPort
     private let scheduler: any SchedulingPort
-    private let publish: @Sendable ([WindowObservation], UInt32?, Bool, CatalogChange, UUID?) -> Void
+    private let publish: @Sendable ([WindowObservation], UInt32?, Bool, Bool, CatalogChange, UUID?) -> Void
     // All mutable state below belongs to queue, including AX handles.
     private let application: AXElement
     private var observer: (any AXObservation)?
@@ -199,6 +207,17 @@ private final class AppWindows: @unchecked Sendable {
     // AppKit can finish an activation after AX accepted it and then make the
     // app's previous key window key again over tessel's request.
     private var awaitedActivation: (intent: UUID, id: UInt32, expiry: any ScheduledWork)?
+    // AX can accept AXFrontmost and leave the activation pending until a main
+    // or raise write, an asynchronous completion, or another activation request
+    // (deferred-ax-activation). A newer selection cancels the writes that
+    // follow a request, not the request, and nothing reports one abandoned;
+    // the app becoming active by other means is not known to consume it.
+    // A background raise could then complete it over the user's selection.
+    // It is resolved once tessel's own focus writes have followed its latest
+    // request and the app has been read frontmost, or when the read that
+    // follows an unfollowed request already finds the app frontmost.
+    private enum ActivationRequest { case resolved, unfollowed, followed }
+    private var activationRequest = ActivationRequest.resolved
     private var constrained = Set<UInt32>()
     private struct Validation {
         let area: CGRect
@@ -209,7 +228,7 @@ private final class AppWindows: @unchecked Sendable {
 
     init(pid: Int32, name: String, bundleId: String, hidden: Bool, generation: UUID,
          ax: any AccessibilityPort, windowOrder: any WindowOrderPort, scheduler: any SchedulingPort,
-         publish: @escaping @Sendable ([WindowObservation], UInt32?, Bool, CatalogChange, UUID?) -> Void) {
+         publish: @escaping @Sendable ([WindowObservation], UInt32?, Bool, Bool, CatalogChange, UUID?) -> Void) {
         self.pid = pid
         self.name = name
         self.bundleId = bundleId
@@ -531,6 +550,7 @@ private final class AppWindows: @unchecked Sendable {
         }
         let frontmost = (try? value(application, .frontmost)?.bool) == true
         if frontmost {
+            if activationRequest == .followed { activationRequest = .resolved }
             railActivationCheck?.work.cancel()
             railActivationCheck = nil
         }
@@ -542,10 +562,17 @@ private final class AppWindows: @unchecked Sendable {
             }
             return WindowObservation(record: record, frame: fact.frame, parent: fact.parent, resizable: fact.resizable, replaces: replacements[fact.id])
         }
-        publish(observations, focused == 0 ? nil : focused, frontmost, change, activationToken)
+        publish(observations, focused == 0 ? nil : focused, frontmost, activationRequest != .resolved, change, activationToken)
         change = .snapshot
         activationToken = nil
         return WindowFocusObservation(window: focused == 0 ? nil : focused, frontmost: frontmost)
+    }
+
+    /// A focus sequence stopped after its activation request. The frontmost
+    /// read that follows a request tells whether it is pending.
+    private func confirmUnfollowedActivation() {
+        guard activationRequest == .unfollowed, (try? value(application, .frontmost)?.bool) == true else { return }
+        activationRequest = .resolved
     }
 
     private func focusedWindow() -> UInt32 {
@@ -618,6 +645,7 @@ private final class AppWindows: @unchecked Sendable {
             // The caller's focus intent lasts only while this write is pending,
             // including when an AX read fails or a newer render cancels it.
             defer { scheduler.main.async { completion() } }
+            defer { confirmUnfollowedActivation() }
             guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
             do {
                 guard try canPresent(window, id: id) else { return }
@@ -631,6 +659,7 @@ private final class AppWindows: @unchecked Sendable {
                 }
                 guard presentationLock.withLock({ presentation == token }), try canPresent(window, id: id) else { return }
                 if focus {
+                    activationRequest = .unfollowed
                     try check(ax.set(.frontmost, of: application, to: .bool(true)))
                     guard presentationLock.withLock({ presentation == token }), isNativeFront(window, id: id) else { return }
                     try check(ax.set(.main, of: window, to: .bool(true)))
@@ -638,6 +667,7 @@ private final class AppWindows: @unchecked Sendable {
                     guard presentationLock.withLock({ presentation == token }), try value(window, .minimized)?.bool != true,
                           isNativeFront(window, id: id) else { return }
                     try check(ax.perform(.raise, on: window))
+                    activationRequest = .followed
                 }
                 publishSnapshot()
             } catch { /* Keep the last complete classification when the app is busy. */ }
@@ -645,12 +675,18 @@ private final class AppWindows: @unchecked Sendable {
     }
 
     /// AXRaise on a frontmost app's root may select it (ax-focus). A background
-    /// raise only reorders below the active window (ax-raise-across-applications).
-    func raiseBackground(id: UInt32, completion: @escaping @MainActor @Sendable () -> Void) {
+    /// raise only reorders below the active window (ax-raise-across-applications),
+    /// unless it completes an activation still pending in that app.
+    func raiseBackground(id: UInt32, completion: @escaping @MainActor @Sendable (BackgroundRaise) -> Void) {
         let token = presentationLock.withLock { presentation }
         queue.async { [self] in
-            defer { scheduler.main.async { completion() } }
+            var result = BackgroundRaise.finished
+            defer {
+                let outcome = result
+                scheduler.main.async { completion(outcome) }
+            }
             guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
+            guard activationRequest == .resolved else { result = .awaitingActivation; return }
             do {
                 guard try canPresent(window, id: id), try value(application, .frontmost)?.bool == false,
                       presentationLock.withLock({ presentation == token }) else { return }
@@ -677,6 +713,7 @@ private final class AppWindows: @unchecked Sendable {
                 scheduler.main.async { completion(result) }
             }
         }
+        defer { confirmUnfollowedActivation() }
         guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
         do {
             guard try canPresent(window,id:id) else { return }
@@ -714,12 +751,14 @@ private final class AppWindows: @unchecked Sendable {
             if focus {
                 guard try canPresent(window,id:id) else { return }
                 let active = try value(application, .frontmost)?.bool == true
+                activationRequest = .unfollowed
                 try check(ax.set(.frontmost, of: application, to: .bool(true)))
                 guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return }
                 try check(ax.set(.main, of: window, to: .bool(true)))
                 guard presentationLock.withLock({ presentation == token }), try value(window, .minimized)?.bool != true,
                       isNativeFront(window,id:id) else { return }
                 try check(ax.perform(.raise, on: window))
+                activationRequest = .followed
                 awaitedActivation?.expiry.cancel()
                 awaitedActivation = nil
                 if !active {
@@ -740,12 +779,15 @@ private final class AppWindows: @unchecked Sendable {
                           (try? self.canPresent(window,id:id)) == true,
                           (try? self.value(self.application,.frontmost)?.bool) != true else { return }
                     do {
+                        defer { self.confirmUnfollowedActivation() }
+                        self.activationRequest = .unfollowed
                         try self.check(self.ax.set(.frontmost, of: self.application, to: .bool(true)))
                         guard self.presentationLock.withLock({ self.presentation == token }), self.isNativeFront(window,id:id) else { return }
                         try self.check(self.ax.set(.main, of: window, to: .bool(true)))
                         guard self.presentationLock.withLock({ self.presentation == token }), try self.value(window, .minimized)?.bool != true,
                               self.isNativeFront(window,id:id) else { return }
                         try self.check(self.ax.perform(.raise, on: window))
+                        self.activationRequest = .followed
                         self.publishSnapshot()
                     } catch { /* Another app and newer focus intents remain independent. */ }
                 }
