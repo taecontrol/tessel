@@ -215,7 +215,8 @@ private final class AppWindows: @unchecked Sendable {
     // A background raise could then complete it over the user's selection.
     // It is resolved once tessel's own focus writes have followed its latest
     // request and the app has been read frontmost, or when the read that
-    // follows an unfollowed request already finds the app frontmost.
+    // follows an unfollowed request, in the sequence that issued it, already
+    // finds the app frontmost (`requestActivation`).
     private enum ActivationRequest { case resolved, unfollowed, followed }
     private var activationRequest = ActivationRequest.resolved
     private var constrained = Set<UInt32>()
@@ -568,11 +569,19 @@ private final class AppWindows: @unchecked Sendable {
         return WindowFocusObservation(window: focused == 0 ? nil : focused, frontmost: frontmost)
     }
 
-    /// A focus sequence stopped after its activation request. The frontmost
-    /// read that follows a request tells whether it is pending.
-    private func confirmUnfollowedActivation() {
-        guard activationRequest == .unfollowed, (try? value(application, .frontmost)?.bool) == true else { return }
-        activationRequest = .resolved
+    /// Request activation, then `follow` it with tessel's own focus writes,
+    /// returning whether they all ran. When they stop early, the frontmost read
+    /// that follows this request tells whether it is pending. A presentation
+    /// that issued no request learns nothing about an older one from that read.
+    private func requestActivation(followedBy follow: () throws -> Bool) throws -> Bool {
+        activationRequest = .unfollowed
+        defer {
+            if activationRequest == .unfollowed, (try? value(application, .frontmost)?.bool) == true { activationRequest = .resolved }
+        }
+        try check(ax.set(.frontmost, of: application, to: .bool(true)))
+        guard try follow() else { return false }
+        activationRequest = .followed
+        return true
     }
 
     private func focusedWindow() -> UInt32 {
@@ -645,7 +654,6 @@ private final class AppWindows: @unchecked Sendable {
             // The caller's focus intent lasts only while this write is pending,
             // including when an AX read fails or a newer render cancels it.
             defer { scheduler.main.async { completion() } }
-            defer { confirmUnfollowedActivation() }
             guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
             do {
                 guard try canPresent(window, id: id) else { return }
@@ -659,15 +667,16 @@ private final class AppWindows: @unchecked Sendable {
                 }
                 guard presentationLock.withLock({ presentation == token }), try canPresent(window, id: id) else { return }
                 if focus {
-                    activationRequest = .unfollowed
-                    try check(ax.set(.frontmost, of: application, to: .bool(true)))
-                    guard presentationLock.withLock({ presentation == token }), isNativeFront(window, id: id) else { return }
-                    try check(ax.set(.main, of: window, to: .bool(true)))
-                    // AXMain leaves a completed minimize alone; AXRaise restores it.
-                    guard presentationLock.withLock({ presentation == token }), try value(window, .minimized)?.bool != true,
-                          isNativeFront(window, id: id) else { return }
-                    try check(ax.perform(.raise, on: window))
-                    activationRequest = .followed
+                    let followed = try requestActivation {
+                        guard presentationLock.withLock({ presentation == token }), isNativeFront(window, id: id) else { return false }
+                        try check(ax.set(.main, of: window, to: .bool(true)))
+                        // AXMain leaves a completed minimize alone; AXRaise restores it.
+                        guard presentationLock.withLock({ presentation == token }), try value(window, .minimized)?.bool != true,
+                              isNativeFront(window, id: id) else { return false }
+                        try check(ax.perform(.raise, on: window))
+                        return true
+                    }
+                    guard followed else { return }
                 }
                 publishSnapshot()
             } catch { /* Keep the last complete classification when the app is busy. */ }
@@ -713,7 +722,6 @@ private final class AppWindows: @unchecked Sendable {
                 scheduler.main.async { completion(result) }
             }
         }
-        defer { confirmUnfollowedActivation() }
         guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
         do {
             guard try canPresent(window,id:id) else { return }
@@ -751,14 +759,15 @@ private final class AppWindows: @unchecked Sendable {
             if focus {
                 guard try canPresent(window,id:id) else { return }
                 let active = try value(application, .frontmost)?.bool == true
-                activationRequest = .unfollowed
-                try check(ax.set(.frontmost, of: application, to: .bool(true)))
-                guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return }
-                try check(ax.set(.main, of: window, to: .bool(true)))
-                guard presentationLock.withLock({ presentation == token }), try value(window, .minimized)?.bool != true,
-                      isNativeFront(window,id:id) else { return }
-                try check(ax.perform(.raise, on: window))
-                activationRequest = .followed
+                let followed = try requestActivation {
+                    guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return false }
+                    try check(ax.set(.main, of: window, to: .bool(true)))
+                    guard presentationLock.withLock({ presentation == token }), try value(window, .minimized)?.bool != true,
+                          isNativeFront(window,id:id) else { return false }
+                    try check(ax.perform(.raise, on: window))
+                    return true
+                }
+                guard followed else { return }
                 awaitedActivation?.expiry.cancel()
                 awaitedActivation = nil
                 if !active {
@@ -779,16 +788,15 @@ private final class AppWindows: @unchecked Sendable {
                           (try? self.canPresent(window,id:id)) == true,
                           (try? self.value(self.application,.frontmost)?.bool) != true else { return }
                     do {
-                        defer { self.confirmUnfollowedActivation() }
-                        self.activationRequest = .unfollowed
-                        try self.check(self.ax.set(.frontmost, of: self.application, to: .bool(true)))
-                        guard self.presentationLock.withLock({ self.presentation == token }), self.isNativeFront(window,id:id) else { return }
-                        try self.check(self.ax.set(.main, of: window, to: .bool(true)))
-                        guard self.presentationLock.withLock({ self.presentation == token }), try self.value(window, .minimized)?.bool != true,
-                              self.isNativeFront(window,id:id) else { return }
-                        try self.check(self.ax.perform(.raise, on: window))
-                        self.activationRequest = .followed
-                        self.publishSnapshot()
+                        let followed = try self.requestActivation {
+                            guard self.presentationLock.withLock({ self.presentation == token }), self.isNativeFront(window,id:id) else { return false }
+                            try self.check(self.ax.set(.main, of: window, to: .bool(true)))
+                            guard self.presentationLock.withLock({ self.presentation == token }), try self.value(window, .minimized)?.bool != true,
+                                  self.isNativeFront(window,id:id) else { return false }
+                            try self.check(self.ax.perform(.raise, on: window))
+                            return true
+                        }
+                        if followed { self.publishSnapshot() }
                     } catch { /* Another app and newer focus intents remain independent. */ }
                 }
                 railActivationCheck = (token,check)

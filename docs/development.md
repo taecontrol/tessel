@@ -625,7 +625,9 @@ focus writes that follow a request, but it does not cancel the request. Each
 app worker therefore remembers its latest request until it is resolved. A
 request is resolved when tessel's own AXMain and AXRaise have followed it and
 the app is later read frontmost. It is also resolved when the frontmost read
-taken where its focus writes stopped already finds the app active. The
+taken where its focus writes stopped already finds the app active. Only the
+presentation that issued the request takes that read; a later one that only
+moves windows says nothing about it, even when it finds the app active. The
 contract does not say whether activating the app another way, such as with
 Cmd-Tab, consumes the request, so that does not resolve it. While a request
 is unresolved, the worker declines to raise that app's floats and reports the
