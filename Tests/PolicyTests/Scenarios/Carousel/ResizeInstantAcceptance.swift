@@ -79,6 +79,25 @@ import Testing
         })
     }
 
+    @Test("#33 E7: a restore-only AX failure retries the original enhanced UI preference")
+    func enhancedUIRestoreRetriesWithoutReplayingGeometry() {
+        requireCarousel(Scenario.run("only enhanced UI restore times out") { s in
+            let f = CarouselFixture(s, presets: [1], duration: 0), id = f.ids[0]
+            let application = f.mac.ax.application(f.app.pid)
+            _ = f.mac.ax.set(.enhancedUserInterface, of: application, to: .bool(true))
+            f.mac.clearMotionHistory()
+            f.tessel.press("cycle width")
+            let held = f.mac.pause(after: .call("AccessibilityPort.set AXEnhancedUserInterface=true \(f.app.alias) pid=\(f.app.pid)"))
+            if case .paused = held {} else { s.expect("restore is about to run: \(held)", false) }
+            // A one-millisecond busy interval makes only this write fail. Its
+            // timeout outlasts the interval, so geometry and later reads work.
+            f.app.busy(forMilliseconds: 1); s.settle()
+            f.near(f.frame(id).width, f.width(1.0 / 3), "geometry succeeded before restore failed")
+            s.expect("the original app preference is eventually restored", f.mac.ax.copy(.enhancedUserInterface, of: application).value?.bool == true)
+            s.expect("restoring the preference never replays size", f.mac.geometryWrites.filter { $0.window == id && $0.attribute == .size }.count == 1)
+        })
+    }
+
     @Test("#33 E7: a late application resize cannot become an adopted mouse width")
     func lateApplicationResizeDoesNotBecomeMouseInput() {
         requireCarousel(Scenario.run("late enhanced-UI redraw") { s in
