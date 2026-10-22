@@ -847,6 +847,8 @@ it excludes policy-owned visibility and rail membership, which can change when
 cleanup returns windows and startup follows native focus. Mixed-app rail setup
 uses rail navigation to reveal a closeted destination before selecting it,
 preserving #19 E26.
+The layer-key wiring scene creates its panel before startup to establish the
+hidden-layer Given; a live new panel would enter its single-window layer.
 
 ## Acceptance example layers (#24)
 
