@@ -52,6 +52,8 @@ struct Status: Decodable {
         let rail: Int?
         let gaps: Gaps
         let keys: [String: String]
+        struct Layer: Decodable { let state: String; let focused: Bool }
+        let layer: Layer?
         struct Gaps: Decodable { let outer: Double }
     }
 }
@@ -255,6 +257,12 @@ final class Harness {
     private(set) var environment: [String: String] = [:]
     var fixture: FixtureSession!
     var otherFixtures: [FixtureSession] = []
+
+    func other(prohibited: Bool = false) throws -> FixtureSession {
+        let session = try FixtureSession(directory: directory, number: otherFixtures.count + 1, prohibited: prohibited)
+        otherFixtures.append(session)
+        return session
+    }
     var observer: FixtureSession!
     private(set) var appPID: pid_t = 0
     /// What NSWorkspace reported in a fresh signed process when the suite began.

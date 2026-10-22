@@ -24,6 +24,13 @@ tessel keeps checking a new window for a moment, counts native tabs as one
 window, and can explain every classification (#1, #2). Paneru already handles
 native tabs.
 
+AX roots also include surfaces that should never join a layout. tessel checks
+CG level before subrole: standard windows, dialogs, system dialogs and floating
+windows at layer 0 or the floating level 3 are managed, including apps' own
+utility panels, inspectors and palettes. Other surfaces are listed as
+`ignored`, with their level or subrole as the reason (#19). This keeps popups,
+alerts and widgets out of workspace membership and focus history.
+
 macOS moves a window that sits entirely off screen onto another display, so
 AeroSpace and Paneru hide windows by leaving a thin sliver of each one visible
 at a screen edge.
@@ -40,7 +47,7 @@ parked in a strip. TileMyMac uses Paneru's engine and exposes numbered rows.
 |---|---|---|---|---|---|---|
 | Tiling model | Manual i3-style tree | Docking by dragging | Scrolling strip | Dwindle: automatic spiral splits | Accessibility API | #3 |
 | Scrolling columns layout (niri-style) | — | — | Yes, one strip per display | Per workspace | Feasible | Carousel experiment (#26) |
-| Floating workspace | — | "Float all" | — | Per workspace | Feasible | Idea |
+| Floating workspace | — | "Float all" | — | Per workspace | Feasible | Floating layer over carousel (#19) |
 | Accordion or tabs | Accordion | Tab groups across apps | Stack windows in a column | Groups with a tab bar | Tab bar needs its own overlay | #5 |
 | Nested groups, step in and out | Nesting by hand | Nested spaces with a camera | Stacked rows (experimental, Paneru) | — | Feasible | #5 |
 | Zoom into one window | Full screen | Frame window | Fill the screen | Tiled full screen | Feasible | #4 |
@@ -55,7 +62,7 @@ parked in a strip. TileMyMac uses Paneru's engine and exposes numbered rows.
 | Scratchpad | — | — | — | Yes | Feasible | Idea |
 | Pop out: float and show on every workspace | — | — | — | Yes | Feasible | Idea |
 | Full screen, full width | Full screen | Frame window | Fill the screen | Both | Feasible | Idea |
-| Toggle floating and tiling | Yes | Green button | — | Yes | Feasible | Idea |
+| Toggle floating and tiling | Yes | Green button | — | Yes | Feasible | Floating layer experiment: Option+F (#19) |
 | Per-app rules (workspace, floating) | Yes | Exclude an app | Yes (Paneru) | Yes | Feasible | Idea |
 | Gaps | Yes | — | — | Yes, with a toggle | Feasible | #2 |
 | Active window border | — | — | — | Gradient border | Needs its own overlay | Idea |

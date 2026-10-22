@@ -1,7 +1,7 @@
 import Foundation
 
 enum WindowState: String, Codable, Sendable {
-    case tiled, floats, minimized, hidden, fullscreen
+    case tiled, floats, minimized, hidden, fullscreen, ignored
 }
 
 struct WindowRecord: Codable, Sendable {
@@ -44,6 +44,8 @@ struct Configuration: Codable, Sendable, Equatable {
     var keys = KeyChord.defaults
     var gaps = Gaps()
     var animation = Animation()
+    var layerEnabled: Bool { experiments["layer"] == true }
+    var carouselEnabled: Bool { experiments["carousel"] == true || layerEnabled }
 }
 
 struct Animation: Codable, Sendable, Equatable {
@@ -66,6 +68,12 @@ struct WorkspaceStatus: Codable, Sendable, Equatable {
     var railCount = 0
     var gaps = Gaps()
     var keys = KeyChord.defaults
+    var layer: LayerStatus? = nil
+}
+
+struct LayerStatus: Codable, Sendable, Equatable {
+    var state: String
+    var focused: Bool
 }
 
 struct ConfigStatus: Codable, Sendable {

@@ -2,6 +2,46 @@ import Foundation
 import Testing
 
 extension Acceptance.Contracts {
+    @Test("window-levels: CG layers distinguish native roots and remain readable by ID off the active Space", contract(.windowLevels))
+    func windowLevels() throws {
+        let reply = try fixture.command("windowLevels")
+        let ordinary = try #require(reply.windows["ordinary"]), dialog = try #require(reply.windows["dialog"])
+        let panel = try #require(reply.windows["panel"])
+        let popup = try #require(reply.windows["popup"]), status = try #require(reply.windows["status"])
+        // One native setup and one closet round trip, with no sleeps or
+        // repeated transitions; this contract is intended to cost about 1 s.
+        try requireFinalState("the independent observer reads each native layer and AX root") {
+            let roots = try native().roots
+            guard let a = roots.first(where: { $0.id == ordinary }), let b = roots.first(where: { $0.id == dialog }),
+                  let utility = roots.first(where: { $0.id == panel }),
+                  let child = roots.first(where: { $0.id == popup }), let high = roots.first(where: { $0.id == status }) else { return false }
+            return a.layer == 0 && a.subrole == "AXStandardWindow" && b.layer == 0 && b.subrole == "AXDialog"
+                && utility.layer == 3 && utility.subrole == "AXFloatingWindow"
+                && child.layer == 0 && child.subrole == "AXUnknown" && child.role == "AXWindow"
+                && high.layer.map { $0 != 0 && $0 != 3 } == true
+                && [a, b, utility, child, high].allSatisfy { $0.subroleError == 0 && $0.roleError == 0 }
+                && !a.sheets.contains { $0.id == popup }
+        }
+        let started = try native("closetStart")
+        defer { _ = try? native("closetStop") }
+        let active = try #require(started.activeSpace), closet = try #require(started.closetSpace)
+        try #require(closet != 0 && closet != active)
+        try native("closetHide", ["ids": [dialog]])
+        try requireFinalState("CG still describes a fixture window by ID while it is only in the closet") {
+            let state = try native(), spaces = try native("spaces", ["ids": [dialog]])
+            let retained = try native("retained", ["id": dialog]).window
+            return spaces.activeSpace == active && spaces.memberships?.first?.ordinary.isEmpty == true
+                && spaces.memberships?.first?.all == [closet] && !state.visible.contains(dialog)
+                && retained?.id == dialog && retained?.layer == 0
+        }
+        try native("closetShow", ["ids": [dialog]])
+        try requireFinalState("the observed window returns to the active Space with the same readable layer") {
+            let state = try native(), spaces = try native("spaces", ["ids": [dialog]])
+            return spaces.activeSpace == active && spaces.memberships?.first?.ordinary == [active]
+                && state.visible.contains(dialog) && state.roots.first { $0.id == dialog }?.layer == 0
+        }
+    }
+
     @Test("transient-window-lists: native transitions stay within the modeled AX outcomes", contract(.transientWindowLists))
     func transientWindowLists() throws {
         let a = try fixture.open(key: "a"), b = try fixture.open(key: "b")

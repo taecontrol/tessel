@@ -87,8 +87,10 @@ With no arguments, `scripts/verify` runs every real-system suite except the
 disposable-runner permission steps. `--journeys` includes those steps on CI;
 `--permission` selects just those steps. The signing-and-permission journey has
 separate signing and permission tests so the default can skip only the latter. Captures
-run only with their opt-in flag: `TESSEL_CAPTURE_WORKSPACES=1` for AppKit views
-or `TESSEL_CAPTURE_CAROUSEL=1` for E21 geometry recordings. Select a suite or pass a test
+run only with their opt-in flag: `TESSEL_CAPTURE_WORKSPACES=1` for AppKit views,
+`TESSEL_CAPTURE_CAROUSEL=1` for E21 geometry recordings, or
+`TESSEL_CAPTURE_LAYER=1` for layer recordings, the automated E30 fidelity
+walkthrough and E32 owner-session preparation. Select a suite or pass a test
 name fragment, such as `scripts/verify switchWorkspaces`. Empty selections fail
 before a GUI session starts. The script sets `TESSEL_ACCEPTANCE=1`; a direct
 `TESSEL_ACCEPTANCE=1 swift build --build-tests` compiles these suites without
@@ -158,7 +160,9 @@ that child QoS changes cannot lift. Interrupting verification removes the job.
 
 `Resources.swift` keeps foundation E22's twenty default-config windows, workspace
 E36's twenty windows across ten workspaces, and carousel E24's twenty windows
-across five workspaces and multiple rails. Each retains its setup and one-second
+across five workspaces and multiple rails, plus one hidden float with the layer
+experiment enabled (also #19 E28). The two IDs share one resource test and the
+same budgets and observation window. Each retains its setup and one-second
 settle, then observes one 20-second idle window from outside the app with
 `proc_pid_rusage` (`rusage_info_v0`). Interrupt wakeups must be at most 11;
 user + system CPU must be at most 100 ms, converting Mach ticks with
@@ -253,7 +257,9 @@ for the private system dependency and its tradeoffs.
 Window records contain an ID, app name, bundle ID, state, reason, native tab
 count, `workspace` (1…10 or null), `visible` (CG on-screen membership), and
 `answeredAt`.
-`state` includes `fullscreen`. Titles are never queried. `status --json` adds
+`state` is `tiled`, `floats`, `minimized`, `hidden`, `fullscreen`, or `ignored`.
+Ignored surfaces have no workspace and are never placed, hidden or focused.
+Titles are never queried. `status --json` adds
 `workspaces.enabled`, `reason`, `active`, `gaps`, and the effective `keys`.
 With the experiment disabled, tessel observes without managing ordinary windows.
 
@@ -450,6 +456,26 @@ answers `available` from its last Screen Recording preflight, which takes about
 change when motion is off. No capture or timer remains at rest; the overlay
 stays ordered in, empty and transparent, so the next show draws at once.
 
+SIGTERM, the Quit menu and permission relaunch clear the stage at once, then
+drain outstanding ScreenCaptureKit requests for at most 500 ms before asking
+AppKit to terminate. Cleanup then returns managed windows and exits. Exiting
+during a capture can leave replayd checking a dead client's audit token
+and showing an approval alert. The capture-settled callback or one-shot deadline,
+whichever arrives first, completes the drain exactly once; repeated quit requests
+do not extend it or repeat cleanup. The limit leaves margin over normal
+15–100 ms captures and the measured 230 ms cold start, without letting a stuck
+capture block quit.
+It bounds capture draining before cleanup, excluding window-return work.
+
+`applicationShouldTerminate` always returns `terminateNow`, including for
+external requests such as logout. Draining inside AppKit's `terminateLater`
+wait can hang: when SIGTERM calls terminate from the main dispatch queue, the
+nested modal loop cannot reenter that queue to deliver capture continuations
+or its dispatch deadline. Deterministic CarouselShutdown scenarios prove drain
+ordering, the deadline and exactly-once completion; they do not model AppKit's
+termination loop. Real-system journeys exercise SIGTERM teardown after each
+test and must confirm process exit.
+
 Fixture-only development status adds `testMotion.stageCaptures` and
 `testMotion.stageShows`. The app's real stage adapter increments them, and the
 signed development CLI preserves them. The resource suite samples them only
@@ -558,9 +584,151 @@ recording window includes bounce and a settled tail; final states use the usual
 review destination when requested. E21 remains pending until the owner compares
 it with the accepted prototype; generating the recording does not accept it.
 
+## Floating layer experiment (#19)
+
+`[experiments] layer = true` enables the carousel and a floating layer for each
+workspace. Existing floats start hidden in the closet while the rail keeps
+focus. If startup focus is already on a float, tessel enters the whole layer.
+The layer's visibility and pinning belong to its workspace; switching away
+hides all its windows and returning restores its selection.
+
+Option+Z (`toggle layer`) shows the workspace's floats and selects the most
+recently used one, or the first arrival before any has been used. Pressing it
+again returns to the remembered rail tile and hides the layer. Tiles retain
+their geometry and scroll position. Inside the layer, Option+H/K cycles backward
+and Option+L/J forward in arrival order, wrapping at either end. Option+R and
+Option+Shift+H/J/K/L do nothing there.
+
+Option+Shift+Z (`pin layer`) keeps the floats visible while rail
+navigation continues. Option+Z still enters and leaves the layer. Unpinning on
+the rails hides it; unpinning inside leaves it shown.
+
+A pinned or shown layer raises its visible background-app floats with AXRaise
+alone, serially from least to most recently used. Untouched floats favor the
+first arrival. The raise changes neither AXMain nor activation. The pass is a
+function of observed state rather than of the render that preceded it: one is
+owed after every placement and whenever the native frontmost app differs from
+the one the last pass was computed for, including an app with no managed
+window. It runs once tessel's own focus write has answered and native focus is
+not on another managed window, since that means a selection is still on its
+way. Every catalog publication and focus result re-checks this; with nothing
+owed and the same frontmost app the check does nothing. Tessel skips frontmost-app floats:
+raising a root there can take keyboard focus from the tile, as
+[`ax-focus`](../Tests/Acceptance/ContractsAccessibility.swift) proves. The focused
+float is selected normally when entering or navigating the layer.
+
+A background raise must not finish an activation either.
+[`deferred-ax-activation`](../Tests/Acceptance/ContractsScenarios.swift)
+allows AX to accept AXFrontmost while the app is not yet active. A main or
+raise write can then complete that activation. A newer selection cancels the
+focus writes that follow a request, but it does not cancel the request. Each
+app worker therefore remembers its latest request until it is resolved. A
+request is resolved when tessel's own AXMain and AXRaise have followed it and
+the app is later read frontmost. It is also resolved when the frontmost read
+taken where its focus writes stopped already finds the app active. Only the
+presentation that issued the request takes that read; a later one that only
+moves windows says nothing about it, even when it finds the app active. The
+contract does not say whether activating the app another way, such as with
+Cmd-Tab, consumes the request, so that does not resolve it. While a request
+is unresolved, the worker declines to raise that app's floats and reports the
+raise as deferred. The app's first publication after resolution owes another
+pass. After a request whose focus writes never ran, that app's floats wait
+for tessel's next selection in it.
+
+This is best effort on macOS 27. Every raised float is above background apps'
+tiles, but the frontmost app's focused window can remain above another app's
+float. [`ax-raise-across-applications`](../Tests/Acceptance/ContractsMotion.swift)
+pins this limit; `ax-frontmost-activation` in the same file pins activation
+bringing the app's windows forward. CG on-screen membership (`visible`) includes
+covered windows; it cannot prove stacking. The supplementary E7/E9 spec-gap
+scenarios check the simulator's front-to-back `cg-on-screen-order` list and
+keyboard focus instead. A seeded sweep replays command sequences under
+deferred activation and stage retargets and checks that rule after each settle.
+It and a second sweep, of superseded activations, native selections and
+geometry-only relayouts, also check that no passive float raise moves
+keyboard focus into the float's app.
+
+During rail motion the stage captures each visible pinned float once, excludes
+it from the background, and draws stand-ins in their at-rest stacking order:
+above every tile macOS lets them cover (background apps' tiles), below the
+frontmost app's windows they will sit under. Retargets update stand-in order
+without extra captures. Visible stand-ins retain CG's observed order, including
+native panels and failed raises. A destination tile still in the closet gets a
+provisional slot until it is placed. The stage waits for the serial raise pass
+and reads CG order again when WindowServer confirms placement, immediately
+before the existing reveal fade. ADR-0006's capture and placement method is unchanged.
+No layer animation, polling or recurring timer is added.
+
+E11 remains an opt-in pixel recording. Its panels belong to a different signed
+fixture app from both apps in its mixed-app rail, so the movie shows them above
+background tiles and below the frontmost focused tile, without a pop as the
+stage clears. Same-app floats keep their native order because tessel skips their
+raise. E30 runs all seven prototype walkthroughs for U1 B, U2 B, U3 B and U4 A,
+plus four-direction wrap, remembered-tile return while pinned, and a 0.62-area
+width that must return at two-thirds rather than half. It posts real keys and
+uses signed fixture selection for the prototype's external focus actions. It
+writes frames as fractions of the usable area, focus, layer state and visibility
+to `.work/captures/layer/E30-fidelity.md`, retaining the last observation and
+failing on mismatch. E30 requires no owner interaction:
+
+```sh
+TESSEL_CAPTURE_LAYER=1 scripts/verify captureOwnerPrototypeComparison
+```
+
+A new float takes focus and, when the layer was hidden, appears alone. Another
+new float replaces that single view. Closing it or pressing Option+Z returns to
+the rails; directional navigation expands to the whole layer, and pinning shows
+it all while retaining float focus. In an entered layer, closing focus selects
+the surviving most recently used float; the final close returns to the rails.
+Sheets stay with their parent and do not enter the layer independently. External
+focus on a hidden float enters the whole layer; external tile focus leaves it,
+hiding floats unless pinned. Focus moves away before a float enters the closet.
+A hidden modal can leave its app waiting until the dialog is shown again.
+
+Option+F (`toggle float`) moves a tile to the layer, centered at half the area's
+width and two thirds its height. It becomes the newest float arrival, and the
+rail closes its gap and remembers the left neighbor. Moving a resizable float
+back inserts it to the right of the remembered tile, creating a rail if needed.
+Its current width selects the nearest rail preset; a tie chooses the wider one.
+A one-shot read on the app's AX worker publishes its current frame before the
+float joins the rail. Earlier resize snapshots therefore arrive while it still
+floats, and cannot replace the chosen preset with an exact mouse width during
+the focus-before-hide handoff. A failed read leaves it floating; a newer layout
+or selection decision cancels the pending transfer.
+A fixed-size float bounces and stays floating. Manual choices last for that
+window's lifetime, including catalog refreshes, and reset on restart. Sending a
+float with Option+Shift+N follows it into the destination workspace's layer.
+
+The three commands are accepted and rebindable in `[keys]` even with the flag
+off, but are registered only while the layer is enabled. Toggling an empty layer
+does nothing. Disabling a layer-only config, removing it, or quitting returns
+all floats. With `carousel = true` explicitly retained and `layer = false`,
+active-workspace floats remain visible above the rails and inactive workspaces
+stay in their closet, as in the carousel experiment. Enabling the layer again
+starts hidden.
+
+With the layer enabled, `status --json` adds
+`workspaces.layer: {"state":"hidden","focused":false}`. State is `hidden`,
+`single`, `shown`, or `pinned`; `focused` says whether focus is in the layer.
+Hidden floats retain `state: "floats"`, workspace membership, null `rail` and
+`slot`, and `visible: false` in `windows --json`. Manual classifications report
+`floats` / `moved to the layer` or `tiled` / `moved to a rail`.
+
+Classification is fixed independently of the flag: tessel manages windows at CG
+layer 0 or the floating level 3 with subrole `AXStandardWindow`, `AXDialog`,
+`AXSystemDialog`, or `AXFloatingWindow`. Layer 3 includes apps' own floating
+utility panels, inspectors and palettes. Every other layer is `ignored` with
+reason `window level <n>`, checked before the subrole. Other subroles are
+`ignored` with that subrole as the reason. Ignored records have null `workspace`,
+`rail` and `slot`; their
+appearance or removal changes neither focus history nor layouts. Native
+fullscreen remains detected through `AXFullScreen`, including a transient
+`AXUnknown` fullscreen root. The catalog reads CG levels only for the IDs it
+inspects, alongside their other facts.
+
 ## Journeys and latency (#24)
 
-`scripts/verify --journeys` runs nine journeys. The signing-and-permission
+`scripts/verify --journeys` runs eleven journeys. The signing-and-permission
 journey includes the disposable-runner-only permission steps under the guard
 described above. Foundation E11 (CLI failure) and E14 (permission restart) prove
 their timing decisions in the deterministic layer. The same journey wiring
@@ -585,6 +753,7 @@ deterministic policy layer and are not tagged in these files:
 | Send | #2 E35 |
 | Rail scroll and elevator | Wiring regression (no policy example IDs) |
 | Carousel rail change | #26 E15 |
+| Floating layer | #19 E29 |
 | Reduce Motion | Wiring check that Reduce Motion makes a carousel move instant (E18 belongs to P) |
 | Reload | File watcher wiring for save, atomic replace, chmod and delete |
 | Crash, quit and disable | #2 E28, E29, E34 |
@@ -626,7 +795,7 @@ failed sample index. No window listings or titles reach the artifact.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2 and #26.
+This table is the maintained example-to-layer map for issues #1, #2, #19 and #26.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -712,6 +881,39 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #2 E36 | R |
 | #2 E37 | X |
 | #2 U-switch-budget | L |
+| #19 E1 | P |
+| #19 E2 | P |
+| #19 E3 | P |
+| #19 E4 | P |
+| #19 E5 | P |
+| #19 E6 | P |
+| #19 E7 | P |
+| #19 E8 | P |
+| #19 E9 | P |
+| #19 E10 | P |
+| #19 E11 | X |
+| #19 E12 | P |
+| #19 E13 | P |
+| #19 E14 | P |
+| #19 E15 | P |
+| #19 E16 | P |
+| #19 E17 | P |
+| #19 E18 | P |
+| #19 E19 | P |
+| #19 E20 | P |
+| #19 E21 | P |
+| #19 E22 | P |
+| #19 E23 | P |
+| #19 E24 | P |
+| #19 E25 | P |
+| #19 E26 | P |
+| #19 E27 | P |
+| #19 E28 | R |
+| #19 E29 | J |
+| #19 E30 | X |
+| #19 E31 | P |
+| #19 E32 | X |
+| #19 U-quit-capture-drain | P |
 | #26 E1 | P |
 | #26 E2 | P |
 | #26 E3 | P |

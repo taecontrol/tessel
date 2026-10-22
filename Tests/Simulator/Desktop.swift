@@ -52,6 +52,7 @@ extension SimulatedMac {
             mac.scheduler.call("ApplicationPort.activate \(mac.apps[pid]?.alias ?? "app-unknown") pid=\(pid)")
             guard mac.scheduler.isActive, mac.apps[pid]?.terminated == false else { return }
             mac.front = pid
+            mac.recordFocusEffect()
             mac.post(.activated, pid: pid)
         }
         func isAlive(_ pid: Int32) -> Bool {
@@ -68,6 +69,14 @@ extension SimulatedMac {
             mac.assume(.cgOnScreenOrder)
             mac.scheduler.call("WindowOrderPort.onScreenOrder")
             return mac.visibleIDs()
+        }
+        nonisolated func windowLevels(_ windows: Set<UInt32>) -> [UInt32: Int] {
+            mac.assume(.windowLevels)
+            mac.scheduler.call("WindowOrderPort.windowLevels")
+            return Dictionary(uniqueKeysWithValues: windows.sorted().compactMap { id in
+                guard let window = mac.windows[id], !window.closed else { return nil }
+                return (id, window.spec.cgLayer)
+            })
         }
     }
     @MainActor struct Closet: ClosetPort {

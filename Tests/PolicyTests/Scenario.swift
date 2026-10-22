@@ -14,11 +14,16 @@ enum Layout: String, CaseIterable, Sendable { case off, stack, carousel }
     let rows: PublishedRows
     let keys = PressedKeys()
     private(set) var configurationPublications: [(at: Int, status: ConfigStatus)] = []
-    private let input = ConfigurationInput()
+    private let input: ConfigurationInput
     private let mac: SimulatedMac
+    private(set) var quitCompletions = 0
+    private(set) var quitReadyAt: Int?
 
-    init(on mac: SimulatedMac, configuration: Layout = .off) {
+    init(on mac: SimulatedMac, configuration: Layout = .off, text: String? = nil) {
         self.mac = mac
+        let input = ConfigurationInput()
+        self.input = input
+        input.data = text.map { Data($0.utf8) }
         rows = PublishedRows(now: { mac.scheduler.now })
         config = ConfigManager(path: "/scenario/tessel.toml", main: mac.scheduler.main, load: { [input] in
             if input.unreadable { throw CocoaError(.fileReadNoPermission) }
@@ -29,7 +34,7 @@ enum Layout: String, CaseIterable, Sendable { case off, stack, carousel }
                                 windowOrder: mac.windowOrder, scheduler: mac.scheduler, hotkeys: keys,
                                 fixtureOnly: true, motionPreferences: mac.motionPreferences, stage: mac.stage,
                                 pointerActivity: mac.pointerActivity) { mac.closetPort }
-        catalog = WindowCatalog(workspaces: workspaces, applications: mac.applications, ax: mac.ax, scheduler: mac.scheduler)
+        catalog = WindowCatalog(workspaces: workspaces, applications: mac.applications, ax: mac.ax, windowOrder: mac.windowOrder, scheduler: mac.scheduler)
         workspaces.catalog = catalog
         configurationPublications.append((mac.scheduler.now, config.status))
         config.onChange = { [weak self] status in
@@ -68,7 +73,15 @@ enum Layout: String, CaseIterable, Sendable { case off, stack, carousel }
     var configuration: ConfigStatus { config.status }
     var configurationWatchRequests: Int { input.watchRequests }
     var windowPublications: [PublishedRows.Publication] { rows.publications }
-    func quit() { mac.action("quit tessel"); workspaces.disable(reason: "quit") }
+    func quit() {
+        mac.action("quit tessel")
+        workspaces.prepareToQuit { [self] in finishQuit() }
+    }
+    private func finishQuit() {
+        quitReadyAt = mac.scheduler.now
+        workspaces.disable(reason: "quit")
+        quitCompletions += 1
+    }
 }
 
 @MainActor private final class ConfigurationInput { var data: Data?; var unreadable = false; var watchRequests = 0 }
@@ -139,8 +152,8 @@ struct ScenarioResult {
         mac.scheduler.writeOrder = writes
         schedule = [name, "writes=\(writes.rawValue)"]
     }
-    func startTessel(_ configuration: Layout = .off) -> Tessel {
-        let tessel = Tessel(on: mac, configuration: configuration)
+    func startTessel(_ configuration: Layout = .off, text: String? = nil) -> Tessel {
+        let tessel = Tessel(on: mac, configuration: configuration, text: text)
         tessels.append(tessel)
         return tessel
     }

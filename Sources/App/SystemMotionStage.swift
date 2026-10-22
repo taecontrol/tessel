@@ -87,6 +87,7 @@ final class SystemMotionStage: MotionStagePort {
     /// The longest the stage waits for WindowServer to draw the overlay.
     private static let drawLimit = 0.15
     private var standIns: [UInt32: StandIn] = [:]
+    private var stacking: [UInt32: CGFloat] = [:]
     /// One window's capture, measured once.
     private final class Capture: @unchecked Sendable {
         let sample: CMSampleBuffer
@@ -144,6 +145,11 @@ final class SystemMotionStage: MotionStagePort {
     /// Captures that arrived this session, for a move to install.
     private var ready: [UInt32: Capture] = [:]
     private var background: Task<Capture?, Never>?
+    /// Unlike the session's image tasks, this count survives `clear()`. A
+    /// cancelled Swift task does not cancel replayd's native request.
+    private var pendingCaptures = 0
+    var capturesPending: Bool { pendingCaptures > 0 }
+    var onCapturesSettled: (@MainActor @Sendable () -> Void)?
     private var refreshes: [UInt32: Int] = [:]
     private var retried = Set<UInt32>()
     private var revealing = 0
@@ -187,6 +193,13 @@ final class SystemMotionStage: MotionStagePort {
         return CGRect(x: main.frame.minX, y: menu, width: main.frame.width, height: main.frame.height - menu)
     }
 
+    func order(_ windows: [UInt32]) {
+        stacking = Dictionary(uniqueKeysWithValues: windows.enumerated().map { ($0.element, CGFloat(windows.count - $0.offset)) })
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        for (id, standIn) in standIns { standIn.container.zPosition = stacking[id] ?? 1 }
+        CATransaction.commit()
+    }
+
     func capture(_ windows: Set<UInt32>, background excluding: Set<UInt32>?) {
         let token = session
         if activity == nil {
@@ -208,7 +221,7 @@ final class SystemMotionStage: MotionStagePort {
             }
         }
         if let excluding, background == nil {
-            background = Task { [weak self] in await self?.captureBackground(excluding: excluding) }
+            background = Task { [weak self] in await self?.captureBackground(excluding: excluding, session: token) }
         }
     }
 
@@ -328,7 +341,8 @@ final class SystemMotionStage: MotionStagePort {
         check()
     }
 
-    func reveal(_ frames: [UInt32: CGRect], hidden: Set<UInt32>, revealed: @escaping @MainActor @Sendable () -> Void) {
+    func reveal(_ frames: [UInt32: CGRect], hidden: Set<UInt32>, willReveal: @escaping @MainActor @Sendable () -> Void,
+                revealed: @escaping @MainActor @Sendable () -> Void) {
         revealing += 1
         let token = revealing, session = self.session
         func check() {
@@ -346,6 +360,7 @@ final class SystemMotionStage: MotionStagePort {
             // The stage fades into the real windows, now in place under it:
             // the curve's last points, the shadows and the focus look change
             // over a few frames instead of in one.
+            willReveal()
             CATransaction.begin(); CATransaction.setDisableActions(true)
             CATransaction.setCompletionBlock {
                 MainActor.assumeIsolated { if token == self.revealing, session == self.session { revealed() } }
@@ -405,6 +420,7 @@ final class SystemMotionStage: MotionStagePort {
         ready.removeAll()
         refreshes.removeAll()
         retried.removeAll()
+        stacking.removeAll()
         background?.cancel(); background = nil
         lastMove = nil
         revealing += 1
@@ -421,6 +437,11 @@ final class SystemMotionStage: MotionStagePort {
     }
 
     // MARK: Captures
+
+    private func captureSettled() {
+        pendingCaptures -= 1
+        if pendingCaptures == 0 { onCapturesSettled?() }
+    }
 
     private func shareable(_ id: UInt32) async -> SCWindow? {
         if let window = content?.windows.first(where: { $0.windowID == id }) { return window }
@@ -450,6 +471,9 @@ final class SystemMotionStage: MotionStagePort {
     /// stale after a resize, and ScreenCaptureKit fits the window into the
     /// output, which would draw it smaller.
     private func captureWindow(_ id: UInt32, session token: Int) async -> Capture? {
+        guard token == session else { return nil }
+        pendingCaptures += 1
+        defer { captureSettled() }
         guard let window = await shareable(id), token == session, let size = liveSize(id) else { return nil }
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let configuration = SCStreamConfiguration()
@@ -469,14 +493,19 @@ final class SystemMotionStage: MotionStagePort {
         return image
     }
 
-    private func captureBackground(excluding: Set<UInt32>) async -> Capture? {
+    private func captureBackground(excluding: Set<UInt32>, session token: Int) async -> Capture? {
+        guard token == session else { return nil }
+        pendingCaptures += 1
+        defer { captureSettled() }
         // A window opened since the last fetch would otherwise stay in the
         // backdrop, frozen where it opened.
         if content == nil || !excluding.isSubset(of: Set(content?.windows.map(\.windowID) ?? [])) {
             content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         }
-        guard let content, let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) else { return nil }
+        guard token == session, let content, let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) else { return nil }
         let floating = Int(CGWindowLevelForKey(.floatingWindow))
+        // The policy excludes normal-level pinned floats as well as tiles;
+        // their stand-ins share the at-rest stacking order above this backdrop.
         let excluded = content.windows.filter {
             excluding.contains($0.windowID) || $0.owningApplication?.processID == getpid() || $0.windowLayer >= floating
         }
@@ -542,6 +571,7 @@ final class SystemMotionStage: MotionStagePort {
 
     private func place(_ id: UInt32, image: Capture, at rect: CGRect) {
         let standIn = standIns[id] ?? StandIn()
+        standIn.container.zPosition = stacking[id] ?? 1
         standIn.rect = rect
         standIn.path = nil
         standIn.container.frame = rect

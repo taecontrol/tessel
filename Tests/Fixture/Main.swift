@@ -216,6 +216,24 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 }
                 if background { window.orderBack(nil) }
             }
+        case "windowLevels":
+            let ordinary = makeWindow(key: "ordinary", kind: "standard")
+            let dialog = makeWindow(key: "dialog", kind: "dialog")
+            makeWindow(key: "panel", kind: "panel")
+            ordinary.level = .normal
+            dialog.level = .normal
+            let popup = NSWindow(contentRect: NSRect(x: 140, y: 180, width: 376, height: 22),
+                                 styleMask: .borderless, backing: .buffered, defer: false)
+            popup.isReleasedWhenClosed = false
+            popup.level = .normal
+            popup.animationBehavior = .none
+            ordinary.addChildWindow(popup, ordered: .above)
+            popup.orderFront(nil)
+            windows["popup"] = popup
+            let status = makeWindow(key: "status", kind: "dialog", show: false)
+            status.level = .statusBar
+            status.orderFront(nil)
+            ordinary.makeKeyAndOrderFront(nil)
         case "detachTab": windows[key]?.moveTabToNewWindow(nil)
         case "tab": windows[key]?.makeKeyAndOrderFront(nil)
         case "windowList":
@@ -436,10 +454,11 @@ final class Fixture: NSObject, NSApplicationDelegate {
         if kind != "fixed" { style.insert(.resizable) }
         let rect = NSRect(x: 100, y: 120, width: 480, height: 300)
         let window: NSWindow
-        if kind == "panel" {
+        if kind == "panel" || kind == "normalPanel" {
             window = NSPanel(contentRect: rect, styleMask: style.union(.utilityWindow), backing: .buffered, defer: false)
             (window as? NSPanel)?.isFloatingPanel = true
             (window as? NSPanel)?.hidesOnDeactivate = false
+            if kind == "normalPanel" { window.level = .normal }
         } else if kind == "dialog" {
             window = DialogWindow(contentRect: rect, styleMask: style, backing: .buffered, defer: false)
         } else if kind == "newTabButton" {

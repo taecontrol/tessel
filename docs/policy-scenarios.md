@@ -88,6 +88,10 @@ IDs, failed/non-array reads and retained closed handles. They do not publish
 catalog rows or decide workspace membership. The production catalog must
 interpret the resulting port calls.
 
+`WindowSpec` defaults `AXFloatingWindow` panels to CG layer 3 and other windows
+to layer 0, as pinned by `window-levels`. Set `cgLayer` explicitly for an app's
+level override, such as a normal-level panel, or for a system surface.
+
 Content tabs flatten their selected page: an empty page contributes no contents
 or child, while a populated page exposes its static-text leaf in both AXContents
 and AXChildren. The content handles remain distinct from the tab buttons.
@@ -122,6 +126,9 @@ window with both memberships is visible and is no longer in the closet.
 confirmed. Completion can follow a main/raise write (the default), arrive as a
 native event, or wait for another activation request. Retry scenarios select
 the last choice explicitly; native completion does not require that retry.
+The choice belongs to the app, not to the request: deferring an app again with
+another choice also changes the one an earlier request is still waiting for.
+Scenarios that check what completes a pending request keep one choice per app.
 
 `beginMinimize` and `finishMinimize` separate the pending Dock transition from
 its completion. AXMain or AXRaise can cancel the pending operation. After

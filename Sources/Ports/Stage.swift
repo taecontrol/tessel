@@ -15,6 +15,9 @@ package protocol MotionStagePort: AnyObject {
     /// without those windows. A window already captured for this stage is not
     /// captured again.
     func capture(_ windows: Set<UInt32>, background excluding: Set<UInt32>?)
+    /// Front-to-back order of the stand-ins at rest. Retargeting can change
+    /// this order without requesting another capture.
+    func order(_ windows: [UInt32])
     /// Shows every captured stand-in at its rect in one frame, once all
     /// requested captures have arrived. False when a capture failed or the
     /// stage was cleared meanwhile.
@@ -32,10 +35,19 @@ package protocol MotionStagePort: AnyObject {
     func cover(_ covered: @escaping @MainActor @Sendable () -> Void)
     /// Calls `revealed` once WindowServer shows each window at its frame and
     /// each hidden window off screen. Accessibility accepts a placement
-    /// before WindowServer draws it. A later move or a clear cancels it.
-    func reveal(_ frames: [UInt32: CGRect], hidden: Set<UInt32>, revealed: @escaping @MainActor @Sendable () -> Void)
+    /// before WindowServer draws it. Calls `willReveal` at that boundary so
+    /// stand-in order can follow native order before the fade. A later move
+    /// or a clear cancels it.
+    func reveal(_ frames: [UInt32: CGRect], hidden: Set<UInt32>, willReveal: @escaping @MainActor @Sendable () -> Void,
+                revealed: @escaping @MainActor @Sendable () -> Void)
     /// Captures a window again once it has redrawn, and crossfades to it.
     func refresh(_ window: UInt32)
     /// Removes every stand-in; the real windows show.
     func clear()
+    /// Native capture work still outstanding, including shareable-content
+    /// fetches and refreshes from a cleared session. Clearing cannot settle it.
+    var capturesPending: Bool { get }
+    /// Called when the last outstanding capture completes or fails. The
+    /// owner clears this callback when it no longer needs to wait.
+    var onCapturesSettled: (@MainActor @Sendable () -> Void)? { get set }
 }

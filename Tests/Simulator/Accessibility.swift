@@ -108,6 +108,7 @@ extension SimulatedMac {
         func set(_ attribute: AXAttribute, of element: AXElement, to value: AXValue) -> AXStatus {
             guard let handle = handle(element, operation: "set \(attribute.rawValue)=\(mac.describe(value))") else { return .cannotComplete }
             let result = unavailable(handle) ?? mac.write(attribute, node: handle.node, value: value)
+            if attribute == .frontmost || attribute == .main { mac.recordFocusEffect() }
             finish(handle, operation: "set \(attribute.rawValue)", status: result)
             return result
         }
@@ -133,6 +134,8 @@ extension SimulatedMac {
                 if case .window(let id) = handle.node { status = mac.selectFromAX(id, raising: true) }
                 else { mac.scheduler.failUnmodeled("AccessibilityPort.perform \(action.rawValue) \(mac.name(handle.node))"); status = .cannotComplete }
             }
+            let raisedWindow: UInt32? = if case .window(let id) = handle.node { id } else { nil }
+            mac.recordFocusEffect(raisedWindow: raisedWindow)
             finish(handle, operation: "perform \(action.rawValue)", status: status)
             return status
         }

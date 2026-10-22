@@ -8,10 +8,29 @@ struct WindowObservation: Sendable {
     var record: WindowRecord
     let frame: CGRect
     let parent: UInt32?
+    var resizable = true
     var replaces: UInt32? = nil
 }
 
 enum CatalogChange: Sendable, Equatable { case snapshot, activation, focus, restored }
+
+struct WindowFocusObservation: Sendable {
+    let window: UInt32?
+    let frontmost: Bool
+}
+
+enum BackgroundRaise: Sendable, Equatable {
+    case finished
+    /// The app may still hold an activation tessel requested; raising it now
+    /// could complete that activation (deferred-ax-activation).
+    case awaitingActivation
+}
+
+struct RailPresentationResult: Sendable {
+    var frame: CGRect?
+    /// Nil when presentation stopped before publishing a fresh native read.
+    var focus: WindowFocusObservation?
+}
 
 @MainActor
 final class WindowCatalog {
@@ -19,15 +38,17 @@ final class WindowCatalog {
     private let fixtureBundleID: String?
     private let applications: any ApplicationPort
     private let ax: any AccessibilityPort
+    private let windowOrder: any WindowOrderPort
     private let scheduler: any SchedulingPort
     private var lifecycle: (any ApplicationObservation)?
     private var apps: [Int32: AppWindows] = [:]
 
-    init(workspaces: Workspaces, applications: any ApplicationPort, ax: any AccessibilityPort,
+    init(workspaces: Workspaces, applications: any ApplicationPort, ax: any AccessibilityPort, windowOrder: any WindowOrderPort,
          scheduler: any SchedulingPort, fixtureBundleID: String? = nil) {
         self.workspaces = workspaces
         self.applications = applications
         self.ax = ax
+        self.windowOrder = windowOrder
         self.scheduler = scheduler
         self.fixtureBundleID = fixtureBundleID
         lifecycle = applications.observe { [weak self] event, app in self?.appChanged(event, app: app) }
@@ -41,13 +62,14 @@ final class WindowCatalog {
         if let existing = apps[pid] { existing.refresh(hidden: app.hidden); return }
         let generation = UUID()
         let worker = AppWindows(pid: pid, name: app.name ?? "Application", bundleId: app.bundleID ?? "",
-                                hidden: app.hidden, generation: generation, ax: ax, scheduler: scheduler) { [weak self, scheduler] rows, focused, frontmost, change, activation in
+                                hidden: app.hidden, generation: generation, ax: ax, windowOrder: windowOrder, scheduler: scheduler) { [weak self, scheduler] rows, focused, frontmost, activationPending, change, activation in
             scheduler.main.async {
                 guard let self, let worker = self.apps[pid], worker.generation == generation else { return }
                 // An activation can wait behind a newer keyboard selection in
                 // either queue. Its facts remain valid; its old intent does not.
                 let received: CatalogChange = change == .activation && !worker.ownsFocusIntent(activation) ? .snapshot : change
-                self.workspaces.update(pid: pid, observations: rows, focused: focused, frontmost: frontmost, change: received)
+                self.workspaces.update(pid: pid, observations: rows, focused: focused, frontmost: frontmost,
+                                       activationPending: activationPending, change: received)
             }
         }
         apps[pid] = worker
@@ -72,14 +94,24 @@ final class WindowCatalog {
     }
 
     func presentRail(pid: Int32, id: UInt32, frame: CGRect?, position: Bool, resize: Bool, focus: Bool, screenRight: CGFloat,
-                     completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
-        guard let app = apps[pid] else { completion(nil); return }
+                     completion: @escaping @MainActor @Sendable (RailPresentationResult) -> Void) {
+        guard let app = apps[pid] else { completion(RailPresentationResult()); return }
         app.presentRail(id:id,target:frame,position:position,resize:resize,focus:focus,screenRight:screenRight,completion:completion)
     }
 
     func windowIsGone(pid: Int32, id: UInt32, completion: @escaping @MainActor @Sendable (Bool) -> Void) {
         guard let app = apps[pid] else { completion(false); return }
         app.windowIsGone(id: id, completion: completion)
+    }
+
+    func refreshFrame(pid: Int32, id: UInt32, completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
+        guard let app = apps[pid] else { completion(nil); return }
+        app.refreshFrame(id: id, completion: completion)
+    }
+
+    func raiseBackground(pid: Int32, id: UInt32, completion: @escaping @MainActor @Sendable (BackgroundRaise) -> Void) {
+        guard let app = apps[pid] else { completion(.finished); return }
+        app.raiseBackground(id: id, completion: completion)
     }
 
     func returnInside(ids: Set<UInt32>, area: CGRect) { apps.keys.sorted().compactMap { apps[$0] }.forEach { $0.returnInside(ids:ids,area:area) } }
@@ -92,10 +124,14 @@ final class WindowCatalog {
 private enum AXReadError: Error { case unresponsive, gone, changed }
 
 private struct WindowFacts {
+    // Layer 3 holds apps' own floating utility panels, inspectors and palettes.
+    private static let managedWindowLevels: Set<Int> = [0, 3]
+
     let id: UInt32
     let minimized: Bool
     var fullscreen: Bool
     let subrole: String
+    let level: Int
     let resizable: Bool
     let tabs: Int
     var frame: CGRect
@@ -109,13 +145,19 @@ private struct WindowFacts {
     func record(app: String, bundleId: String, hidden: Bool) -> WindowRecord {
         let state: WindowState
         var reason: String
-        if fullscreen { state = .fullscreen; reason = "native fullscreen" }
+        if !Self.managedWindowLevels.contains(level) { state = .ignored; reason = "window level \(level)" }
+        // AXFullScreen remains authoritative while a native transition exposes
+        // a temporary root with an unknown subrole.
+        else if fullscreen { state = .fullscreen; reason = "native fullscreen" }
+        else if !["AXStandardWindow", "AXDialog", "AXSystemDialog", "AXFloatingWindow"].contains(subrole) {
+            state = .ignored; reason = subrole
+        }
         else if minimized { state = .minimized; reason = "minimized" }
         else if hidden { state = .hidden; reason = "application hidden" }
         else if subrole != "AXStandardWindow" { state = .floats; reason = subrole }
         else if !resizable { state = .floats; reason = "fixed size" }
         else { state = .tiled; reason = "standard window" }
-        if tabs > 1 { reason += "; \(tabs) native tabs" }
+        if tabs > 1 && state != .ignored { reason += "; \(tabs) native tabs" }
         return WindowRecord(id: id, app: app, bundleId: bundleId, state: state, reason: reason, tabs: tabs)
     }
 }
@@ -129,8 +171,9 @@ private final class AppWindows: @unchecked Sendable {
     private let bundleId: String
     private let queue: any SerialLane
     private let ax: any AccessibilityPort
+    private let windowOrder: any WindowOrderPort
     private let scheduler: any SchedulingPort
-    private let publish: @Sendable ([WindowObservation], UInt32?, Bool, CatalogChange, UUID?) -> Void
+    private let publish: @Sendable ([WindowObservation], UInt32?, Bool, Bool, CatalogChange, UUID?) -> Void
     // All mutable state below belongs to queue, including AX handles.
     private let application: AXElement
     private var observer: (any AXObservation)?
@@ -164,6 +207,18 @@ private final class AppWindows: @unchecked Sendable {
     // AppKit can finish an activation after AX accepted it and then make the
     // app's previous key window key again over tessel's request.
     private var awaitedActivation: (intent: UUID, id: UInt32, expiry: any ScheduledWork)?
+    // AX can accept AXFrontmost and leave the activation pending until a main
+    // or raise write, an asynchronous completion, or another activation request
+    // (deferred-ax-activation). A newer selection cancels the writes that
+    // follow a request, not the request, and nothing reports one abandoned;
+    // the app becoming active by other means is not known to consume it.
+    // A background raise could then complete it over the user's selection.
+    // It is resolved once tessel's own focus writes have followed its latest
+    // request and the app has been read frontmost, or when the read that
+    // follows an unfollowed request, in the sequence that issued it, already
+    // finds the app frontmost (`requestActivation`).
+    private enum ActivationRequest { case resolved, unfollowed, followed }
+    private var activationRequest = ActivationRequest.resolved
     private var constrained = Set<UInt32>()
     private struct Validation {
         let area: CGRect
@@ -173,8 +228,8 @@ private final class AppWindows: @unchecked Sendable {
     private var validations: [UInt32: Validation] = [:]
 
     init(pid: Int32, name: String, bundleId: String, hidden: Bool, generation: UUID,
-         ax: any AccessibilityPort, scheduler: any SchedulingPort,
-         publish: @escaping @Sendable ([WindowObservation], UInt32?, Bool, CatalogChange, UUID?) -> Void) {
+         ax: any AccessibilityPort, windowOrder: any WindowOrderPort, scheduler: any SchedulingPort,
+         publish: @escaping @Sendable ([WindowObservation], UInt32?, Bool, Bool, CatalogChange, UUID?) -> Void) {
         self.pid = pid
         self.name = name
         self.bundleId = bundleId
@@ -183,6 +238,7 @@ private final class AppWindows: @unchecked Sendable {
         self.generation = generation
         self.publish = publish
         self.ax = ax
+        self.windowOrder = windowOrder
         self.scheduler = scheduler
         presentationLock = scheduler.makeLock()
         application = ax.application(pid)
@@ -429,8 +485,11 @@ private final class AppWindows: @unchecked Sendable {
         var visited = 0
         let tabs = try chrome(window, depth: 0, visited: &visited, sheets: &sheets, groups: &tabGroups)
         let frame = try frame(window)
+        // Reinspection owns this native fact, rather than layout reconciliation.
+        // A missing CG description is an incomplete read, never layer zero.
+        guard let level = windowOrder.windowLevels([id])[id] else { throw AXReadError.changed }
         handles[id] = window
-        result.append(WindowFacts(id: id, minimized: minimized, fullscreen: fullscreen, subrole: subrole,
+        result.append(WindowFacts(id: id, minimized: minimized, fullscreen: fullscreen, subrole: subrole, level: level,
                                   resizable: resizable.value ?? false, tabs: max(1, tabs), frame: frame, parent: parent, nativeTabGroups: tabGroups))
         elements.append(contentsOf: tabGroups)
         for sheet in sheets { try inspect(sheet, into: &result, elements: &elements, handles: &handles, parent: id) }
@@ -475,7 +534,8 @@ private final class AppWindows: @unchecked Sendable {
         })
     }
 
-    private func publishSnapshot(replacing replacements: [UInt32: UInt32] = [:]) {
+    @discardableResult
+    private func publishSnapshot(replacing replacements: [UInt32: UInt32] = [:]) -> WindowFocusObservation {
         var focused = focusedWindow()
         if change == .activation, let awaited = awaitedActivation {
             awaited.expiry.cancel()
@@ -491,6 +551,7 @@ private final class AppWindows: @unchecked Sendable {
         }
         let frontmost = (try? value(application, .frontmost)?.bool) == true
         if frontmost {
+            if activationRequest == .followed { activationRequest = .resolved }
             railActivationCheck?.work.cancel()
             railActivationCheck = nil
         }
@@ -500,11 +561,27 @@ private final class AppWindows: @unchecked Sendable {
                 record.state = .floats
                 record.reason = "cannot fill the screen"
             }
-            return WindowObservation(record: record, frame: fact.frame, parent: fact.parent, replaces: replacements[fact.id])
+            return WindowObservation(record: record, frame: fact.frame, parent: fact.parent, resizable: fact.resizable, replaces: replacements[fact.id])
         }
-        publish(observations, focused == 0 ? nil : focused, frontmost, change, activationToken)
+        publish(observations, focused == 0 ? nil : focused, frontmost, activationRequest != .resolved, change, activationToken)
         change = .snapshot
         activationToken = nil
+        return WindowFocusObservation(window: focused == 0 ? nil : focused, frontmost: frontmost)
+    }
+
+    /// Request activation, then `follow` it with tessel's own focus writes,
+    /// returning whether they all ran. When they stop early, the frontmost read
+    /// that follows this request tells whether it is pending. A presentation
+    /// that issued no request learns nothing about an older one from that read.
+    private func requestActivation(followedBy follow: () throws -> Bool) throws -> Bool {
+        activationRequest = .unfollowed
+        defer {
+            if activationRequest == .unfollowed, (try? value(application, .frontmost)?.bool) == true { activationRequest = .resolved }
+        }
+        try check(ax.set(.frontmost, of: application, to: .bool(true)))
+        guard try follow() else { return false }
+        activationRequest = .followed
+        return true
     }
 
     private func focusedWindow() -> UInt32 {
@@ -549,6 +626,28 @@ private final class AppWindows: @unchecked Sendable {
         }
     }
 
+    /// Publish fresh geometry before the caller changes membership. Earlier
+    /// snapshots on this lane reach main first, while the window still floats.
+    func refreshFrame(id: UInt32, completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
+        queue.async { [self] in
+            var observed: CGRect?
+            defer {
+                let result = observed
+                scheduler.main.async { completion(result) }
+            }
+            guard !stopped, let window = elementsByID[id] else { return }
+            do {
+                guard try canPresent(window, id: id) else { return }
+                let current = try frame(window)
+                guard current.width > 0, current.height > 0, try canPresent(window, id: id),
+                      let index = facts.firstIndex(where: { $0.id == id }) else { return }
+                facts[index].frame = current
+                publishSnapshot()
+                observed = current
+            } catch { /* An unanswered read cannot choose a preset from stale geometry. */ }
+        }
+    }
+
     func present(id: UInt32, area: CGRect?, focus: Bool, completion: @escaping @MainActor @Sendable () -> Void) {
         let token = presentationLock.withLock { presentation }
         queue.async { [self] in
@@ -568,21 +667,45 @@ private final class AppWindows: @unchecked Sendable {
                 }
                 guard presentationLock.withLock({ presentation == token }), try canPresent(window, id: id) else { return }
                 if focus {
-                    try check(ax.set(.frontmost, of: application, to: .bool(true)))
-                    guard presentationLock.withLock({ presentation == token }), isNativeFront(window, id: id) else { return }
-                    try check(ax.set(.main, of: window, to: .bool(true)))
-                    // AXMain leaves a completed minimize alone; AXRaise restores it.
-                    guard presentationLock.withLock({ presentation == token }), try value(window, .minimized)?.bool != true,
-                          isNativeFront(window, id: id) else { return }
-                    try check(ax.perform(.raise, on: window))
+                    let followed = try requestActivation {
+                        guard presentationLock.withLock({ presentation == token }), isNativeFront(window, id: id) else { return false }
+                        try check(ax.set(.main, of: window, to: .bool(true)))
+                        // AXMain leaves a completed minimize alone; AXRaise restores it.
+                        guard presentationLock.withLock({ presentation == token }), try value(window, .minimized)?.bool != true,
+                              isNativeFront(window, id: id) else { return false }
+                        try check(ax.perform(.raise, on: window))
+                        return true
+                    }
+                    guard followed else { return }
                 }
                 publishSnapshot()
             } catch { /* Keep the last complete classification when the app is busy. */ }
         }
     }
 
+    /// AXRaise on a frontmost app's root may select it (ax-focus). A background
+    /// raise only reorders below the active window (ax-raise-across-applications),
+    /// unless it completes an activation still pending in that app.
+    func raiseBackground(id: UInt32, completion: @escaping @MainActor @Sendable (BackgroundRaise) -> Void) {
+        let token = presentationLock.withLock { presentation }
+        queue.async { [self] in
+            var result = BackgroundRaise.finished
+            defer {
+                let outcome = result
+                scheduler.main.async { completion(outcome) }
+            }
+            guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
+            guard activationRequest == .resolved else { result = .awaitingActivation; return }
+            do {
+                guard try canPresent(window, id: id), try value(application, .frontmost)?.bool == false,
+                      presentationLock.withLock({ presentation == token }) else { return }
+                try check(ax.perform(.raise, on: window))
+            } catch { /* A busy or newly frontmost app keeps its native order. */ }
+        }
+    }
+
     func presentRail(id: UInt32, target: CGRect?, position: Bool, resize: Bool, focus: Bool, screenRight: CGFloat,
-                     completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
+                     completion: @escaping @MainActor @Sendable (RailPresentationResult) -> Void) {
         let token = presentationLock.withLock { presentation }
         queue.async { [self] in
             presentRail(id:id,target:target,position:position,resize:resize,focus:focus,screenRight:screenRight,token:token,failures:0,completion:completion)
@@ -590,10 +713,14 @@ private final class AppWindows: @unchecked Sendable {
     }
 
     private func presentRail(id: UInt32, target: CGRect?, position: Bool, resize: Bool, focus: Bool, screenRight: CGFloat, token: UUID,
-                             failures: Int, completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
+                             failures: Int, completion: @escaping @MainActor @Sendable (RailPresentationResult) -> Void) {
         var accepted: CGRect?, retrying = false
+        var observedFocus: WindowFocusObservation?
         defer {
-            if !retrying { let result = accepted; scheduler.main.async { completion(result) } }
+            if !retrying {
+                let result = RailPresentationResult(frame: accepted, focus: observedFocus)
+                scheduler.main.async { completion(result) }
+            }
         }
         guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
         do {
@@ -632,12 +759,15 @@ private final class AppWindows: @unchecked Sendable {
             if focus {
                 guard try canPresent(window,id:id) else { return }
                 let active = try value(application, .frontmost)?.bool == true
-                try check(ax.set(.frontmost, of: application, to: .bool(true)))
-                guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return }
-                try check(ax.set(.main, of: window, to: .bool(true)))
-                guard presentationLock.withLock({ presentation == token }), try value(window, .minimized)?.bool != true,
-                      isNativeFront(window,id:id) else { return }
-                try check(ax.perform(.raise, on: window))
+                let followed = try requestActivation {
+                    guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return false }
+                    try check(ax.set(.main, of: window, to: .bool(true)))
+                    guard presentationLock.withLock({ presentation == token }), try value(window, .minimized)?.bool != true,
+                          isNativeFront(window,id:id) else { return false }
+                    try check(ax.perform(.raise, on: window))
+                    return true
+                }
+                guard followed else { return }
                 awaitedActivation?.expiry.cancel()
                 awaitedActivation = nil
                 if !active {
@@ -658,18 +788,20 @@ private final class AppWindows: @unchecked Sendable {
                           (try? self.canPresent(window,id:id)) == true,
                           (try? self.value(self.application,.frontmost)?.bool) != true else { return }
                     do {
-                        try self.check(self.ax.set(.frontmost, of: self.application, to: .bool(true)))
-                        guard self.presentationLock.withLock({ self.presentation == token }), self.isNativeFront(window,id:id) else { return }
-                        try self.check(self.ax.set(.main, of: window, to: .bool(true)))
-                        guard self.presentationLock.withLock({ self.presentation == token }), try self.value(window, .minimized)?.bool != true,
-                              self.isNativeFront(window,id:id) else { return }
-                        try self.check(self.ax.perform(.raise, on: window))
-                        self.publishSnapshot()
+                        let followed = try self.requestActivation {
+                            guard self.presentationLock.withLock({ self.presentation == token }), self.isNativeFront(window,id:id) else { return false }
+                            try self.check(self.ax.set(.main, of: window, to: .bool(true)))
+                            guard self.presentationLock.withLock({ self.presentation == token }), try self.value(window, .minimized)?.bool != true,
+                                  self.isNativeFront(window,id:id) else { return false }
+                            try self.check(self.ax.perform(.raise, on: window))
+                            return true
+                        }
+                        if followed { self.publishSnapshot() }
                     } catch { /* Another app and newer focus intents remain independent. */ }
                 }
                 railActivationCheck = (token,check)
             }
-            publishSnapshot()
+            observedFocus = publishSnapshot()
         } catch AXReadError.unresponsive where target != nil && accepted == nil && failures < 4 {
             // A busy or briefly hung app can time out every write of the
             // render that moved it, leaving a stale frame over its
@@ -732,7 +864,8 @@ private final class AppWindows: @unchecked Sendable {
     /// Native hide, minimize, and fullscreen can begin between a snapshot and a
     /// queued write. Never let an old presentation undo the user's operation.
     private func canPresent(_ window: AXElement, id: UInt32) throws -> Bool {
-        guard !hidden, try value(application, .hidden)?.bool != true,
+        guard facts.first(where: { $0.id == id })?.record(app: name, bundleId: bundleId, hidden: hidden).state != .ignored,
+              !hidden, try value(application, .hidden)?.bool != true,
               try value(window, .minimized)?.bool != true,
               try value(window, .fullscreen)?.bool != true else { return false }
         return isNativeFront(window, id: id)

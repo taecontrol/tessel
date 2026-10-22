@@ -56,6 +56,7 @@ struct NativeContractReply: Codable {
         let roleError: Int32
         let subrole: String?
         let subroleError: Int32
+        let layer: Int?
         let frame: [Double]
         let frameError: Int32
         let minimized: Bool?
@@ -185,9 +186,7 @@ extension Acceptance {
         }
 
         func other(prohibited: Bool = false) throws -> FixtureSession {
-            let session = try FixtureSession(directory: harness.directory, number: harness.otherFixtures.count + 1, prohibited: prohibited)
-            harness.otherFixtures.append(session)
-            return session
+            try harness.other(prohibited: prohibited)
         }
 
         @discardableResult

@@ -5,6 +5,7 @@ import Ports
 extension SimulatedMac {
     package enum StageEventKind: Sendable, Equatable {
         case capture(UInt32)
+        case order([UInt32])
         case background
         case show([UInt32: CGRect])
         case move([UInt32: CGRect], duration: Int)
@@ -19,9 +20,20 @@ extension SimulatedMac {
         package let at: Int
         package let kind: StageEventKind
     }
+    /// What policy asked for, even if an adapter deduplicates the work or a
+    /// later clear cancels it. Events above describe completed native work.
+    package struct StageCaptureRequest: Sendable {
+        package let at: Int
+        package let windows: Set<UInt32>
+        package let backgroundExcluding: Set<UInt32>?
+        package let refreshing: Bool
+    }
     struct StageState {
         var screenRecording = true
         var events: [StageEvent] = []
+        var captureRequests: [StageCaptureRequest] = []
+        var pendingCaptures = 0
+        var onCapturesSettled: (@MainActor @Sendable () -> Void)?
         var session = 0
         /// Captures are serial, like ScreenCaptureKit's.
         var captureCost = 14
@@ -37,6 +49,13 @@ extension SimulatedMac {
 
     @MainActor package var stage: any MotionStagePort { Stage(mac: self) }
     @MainActor package var stageEvents: [StageEvent] { stageState.events }
+    @MainActor package var stageCaptureRequests: [StageCaptureRequest] { stageState.captureRequests }
+    /// Chooses when the contracted async capture completion arrives. Clearing
+    /// the overlay invalidates its image, not this outstanding native reply.
+    @MainActor package func setStageCaptureCost(milliseconds: Int) {
+        precondition(milliseconds > 0)
+        stageState.captureCost = milliseconds
+    }
     /// Screen Recording, which the stage needs.
     @MainActor package func setScreenRecording(_ granted: Bool) {
         action("Screen Recording=\(granted)")
@@ -44,7 +63,10 @@ extension SimulatedMac {
     }
     /// Failure injection: a window ScreenCaptureKit cannot capture.
     @MainActor package func failCapture(of id: UInt32) { stageState.failing.insert(id) }
-    @MainActor package func clearStageHistory() { stageState.events.removeAll() }
+    @MainActor package func clearStageHistory() {
+        stageState.events.removeAll()
+        stageState.captureRequests.removeAll()
+    }
 
     @MainActor private func recordStage(_ kind: StageEventKind) {
         stageState.events.append(StageEvent(at: scheduler.now, kind: kind))
@@ -73,15 +95,37 @@ extension SimulatedMac {
             mac.recordStage(.accessRequest)
         }
 
+        var capturesPending: Bool { mac.stageState.pendingCaptures > 0 }
+        var onCapturesSettled: (@MainActor @Sendable () -> Void)? {
+            get { mac.stageState.onCapturesSettled }
+            set { mac.stageState.onCapturesSettled = newValue }
+        }
+
+        private func completeCapture(after milliseconds: Int, _ completed: @escaping @MainActor @Sendable () -> Void) {
+            mac.stageState.pendingCaptures += 1
+            mac.scheduler.main.after(milliseconds: milliseconds) { [mac] in
+                completed()
+                mac.stageState.pendingCaptures -= 1
+                if mac.stageState.pendingCaptures == 0 { mac.stageState.onCapturesSettled?() }
+            }
+        }
+
+        func order(_ windows: [UInt32]) {
+            mac.scheduler.call("MotionStagePort.order")
+            mac.recordStage(.order(windows))
+        }
+
         func capture(_ windows: Set<UInt32>, background excluding: Set<UInt32>?) {
             mac.assume(.stageWholeWindowCapture)
+            mac.stageState.captureRequests.append(StageCaptureRequest(at: mac.scheduler.now, windows: windows,
+                backgroundExcluding: excluding, refreshing: false))
             mac.scheduler.call("MotionStagePort.capture")
             let session = mac.stageState.session
             for id in windows.sorted() where mac.stageState.captured[id] == nil {
                 let done = max(mac.scheduler.now, mac.stageState.busyUntil) + mac.stageState.captureCost
                 mac.stageState.busyUntil = done
                 mac.stageState.captured[id] = done
-                mac.scheduler.main.after(milliseconds: done - mac.scheduler.now) { [mac] in
+                completeCapture(after: done - mac.scheduler.now) { [mac] in
                     guard mac.stageState.session == session else { return }
                     mac.recordStage(.capture(id))
                 }
@@ -90,7 +134,7 @@ extension SimulatedMac {
                 let done = max(mac.scheduler.now, mac.stageState.busyUntil) + mac.stageState.captureCost * 3
                 mac.stageState.busyUntil = done
                 mac.stageState.backgroundReady = done
-                mac.scheduler.main.after(milliseconds: done - mac.scheduler.now) { [mac] in
+                completeCapture(after: done - mac.scheduler.now) { [mac] in
                     guard mac.stageState.session == session else { return }
                     mac.recordStage(.background)
                 }
@@ -140,13 +184,15 @@ extension SimulatedMac {
             }
         }
 
-        func reveal(_ frames: [UInt32: CGRect], hidden: Set<UInt32>, revealed: @escaping @MainActor @Sendable () -> Void) {
+        func reveal(_ frames: [UInt32: CGRect], hidden: Set<UInt32>, willReveal: @escaping @MainActor @Sendable () -> Void,
+                    revealed: @escaping @MainActor @Sendable () -> Void) {
             mac.assume(.stageOverlay)
             mac.scheduler.call("MotionStagePort.reveal")
             mac.stageState.motion += 1
             let motion = mac.stageState.motion
             // The simulated WindowServer shows an accepted placement at once;
             // the stage then fades into it.
+            willReveal()
             mac.scheduler.main.after(milliseconds: 40) { [mac] in
                 guard mac.stageState.motion == motion else { return }
                 mac.recordStage(.revealed)
@@ -156,11 +202,16 @@ extension SimulatedMac {
 
         func refresh(_ window: UInt32) {
             mac.assume(.stageWholeWindowCapture)
+            mac.stageState.captureRequests.append(StageCaptureRequest(at: mac.scheduler.now, windows: [window],
+                backgroundExcluding: nil, refreshing: true))
             mac.scheduler.call("MotionStagePort.refresh")
             let session = mac.stageState.session
-            mac.scheduler.main.after(milliseconds: 17 + mac.stageState.captureCost) { [mac] in
+            mac.scheduler.main.after(milliseconds: 17) { [self, mac] in
                 guard mac.stageState.session == session else { return }
-                mac.recordStage(.refresh(window))
+                completeCapture(after: mac.stageState.captureCost) { [mac] in
+                    guard mac.stageState.session == session else { return }
+                    mac.recordStage(.refresh(window))
+                }
             }
         }
 

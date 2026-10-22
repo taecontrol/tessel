@@ -15,10 +15,24 @@ extension SimulatedMac {
         package let at: Int
         package let windows: [UInt32]
         package let showing: Bool
+        package let focusedWindow: UInt32?
+    }
+    package struct FocusRequest: Sendable {
+        package let window: UInt32
+        package let hidden: Bool
+    }
+    package struct NativeFocus: Sendable {
+        package let at: Int
+        package let window: UInt32?
+        package let hidden: Bool
+        /// The AXRaise target, when this effect followed that action.
+        package let raisedWindow: UInt32?
     }
     struct MotionState {
         var writes: [GeometryWrite] = []
         var visibility: [VisibilityChange] = []
+        var focusRequests: [FocusRequest] = []
+        var focusEffects: [NativeFocus] = []
         var reduced = false
         var preferences: [WeakPreference] = []
         var pointers: [WeakPointer] = []
@@ -43,6 +57,10 @@ extension SimulatedMac {
     }
     @MainActor package var geometryWrites: [GeometryWrite] { motion.writes }
     @MainActor package var visibilityChanges: [VisibilityChange] { motion.visibility }
+    @MainActor package var focusRequests: [FocusRequest] { motion.focusRequests }
+    /// Actual keyboard focus after a tessel focus effect, rather than its
+    /// requested target. External app/user selections are not policy effects.
+    @MainActor package var focusEffects: [NativeFocus] { motion.focusEffects }
     @MainActor package func setScreen(_ geometry: ScreenGeometry) { self.geometry = geometry }
     @MainActor package func setReduceMotion(_ enabled: Bool) {
         assume(.reduceMotionNotifications)
@@ -55,7 +73,12 @@ extension SimulatedMac {
         }
     }
     @MainActor package func clearMotionHistory() {
-        motion.writes.removeAll(); motion.visibility.removeAll(); stageState.events.removeAll()
+        motion.writes.removeAll(); motion.visibility.removeAll(); motion.focusRequests.removeAll(); motion.focusEffects.removeAll()
+        clearStageHistory()
+    }
+    func recordFocusEffect(raisedWindow: UInt32? = nil) {
+        let window = front.flatMap { apps[$0]?.key }
+        motion.focusEffects.append(NativeFocus(at: scheduler.now, window: window, hidden: window.map(isCloseted) ?? false, raisedWindow: raisedWindow))
     }
     func isCloseted(_ id: UInt32) -> Bool {
         guard let spaces = windows[id]?.spaces else { return false }
@@ -71,7 +94,8 @@ extension SimulatedMac {
         motion.writes[index].accepted = windows[id]!.spec.frame
     }
     func recordVisibility(_ ids: [UInt32], showing: Bool) {
-        motion.visibility.append(VisibilityChange(at: scheduler.now, windows: ids, showing: showing))
+        motion.visibility.append(VisibilityChange(at: scheduler.now, windows: ids, showing: showing,
+                                                 focusedWindow: front.flatMap { apps[$0]?.key }))
     }
     @MainActor private struct Preferences: MotionPreferencePort {
         let mac: SimulatedMac
