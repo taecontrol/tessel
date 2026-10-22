@@ -51,8 +51,12 @@ extension Acceptance.Journeys {
                 let visible = try desktop.observe().visibleIDs
                 return [a,b,d].allSatisfy { !visible.contains($0) }
             }
-            try desktop.activate(other,key:"bottomB")
-            try requireFinalState("external selection has revealed the source rail before the next transfer") {
+            // Navigate to the destination while visible; an external AX
+            // activation of a closeted window cannot establish native focus.
+            try desktop.post(kVK_ANSI_K); try desktop.expectFocus(a)
+            try desktop.post(kVK_ANSI_L); try desktop.expectFocus(b)
+            try desktop.post(kVK_ANSI_L); try desktop.expectFocus(d)
+            try requireFinalState("navigation has revealed the source rail before the next transfer") {
                 let observation = try desktop.observe()
                 return try harness.status().workspaces?.rail == 1 && !observation.visibleIDs.contains(c)
                     && observation.windows.contains { $0.id == d && $0.visible && abs($0.frame[1] - observation.area[1] - 10) <= 1 }

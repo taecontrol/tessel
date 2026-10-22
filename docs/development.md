@@ -812,12 +812,15 @@ old/final ownership and shared-coverage assertions now run at each completed
 per-window geometry burst. No other window's geometry write or closet call may
 interleave that burst. Hidden preparation, replacement-before-retirement,
 visible-before-focus and one-write limits still apply after every port call.
-E20 applies the matching pixel rule. Its recorder starts open/close comparison
-at the first frame containing the new window, or excluding the destroyed one,
-matching the trace's boundary after the app's native action. Open additionally
-permits only the native initial or final palette bounds, with no return to the
-initial bounds after landing. Independent native geometry and palette centers
-reject a frozen or incorrectly filtered stream.
+E20 applies the matching pixel rule to workspace, rail, width, stop and close.
+Its recorder starts close comparison at the first frame excluding the destroyed
+window, matching the trace's boundary after the app's native action. Opening
+keeps its original one-step criterion: only the native initial or final palette
+bounds, with no return to the initial bounds after landing, and no final tile
+overlap. Native birth geometry is retained beside each clip. Independent native
+geometry and palette centers reject a frozen or incorrectly filtered stream;
+pixel movement is measured from before the command, so a birth first recorded
+at its final frame is valid evidence.
 E20 still permits zero recorded intermediate or gap frames, including during
 AX geometry bursts; the capture reports left- and right-tile alt-r separately.
 
@@ -838,6 +841,12 @@ proves zero stage activity during the measured idle window. The hidden-layer
 scene finishes the new float's single-layer arrival before hiding it with
 alt-z. Sample counts, the one-second settle, twenty-second idle windows and all
 latency/resource limits are unchanged.
+
+The #1 E9 restart oracle retains IDs, classification, reasons and tab counts;
+it excludes policy-owned visibility and rail membership, which can change when
+cleanup returns windows and startup follows native focus. Mixed-app rail setup
+uses rail navigation to reveal a closeted destination before selecting it,
+preserving #19 E26.
 
 ## Acceptance example layers (#24)
 

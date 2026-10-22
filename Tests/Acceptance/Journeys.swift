@@ -48,7 +48,19 @@ extension Acceptance {
                 let before = try harness.rows()
                 harness.stopApp()
                 try harness.startApp(fixtureReady: false)
-                try requireFinalState("the same fixture records after restart") { try harness.rows() == before }
+                // #1 E9 concerns classification. Cleanup returns every window
+                // and startup follows native focus, so policy visibility and
+                // rail membership need not equal their pre-restart values.
+                func classifications(_ rows: [Row]) -> [String] {
+                    rows.map { "\($0.id):\($0.app):\($0.bundleId):\($0.state):\($0.reason):\($0.tabs)" }.sorted()
+                }
+                var restarted: [Row] = []
+                do {
+                    try requireFinalState("the same fixture classifications after restart") {
+                        restarted = try harness.rows()
+                        return classifications(restarted) == classifications(before)
+                    }
+                } catch { throw HarnessError("\(error); expected \(classifications(before)), actual \(classifications(restarted))") }
                 harness.stopApp()
                 try fixture.command("minimize", ["key": "fixed"])
                 try fixture.command("minimize", ["key": "existingTabs0"])
