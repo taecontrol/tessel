@@ -273,6 +273,22 @@ import Testing
         })
     }
 
+    @Test("#33 E12: pending mouse geometry follows a native tab replacement")
+    func pointerBaselineFollowsNativeTabReplacement() {
+        requireCarousel(Scenario.run("native tab changes before the release snapshot") { s in
+            let f = CarouselFixture(s, presets: [0.5, 0.5], duration: 0), a = f.ids[0], b = f.ids[1]
+            f.app.groupTabs([a, b], selected: a); s.settle()
+            f.mac.pointerDown()
+            f.app.resize(a, to: CGSize(width: 600, height: f.area.height - 40))
+            f.app.selectTab(b); f.mac.pointerUp(); s.settle()
+            s.expect("the replacement owns the one catalog row", f.tessel.windows.map(\.id) == [b])
+            f.near(f.frame(b).width, 600, "the replacement retains the mouse width")
+            f.near(f.frame(b).height, f.area.height, "the replacement restores rail height at release")
+            f.press("cycle width")
+            f.near(f.frame(b).width, f.width(0.5), "the next key cycles from the adopted width")
+        })
+    }
+
     @Test("#33 E11; #33 E12: closing a nonfocused tile during a hold defers one layout until release")
     func pointerReleaseRendersDeferredClosure() {
         requireCarousel(Scenario.run("close a nonfocused tile while pointer held") { s in
