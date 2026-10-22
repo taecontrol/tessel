@@ -44,11 +44,12 @@ import Testing
     }
 
     @Test("#33 E18: prepare once while hidden and preserve pointwise old-or-final ownership",
-          arguments: ["workspace", "rail", "width", "width-right", "width-shrink", "stop", "stop-mixed", "stop-left", "open", "close", "send", "layer-show", "layer-hide"], WriteOrder.allCases)
+          arguments: ["workspace", "rail", "width", "width-right", "width-shrink", "stop", "stop-mixed", "stop-left", "open", "close", "send", "layer-show", "layer-hide", "gaps"], WriteOrder.allCases)
     func instantOperationsHaveAnOrderedHandoff(_ operation: String, _ writes: WriteOrder) {
-        requireCarousel(Scenario.run("instant \(operation) handoff", writes: writes) { s in
+      for replies in HandoffReplies.allCases {
+        requireCarousel(Scenario.run("instant \(operation) handoff \(replies)", writes: writes) { s in
             let presets = operation == "stop-mixed" ? [0.5, 739.0 / 1718.0, 0.5] : [0.5, 0.5, 0.5]
-            let f = CarouselFixture(s, presets: presets, duration: 0)
+            let f = CarouselFixture(s, presets: presets, duration: 0, appCount: replies == .singleApp ? 1 : 2)
             f.tessel.changeConfig("[experiments]\nlayer = true\n[animation]\nduration = 0\n"); s.settle()
             let t = f.tessel, a = f.ids[0], b = f.ids[1], c = f.ids[2]
             var ids = Set(f.ids)
@@ -69,6 +70,8 @@ import Testing
             ids.formUnion(t.windows.map(\.id))
             var startCGOrder = f.mac.visibleOrder
             var before = Dictionary(uniqueKeysWithValues: ids.filter { f.mac.isVisible($0) }.map { ($0, f.frame($0)) })
+            if replies == .delayedFirst { f.apps[0].delayAXReplies(milliseconds: 7) }
+            if replies == .delayedSecond { f.apps[1].delayAXReplies(milliseconds: 17) }
             f.mac.clearMotionHistory(); f.mac.beginPresentationTrace()
             let traceStart = f.mac.scheduler.trace.count
             switch operation {
@@ -86,6 +89,7 @@ import Testing
                 before[a] = nil
             case "send": t.press("send 2")
             case "layer-show", "layer-hide": t.press("toggle layer")
+            case "gaps": t.changeConfig("[animation]\nduration = 0\n[gaps]\nouter = 20\n")
             default: break
             }
             s.settle()
@@ -151,5 +155,8 @@ import Testing
             s.expect("instant operations make no stage", f.mac.stageEvents.isEmpty)
             s.expect("the operation exercised real ports", f.mac.scheduler.trace.count > traceStart)
         })
+      }
     }
 }
+
+private enum HandoffReplies: CaseIterable { case singleApp, twoApps, delayedFirst, delayedSecond }

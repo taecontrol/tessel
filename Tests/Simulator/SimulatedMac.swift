@@ -62,6 +62,10 @@ package struct SimulatedApp: Sendable {
     @MainActor package func unhide() { mac.visibility(pid, hidden: false, omitWindows: false) }
     @MainActor package func hang() { mac.setHung(pid, true) }
     @MainActor package func busy(forMilliseconds duration: Int) { mac.setBusy(pid, duration: duration) }
+    @MainActor package func delayAXReplies(milliseconds: Int) {
+        mac.action("\(alias) delay AX replies by \(milliseconds)ms")
+        mac.apps[pid]?.replyDelay = max(0, milliseconds)
+    }
     @MainActor package func resume() { mac.setHung(pid, false) }
     @MainActor package func quit() { mac.terminate(pid, crash: false) }
     @MainActor package func crash() { mac.terminate(pid, crash: true) }
@@ -117,6 +121,7 @@ package final class SimulatedMac: @unchecked Sendable {
         var processExists = true
         var prohibitedNotifications = ProhibitedNotifications.omitted
         var busyUntil = 0
+        var replyDelay = 0
         var omitHiddenWindows = false
         var key: UInt32?, main: UInt32?
         var windowLists: [WindowListReply] = []

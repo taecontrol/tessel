@@ -9,6 +9,7 @@ import Testing
 @MainActor struct CarouselFixture {
     let s: Scenario
     let app: SimulatedApp
+    let apps: [SimulatedApp]
     let tessel: Tessel
     let ids: [UInt32]
     let area: CGRect
@@ -16,19 +17,21 @@ import Testing
     static let config = "[experiments]\ncarousel = true\n"
 
     init(_ s: Scenario, presets: [Double] = [0.5, 0.5, 0.5], duration: Int = 250, reduced: Bool = false, minimumFractions: [Int:Double] = [:],
-         maximumFractions: [Int: Double] = [:]) {
+         maximumFractions: [Int: Double] = [:], appCount: Int = 1) {
         self.s = s
         s.mac.setScreen(ScreenGeometry(frame: CGRect(x: 0, y: 0, width: 1728, height: 1117),
                                        visibleFrame: CGRect(x: 0, y: 0, width: 1728, height: 1084)))
         area = CGRect(x: 10, y: 43, width: 1708, height: 1064)
         s.mac.setReduceMotion(reduced)
-        let app = s.mac.launch()
+        let apps = (0..<appCount).map { _ in s.mac.launch() }
+        self.apps = apps
+        let app = apps[0]
         self.app = app
         ids = presets.enumerated().map { index, p in
             var spec = WindowSpec(frame: CGRect(x: 40, y: 60, width: p * 1718 - 10, height: 1064), minimumSize: CGSize(width: max(1,(minimumFractions[index] ?? 0) * 1708), height: 1),
                                   maximumSize: CGSize(width: (maximumFractions[index] ?? 100) * 1708, height: 100_000), positionAcceptance: .screenEdges)
             spec.closetHeightLoss = 312
-            return app.open(spec)
+            return apps[index % appCount].open(spec)
         }
         if let id = ids.first { app.select(id) }
         tessel = s.startTessel()
