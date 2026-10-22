@@ -1482,7 +1482,20 @@ final class Workspaces {
             let left = ($0.target?.minX ?? 0, $0.id), right = ($1.target?.minX ?? 0, $1.id)
             return movingLeft ? left > right : left < right
         }
-        let hiddenCount = placements.prefix { newlyShown.contains($0.id) }.count
+        // Keep the sweep's order only where moving/showing one tile can affect
+        // another's old or final coverage. Disjoint apps need not wait for a
+        // hung neighbor's retries. Each app still completes one burst at a time.
+        let dependencies = placements.indices.map { index in
+            Set(placements[..<index].filter { earlier in
+                guard let target = earlier.target else { return false }
+                let old = newlyShown.contains(earlier.id) ? nil : entries[earlier.id]?.observation.frame
+                if old == target { return false }
+                let next = placements[index]
+                let nextOld = newlyShown.contains(next.id) ? nil : entries[next.id]?.observation.frame
+                return nextOld.map { target.intersects($0) } == true
+                    || next.target.map { rect in old.map { rect.intersects($0) } == true || rect.intersects(target) } == true
+            }.map(\.id))
+        }
         let shownRoots = newlyShown.filter { entries[$0]?.observation.parent == nil }.sorted()
         let hiddenRoots = newlyHidden.filter { entries[$0]?.observation.parent == nil }.sorted()
         var changedBounds = false
@@ -1557,47 +1570,57 @@ final class Workspaces {
                 }
             }
         }
-        func place(_ index: Int) {
+        var pendingPlacements = Set(placements.indices)
+        var activePIDs = Set<Int32>()
+        var finishedPlacements = 0
+        func placeReady() {
             guard self.transition == token, !self.pointerHeld else { return }
-            if index == 0 {
-                let unchanged = shownRoots.filter { id in !placements.contains { $0.id == id } }
-                closet.show(unchanged)
-                self.closeted.subtract(unchanged)
-                ready.formUnion(unchanged)
-                if !placements.contains(where: { $0.id == self.focused }) { focusAndCommit() }
-            }
-            guard index < placements.count else { geometryReady = true; focusAndCommit(); commitVisibility(); return }
-            let p = placements[index]
-            guard let catalog = self.catalog else { geometryReady = true; finishFocus(); return }
-            catalog.presentRail(pid: p.pid, id: p.id, frame: p.target, position: p.position, resize: p.resize, focus: false, screenRight: self.screenRight) { [weak self] result in
-                guard let self, self.transition == token else { return }
-                if let accepted = result.frame {
-                    self.carouselPresentation?.pending.remove(p.id)
-                    ready.insert(p.id)
-                    if index < hiddenCount {
-                        closet.show([p.id])
-                        self.closeted.remove(p.id)
+            guard let catalog = self.catalog else { return }
+            for index in placements.indices where pendingPlacements.contains(index) {
+                let p = placements[index]
+                guard !activePIDs.contains(p.pid), dependencies[index].isSubset(of: ready) else { continue }
+                pendingPlacements.remove(index)
+                activePIDs.insert(p.pid)
+                catalog.presentRail(pid: p.pid, id: p.id, frame: p.target, position: p.position, resize: p.resize, focus: false, screenRight: self.screenRight) { [weak self] result in
+                    guard let self, self.transition == token else { return }
+                    activePIDs.remove(p.pid)
+                    finishedPlacements += 1
+                    if let accepted = result.frame {
+                        self.carouselPresentation?.pending.remove(p.id)
+                        ready.insert(p.id)
+                        if newlyShown.contains(p.id) {
+                            closet.show([p.id])
+                            self.closeted.remove(p.id)
+                        }
+                        if p.float { self.layerPlacements[p.id] = nil }
+                        if underStage { self.staging?.placed[p.id] = accepted }
+                        if p.resize, !p.float, let target = p.target {
+                            if underStage, self.staging?.shown == true { self.stage?.refresh(p.id) }
+                            self.carouselSizing.remove(p.id)
+                            self.carouselSizes[p.id] = accepted.size
+                            self.carousel.accept(p.id, requested: target.size, accepted: accepted.size,
+                                                 learnBounds: target.minX >= bounds.minX && target.maxX <= bounds.maxX)
+                            if abs(accepted.width - target.width) > 1 || abs(accepted.height - target.height) > 1 { changedBounds = true }
+                        }
                     }
-                    if p.float { self.layerPlacements[p.id] = nil }
-                    if underStage { self.staging?.placed[p.id] = accepted }
-                    if p.resize, !p.float, let target = p.target {
-                        if underStage, self.staging?.shown == true { self.stage?.refresh(p.id) }
-                        self.carouselSizing.remove(p.id)
-                        self.carouselSizes[p.id] = accepted.size
-                        self.carousel.accept(p.id, requested: target.size, accepted: accepted.size,
-                                             learnBounds: target.minX >= bounds.minX && target.maxX <= bounds.maxX)
-                        if abs(accepted.width - target.width) > 1 || abs(accepted.height - target.height) > 1 { changedBounds = true }
+                    geometryReady = finishedPlacements == placements.count
+                    if p.id == self.focused {
+                        if result.frame == nil { self.expectedFocus = nil }
+                        focusAndCommit()
                     }
+                    commitVisibility()
+                    placeReady()
                 }
-                if p.id == self.focused {
-                    if result.frame == nil { self.expectedFocus = nil }
-                    focusAndCommit()
-                }
-                commitVisibility()
-                place(index + 1)
             }
         }
-        place(0)
+        let unchanged = shownRoots.filter { id in !placements.contains { $0.id == id } }
+        closet.show(unchanged)
+        self.closeted.subtract(unchanged)
+        ready.formUnion(unchanged)
+        geometryReady = placements.isEmpty
+        if !placements.contains(where: { $0.id == self.focused }) { focusAndCommit() }
+        placeReady()
+        commitVisibility()
     }
 
 }
