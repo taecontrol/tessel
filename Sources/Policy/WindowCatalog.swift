@@ -198,6 +198,7 @@ private final class AppWindows: @unchecked Sendable {
     private var pending: (any ScheduledWork)?
     private var settleGeneration: UInt64 = 0
     private var failedReads = 0
+    private var pointerReleaseCompletions: [@MainActor @Sendable () -> Void] = []
     private var elementsByID: [UInt32: AXElement] = [:]
     private var change = CatalogChange.snapshot
     private var activationToken: UUID?
@@ -305,6 +306,7 @@ private final class AppWindows: @unchecked Sendable {
             railActivationCheck?.work.cancel()
             railActivationCheck = nil
             pending?.cancel()
+            finishPointerRelease()
             if let observer {
                 scheduler.main.async { [self] in
                     observer.stop()
@@ -422,6 +424,7 @@ private final class AppWindows: @unchecked Sendable {
             elementsByID = handles.filter { newIDs.contains($0.key) }
             failedReads = 0
             publishSnapshot(replacing: replacements)
+            finishPointerRelease()
             if !newIDs.subtracting(oldIDs).isEmpty {
                 beginSettling()
             }
@@ -582,9 +585,18 @@ private final class AppWindows: @unchecked Sendable {
 
     func refreshForPointerRelease(_ completion: @escaping @MainActor @Sendable () -> Void) {
         queue.async { [self] in
+            guard !stopped else { scheduler.main.async { completion() }; return }
+            pointerReleaseCompletions.append(completion)
             readSnapshot()
-            scheduler.main.async { completion() }
         }
+    }
+
+    private func finishPointerRelease() {
+        // Publication is queued first, so release reconciliation sees the fresh
+        // geometry. Failed reads retain the baseline until retry or notification.
+        let completions = pointerReleaseCompletions
+        pointerReleaseCompletions.removeAll()
+        for completion in completions { scheduler.main.async { completion() } }
     }
 
     func ownsFocusIntent(_ token: UUID?) -> Bool {
