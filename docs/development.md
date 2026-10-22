@@ -89,6 +89,7 @@ disposable-runner permission steps. `--journeys` includes those steps on CI;
 separate signing and permission tests so the default can skip only the latter. Captures
 run only with their opt-in flag: `TESSEL_CAPTURE_WORKSPACES=1` for AppKit views,
 `TESSEL_CAPTURE_CAROUSEL=1` for E21 geometry recordings, or
+`TESSEL_CAPTURE_INSTANT=1` for #33's fixture-only 120 Hz pixel recordings, or
 `TESSEL_CAPTURE_LAYER=1` for layer recordings, the automated E30 fidelity
 walkthrough and E32 owner-session preparation. Select a suite or pass a test
 name fragment, such as `scripts/verify switchWorkspaces`. Empty selections fail
@@ -160,8 +161,7 @@ that child QoS changes cannot lift. Interrupting verification removes the job.
 
 `Resources.swift` keeps foundation E22's twenty default-config windows, workspace
 E36's twenty windows across ten workspaces, and carousel E24's twenty windows
-across five workspaces and multiple rails, plus one hidden float with the layer
-experiment enabled (also #19 E28). The two IDs share one resource test and the
+across five workspaces and multiple rails, plus one hidden float in the layer (also #19 E28). The two IDs share one resource test and the
 same budgets and observation window. Each retains its setup and one-second
 settle, then observes one 20-second idle window from outside the app with
 `proc_pid_rusage` (`rusage_info_v0`). Interrupt wakeups must be at most 11;
@@ -180,88 +180,75 @@ its counters.
 
 ### CI
 
-CI runs on `xcode-27` (macOS 27) and must finish in under ten minutes per pull
-request, until every check is green. The Policy job runs bare tests, the layer
-check and trace repetition. The simulator-evidence guard runs in its own
-workflow; it is the only check that reads the pull request description, so it
-is the only one an edit to the description reruns. The
-Acceptance job signs and builds once, then runs contracts, journeys (including
-permission denial/restart), latency, resources and the rails status-item capture.
-Resources have a 200 s command budget: the stage's E24 put the suite at
-91 s on `xcode-27`, past the former 90 s, and the owner raised it. The job has a twelve-minute timeout
-for these suites, three optimized builds (the signed bundles, the signed-rebuild
-journey and the daily-variant argument check) and runner setup. The carousel's
-contracts, E15, E24 and larger compiles put a green run near nine and a half
-minutes on `xcode-27`, so ten minutes no longer left margin for a slower runner.
-`scripts/verify` checks the test selection once; its Interactive launchd job
-does not repeat that check.
-Latency samples and the app-rendered rails capture are uploaded even on failure.
+Pull requests run Policy (bare `swift test`, `tessel-check layers`, and
+`determinism --runs 3`), Simulator evidence, and Permissions. Policy has a nine
+minute timeout, the evidence job five, and Permissions seven. Permissions signs
+and builds once, then selects only `signingAndPermission` and `--permission`:
+signed rebuild, denied Accessibility and permission recovery/restart. Its seven
+minute limit leaves margin over the measured 99 s build, 50 s signing journey
+and 3 s permission steps. There are no scheduled or diagnostic CI runs.
 
-The runner first hides the Dock: fixture Dock icons can move the visible frame's
-bottom edge by two points on its 1024×768 display. It creates a short-lived
-certificate in a temporary keychain, removed at the end; no signing material is
-stored in GitHub. Before any harness suite, `scripts/ci-accessibility` grants the
-development app and fixture Accessibility and Screen Recording on that disposable
-runner, and records their screen-capture approval so macOS does not interrupt the
-first capture with an alert that takes focus. Only `CI=true`
-together with `GITHUB_ACTIONS=true` enables
-Accessibility denial and restart steps. Local runs use the signed development
-bundle's existing permissions and never provision the TCC database.
+Contracts, ordinary journeys, latency and resources run locally. A change under
+`Sources/`, `Tests/Acceptance/`, `Tests/Fixture/`, `Tools/Build/` or `scripts/`
+requires this block in the PR description, with the exact PR head SHA:
+
+```tessel-verification
+head: <40-character head SHA>
+suites: contracts journeys latency resources
+```
+
+A successful no-argument `scripts/verify` prints the block only if the checkout
+is clean and HEAD has not changed during the run. A subset run never prints it.
+An edit to the description reruns both evidence guards. Documentation and
+simulator-only changes require no new real-system verification. Simulator
+changes still require a changed contract or `Simulator-evidence:` explanation.
+The existing 200 ms p95, wakeup, CPU and footprint budgets are unchanged; the
+resource suite has no elapsed-time budget. See
+[ADR 0008](adr/0008-gate-real-system-changes-on-local-evidence.md).
+
+Only `CI=true` together with `GITHUB_ACTIONS=true` enables Accessibility denial
+and restart steps. The runner creates an ephemeral signing identity and grants
+the signed harness permissions on its disposable desktop. Local runs retain
+the owner's signing identity and never provision the TCC database.
 
 ## Configuration and observation
 
 The config is `$XDG_CONFIG_HOME/tessel/tessel.toml`, defaulting to
-`~/.config/tessel/tessel.toml`. An absent file or an empty document disables all
-experiments. Unknown keys and invalid
-TOML produce a line-numbered error; the last valid configuration stays active.
-Saving, replacing, or deleting the file reloads it automatically. `status --json`
-reports the effective config, its revision, its source state, and any error.
+`~/.config/tessel/tessel.toml`. An absent or empty file uses the carousel,
+workspaces and floating layer with their normal shortcuts. The kept experiments
+have no flags. Legacy `workspaces`, `carousel` and `layer` booleans in
+`[experiments]` are accepted and ignored; unknown keys still report their line.
+The table remains available for future experiments.
 
 ```toml
-[experiments]
-workspaces = true
-
 [gaps]
 outer = 10
 
+[animation]
+duration = 250
+
 [keys]
-alt-1 = "workspace 1"
-alt-shift-1 = "send 1"
-alt-j = "focus next"
-alt-k = "focus previous"
+alt-r = "cycle width"
 ```
 
-The workspace experiment manages the primary display only. It shows one tiled
-window per workspace, filling `visibleFrame` minus the outer gap. Dialogs float
-at their original frames and belong to their workspace; sheets follow their
-parents. Size-constrained windows float centered with the reason
-`cannot fill the screen`. Native fullscreen windows have no workspace. Stage
-Manager is assumed off, and external monitors are outside the experiment.
+Unknown keys and invalid TOML preserve the last valid configuration. Saving,
+replacing or deleting a file reloads automatically. Status reports the effective
+configuration, revision, source state and error. `[keys]` overrides merge with
+the layer defaults; an empty command disables a binding. Keys use lowercase ANSI
+letters and digits with `alt`, `shift`, `ctrl` and `cmd` modifiers. Numeric
+workspace/send bindings cover 1…10, using 0 for 10. Directional traversal never
+wraps on a rail; `focus next|previous` remain bindable horizontal aliases.
 
-Default shortcuts are Option+1…0 for workspaces 1…10, Option+Shift+1…0 to send
-the focused window and follow it, and Option+J/K to cycle in arrival order.
-`[keys]` overrides merge with defaults; an empty command disables that binding.
-Keys are lowercase ANSI letters and digits, with optional `alt`, `shift`, `ctrl`,
-and `cmd` modifiers. Commands are `workspace N`, `send N` (N = 1…10),
-`focus next`, and `focus previous`. `outer` is a nonnegative number of points.
-Keys and gaps are validated even with the flag off. Invalid edits preserve the
-last valid configuration and registrations. Carbon cannot detect a shortcut
-registered by another process; resolve a noticed conflict with `[keys]`.
+The primary display is managed; Stage Manager and other displays remain outside
+this scope. Inactive windows live in the SkyLight closet. Quitting returns
+managed windows, and startup recovers orphans after the first successful AX
+snapshot. Native fullscreen is never closeted. Missing Accessibility or hiding
+mechanics disable management with an explicit reason. Titles are never queried.
 
-Inactive windows live in one invisible Space, returned to the current desktop
-when shown. Disabling the flag or quitting returns all managed windows. Startup
-also recovers orphaned windows after a crash, even when the flag is off; no
-workspace membership is persisted. See [ADR 0002](adr/0002-hide-inactive-windows-in-a-skylight-space.md)
-for the private system dependency and its tradeoffs.
-
-Window records contain an ID, app name, bundle ID, state, reason, native tab
-count, `workspace` (1…10 or null), `visible` (CG on-screen membership), and
-`answeredAt`.
-`state` is `tiled`, `floats`, `minimized`, `hidden`, `fullscreen`, or `ignored`.
-Ignored surfaces have no workspace and are never placed, hidden or focused.
-Titles are never queried. `status --json` adds
-`workspaces.enabled`, `reason`, `active`, `gaps`, and the effective `keys`.
-With the experiment disabled, tessel observes without managing ordinary windows.
+Window JSON includes ID, app, bundle ID, classification and reason, tab count,
+workspace, visibility, rail, slot and `answeredAt`. Ignored surfaces have no
+membership and are never placed, hidden or focused. Status includes the active
+workspace, carousel layout, rail counts, gaps, effective keys, motion and layer.
 
 Native tab groups have one front entry while visible or hidden. When a group is
 minimized, macOS 27 exposes each tab as an AX window, and only one reports the
@@ -345,15 +332,10 @@ Before the first public release (#6), revisit the bundle IDs, config schema,
 and read-only CLI contract. A command that changes state or exposes titles needs
 an architecture decision before implementation.
 
-## Carousel experiment (#26)
-
-`[experiments] carousel = true` enables the carousel layout independently of
-`workspaces`. The former `rails` key is unknown and reports its line number.
-Without carousel, the workspace experiment keeps its one-window layout and
-shortcuts. With both experiments absent, tessel only observes.
+## Carousel (#26)
 
 Each workspace owns a stack of rails (rows). Existing windows enter one rail in
-arrival order, retaining their observed widths; an exact preset is recognized.
+ID order, independent of which app finishes its first AX enumeration, retaining their observed widths; an exact preset is recognized.
 New windows enter at half width immediately right of the focused tile, receive
 focus, and are revealed with the smallest scroll. Presets are one third, one
 half, two thirds and full width, measured as `p * (area.width + outer) - outer`.
@@ -362,8 +344,8 @@ The area is the primary display's visible frame inset by the outer gap.
 Option+R (`cycle width`) chooses the next preset, keeping the tile's left edge
 still unless a minimal scroll is needed to show it completely. AX readback
 learns rejected minimum and maximum widths; later cycles skip them. Mouse
-widths remain exact until cycling. A rail shorter than the area stretches its
-windows proportionally; the stretch preserves nominal widths.
+widths remain exact until cycling. Short rails keep their nominal widths and
+align to the left, leaving empty space to the right.
 Height-constrained windows stay tiled at the top, with an explanatory reason.
 
 Option+H/L (`focus left|right`) first selects the nearest complete window in
@@ -380,7 +362,7 @@ moving tile is already alone there. Empty rails disappear.
 
 Closing focus selects the left neighbor, or the right if it was first. An empty
 rail selects the rail below, or the one above if it was last. Minimize/hide
-retains the workspace experiment's most-recent-focus policy. Restoring a tile
+retains the workspace's most-recent-focus policy. Restoring a tile
 uses its former rail and left neighbor when available. Native-tab replacement
 retains tile identity, nominal width, learned limits and focus. Dialogs keep
 their frames, sheets follow their parents, and native fullscreen stays outside
@@ -389,12 +371,9 @@ workspace management. Workspace switching and sends remain instant.
 Numeric workspace/send shortcuts retain their meanings. `focus next|previous`
 are bindable aliases for horizontal traversal. `[keys]` overrides merge with
 defaults; an empty string disables a binding. Directional and width commands
-are validated with the experiment off, but registered only when it is active.
+are always available with their layer defaults.
 
 ```toml
-[experiments]
-carousel = true
-
 [animation]
 duration = 80
 
@@ -439,9 +418,9 @@ strip. A rail change slides the leaving and entering rails as one sheet, one
 rail height apart. A wall bounce moves the stand-ins away from the wall and
 back, 70 ms each way, and moves no real window.
 
-A pointer press, native fullscreen entry, disabling the experiment and a
-layout change clear the stage at once; the pointer case keeps the user's
-geometry. A failed capture clears it and places the windows at once, and so
+A pointer press or native fullscreen entry clears the stage at once. Duration
+zero and Reduce Motion also clear an animation already in flight and place its
+final layout immediately. Duration zero never queries Screen Recording. A failed capture clears it and places the windows at once, and so
 does a screenshot that has not returned after 1 s. A window that WindowServer
 lists off screen outside the closet is ordering out or hidden: the stage never
 captures it and shows no stand-in for it
@@ -486,11 +465,23 @@ signed development CLI preserves them. The resource suite samples them only
 outside its measured idle window. Daily builds contain neither the counters
 nor this status field.
 
-A manually moved tile stays where released until the next layout change. A
-busy AX presentation retries after 100, 200, 400 and 800 ms unless superseded.
-Completely off-screen tiles live in the closet; they are shown before sizing.
-Disabling the experiment or quitting returns managed windows inside the desktop.
-Crash recovery uses the same closet boundary without persisted membership.
+While a pointer button is held, no geometry, focus, main, raise or capture work
+runs. Mouse-up reads fresh frames, adopts the accepted width and released left
+edge, and restores rail height once while moving neighbors. Left alignment wins
+if the first tile would leave a leading gap. An accepted width beyond a learned
+limit releases that obsolete limit. Commands arriving during the release read
+are carried forward rather than lost.
+
+Instant presentation computes one layout. It prepares returning windows while
+hidden, shows them at their final frames, places visible windows, transfers
+focus only to a visible destination, then hides departing windows once their
+replacements are ready. At every point the top visible managed window must be
+the old or final owner; shared tile coverage must never expose desktop. AX writes
+temporarily disable an app's enhanced UI flag and restore its value. No stage or
+capture is involved. Busy writes retain their bounded retries.
+
+Quitting returns managed windows inside the desktop. Crash recovery uses the
+same closet boundary without persisted membership.
 
 ### Native motion contracts and E21 capture
 
@@ -588,10 +579,9 @@ recording window includes bounce and a settled tail; final states use the usual
 review destination when requested. E21 remains pending until the owner compares
 it with the accepted prototype; generating the recording does not accept it.
 
-## Floating layer experiment (#19)
+## Floating layer (#19)
 
-`[experiments] layer = true` enables the carousel and a floating layer for each
-workspace. Existing floats start hidden in the closet while the rail keeps
+Each workspace has a floating layer. Existing floats start hidden in the closet while the rail keeps
 focus. If startup focus is already on a float, tessel enters the whole layer.
 The layer's visibility and pinning belong to its workspace; switching away
 hides all its windows and returning restores its selection.
@@ -703,22 +693,16 @@ A fixed-size float bounces and stays floating. Manual choices last for that
 window's lifetime, including catalog refreshes, and reset on restart. Sending a
 float with Option+Shift+N follows it into the destination workspace's layer.
 
-The three commands are accepted and rebindable in `[keys]` even with the flag
-off, but are registered only while the layer is enabled. Toggling an empty layer
-does nothing. Disabling a layer-only config, removing it, or quitting returns
-all floats. With `carousel = true` explicitly retained and `layer = false`,
-active-workspace floats remain visible above the rails and inactive workspaces
-stay in their closet, as in the carousel experiment. Enabling the layer again
-starts hidden.
-
-With the layer enabled, `status --json` adds
+The three commands are always registered and rebindable through `[keys]`.
+Toggling an empty layer does nothing. Removing a config restores defaults;
+quitting returns all floats. `status --json` reports
 `workspaces.layer: {"state":"hidden","focused":false}`. State is `hidden`,
 `single`, `shown`, or `pinned`; `focused` says whether focus is in the layer.
 Hidden floats retain `state: "floats"`, workspace membership, null `rail` and
 `slot`, and `visible: false` in `windows --json`. Manual classifications report
 `floats` / `moved to the layer` or `tiled` / `moved to a rail`.
 
-Classification is fixed independently of the flag: tessel manages windows at CG
+Classification is fixed: tessel manages windows at CG
 layer 0 or the floating level 3 with subrole `AXStandardWindow`, `AXDialog`,
 `AXSystemDialog`, or `AXFloatingWindow`. Layer 3 includes apps' own floating
 utility panels, inspectors and palettes. Every other layer is `ignored` with
@@ -752,7 +736,7 @@ deterministic policy layer and are not tagged in these files:
 
 | Journey | Journey example IDs |
 | --- | --- |
-| Enable | #1 E9; #2 E1 |
+| Startup | #1 E9 |
 | Switch | #2 E31, E32 |
 | Send | #2 E35 |
 | Rail scroll and elevator | Wiring regression (no policy example IDs) |
@@ -760,7 +744,7 @@ deterministic policy layer and are not tagged in these files:
 | Floating layer | #19 E29 |
 | Reduce Motion | Wiring check that Reduce Motion makes a carousel move instant (E18 belongs to P) |
 | Reload | File watcher wiring for save, atomic replace, chmod and delete |
-| Crash, quit and disable | #2 E28, E29, E34 |
+| Crash, quit and unavailable mechanics | #2 E28, E29, E34 |
 | CLI and config files | #1 E10, E12; #1 U-cli-args, U-private-transport, U-read-only-transport, U-stalled-clients, U-observer-identity, U-cpu-oracle, U-notification-retries |
 | Signing and permission | #1 E13, E15, E16 |
 
@@ -779,7 +763,7 @@ Only this suite judges elapsed time. Both workspace and carousel nearest-rank
 p95 remain at most 200 ms. The carousel latency suite explicitly configures
 `[animation] duration = 0`; E16/E17 independently prove the stage's timing
 against the simulator's clock at the policy boundary. This preserves the existing
-CI processing/observation budget without adding intentional display waiting.
+local processing/observation budget without adding intentional display waiting.
 A local-only proposal to raise the animated total to 280 ms was withdrawn:
 recalibration requires evidence of its spread on CI's runner. Sample counts,
 percentiles, final-state predicates and resource limits remain unchanged.
@@ -794,8 +778,48 @@ bound covers the stage's landing after the last command; it does not claim
 when a slow app finishes its own placement.
 It prints p50, p95 and maximum, and writes `.work/latency.json` (schema 2) with
 the samples, counts, percentiles, configured animation duration, completion
-definition and nonpersonal run metadata. CI uploads that artifact even on failure; incomplete runs retain their partial counts and the
+definition and nonpersonal run metadata. Incomplete local runs retain partial counts and the
 failed sample index. No window listings or titles reach the artifact.
+
+### Issue 33 example amendments
+
+The removed off/stack examples are retired explicitly:
+
+- #2 E1: Management off is removed by #33 E1–E4.
+- #2 E3: Floating visibility now follows #19 E6 and E12.
+- #2 E13: Mixed stack cycling is replaced by rail traversal and layer navigation.
+- #2 E14: New rail arrivals follow #26 E10–E11, rather than append to a stack.
+- #2 E19: One-window fill is replaced by #33 E5–E6 nominal widths.
+- #2 E20: Failed-fill floating is removed; carousel learns intrinsic size bounds (#26 E8).
+- #2 E21: Mouse reconciliation follows #33 E11–E14.
+- #2 E22: Stack centering and stack gap layout are removed; rail gap checks remain.
+- #2 E23: New dialogs follow #19 E12 single-layer entry.
+- #26 E5: Proportional stretching is replaced by #33 E5–E6.
+
+Native-tab identity from #2 E12 remains covered, with rail neighbor selection
+replacing stack wrap/MRU assumptions. #2 E28 and #19 E24 retain quit cleanup;
+flag disable/re-enable cases are retired. #19 E5–E6 retain bindings and startup
+visibility. #1 E17 now starts managed, and #1 E7 no longer expects a new arrival
+to leave the old tile focused. The hung-app classification oracle excludes
+policy-owned visibility and membership fields.
+
+E18 was amended twice during delivery: blanket overlap prohibition conflicted
+with show-before-hide; consecutive show/hide then conflicted with scrolling
+and visible-before-focus. Its maintained test uses pointwise old/final ownership
+and uninterrupted shared coverage, plus hidden preparation and one-write limits.
+E20 applies the matching pixel rule. Its recorder starts open/close comparison
+at the first frame containing the new window, or excluding the destroyed one,
+matching the trace's boundary after the app's native action. Open additionally
+permits only the native initial or final palette bounds, with no return to the
+initial bounds after landing. Independent native geometry and palette centers
+reject a frozen or incorrectly filtered stream.
+
+The old #2 E16 failure-recovery assertion that immediately hid the outgoing
+window now retains the old view while a hung app cannot prepare its replacement
+(#33 E18). Its native-focus and external-activation assertions are preserved.
+The retry measurement excludes later focus-confirmation reads while still
+requiring exactly the four original retry delays. Initial-enumeration race
+setups now hold the startup AX list rather than entering a removed mode.
 
 ## Acceptance example layers (#24)
 
@@ -803,7 +827,8 @@ This table is the maintained example-to-layer map for issues #1, #2, #19, #26 an
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
-R the unchanged resource suite, and X an owner-reviewed capture.
+R the unchanged resource suite, C a native assumption contract, T tooling,
+and X an owner-reviewed capture.
 Foundation E13 belongs to J; supplementary visual permission evidence does
 not assign it to a second layer.
 
@@ -812,7 +837,8 @@ P files live in `Tests/PolicyTests/Scenarios/`, J in
 `Tests/Acceptance/Journeys*.swift`, L in `Tests/Acceptance/Latency.swift`,
 and R in `Tests/Acceptance/Resources.swift`. X tests use `capture*` function
 names in Acceptance, or live in `Tests/Acceptance/Captures*.swift`.
-Contracts carry assumption IDs, never example IDs. The E20 integrity check
+C tests live in `Tests/Acceptance/Contracts*.swift`; T in `Tests/CheckTests/`.
+Contracts declare their assumption IDs as well as any mapped native example. The E20 integrity check
 rejects missing tags, unmapped tags, duplicate map rows and tags in another
 layer. Every mapped ID must have a tagged test in its own layer.
 
@@ -847,9 +873,7 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #1 U-observer-identity | J |
 | #1 U-cpu-oracle | J |
 | #1 U-notification-retries | J |
-| #2 E1 | J |
 | #2 E2 | P |
-| #2 E3 | P |
 | #2 E4 | P |
 | #2 E5 | P |
 | #2 E6 | P |
@@ -859,17 +883,10 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #2 E10 | P |
 | #2 E11 | P |
 | #2 E12 | P |
-| #2 E13 | P |
-| #2 E14 | P |
 | #2 E15 | P |
 | #2 E16 | P |
 | #2 E17 | P |
 | #2 E18 | P |
-| #2 E19 | P |
-| #2 E20 | P |
-| #2 E21 | P |
-| #2 E22 | P |
-| #2 E23 | P |
 | #2 E24 | P |
 | #2 E25 | P |
 | #2 E26 | P |
@@ -922,7 +939,6 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #26 E2 | P |
 | #26 E3 | P |
 | #26 E4 | P |
-| #26 E5 | P |
 | #26 E6 | P |
 | #26 E7 | P |
 | #26 E8 | P |
@@ -1004,3 +1020,18 @@ needs either a changed `Tests/Acceptance/Contracts*.swift` file or a PR-body
 line starting exactly `Simulator-evidence:` with non-empty text after it.
 CI passes the body through an environment variable into a file, then runs
 the guard; it never treats the body as shell source.
+
+### Instant pixel evidence (#33 E20)
+
+`TESSEL_CAPTURE_INSTANT=1 scripts/verify captureInstantOperations` records twelve
+fixture-only operations each for workspace, rail, resize, stop crossing, open
+and close. The signed observer excludes non-fixture applications from the
+ScreenCaptureKit display stream, requests 120 Hz and persists only palette owner
+masks. The opt-in run compiles its pixel analyzer with release optimization;
+ordinary verification keeps its existing build configuration. It checks pixel movement against independent native geometry and checks
+visible palette centers before accepting a recording. Outputs remain ignored
+under `.work/captures/instant/`, including the per-frame masks, analysis and
+operation table. It costs no time in ordinary verification and has no CI job.
+A recording that does not reflect the native movement is inconclusive, not a
+zero-glitch result. Delivery still requires the owner's authorized desktop to
+collect this evidence and run the full signed verification suites.

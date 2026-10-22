@@ -141,7 +141,7 @@ extension Acceptance {
             let ids = try desktop.railSetup()
             try step("CLI reports rail, slot, layout and nulls outside a rail") {
                 try desktop.post(kVK_ANSI_J, shift: true)
-                try desktop.expectShown(ids[0])
+                try desktop.expectFocus(ids[0])
                 try requireFinalState("the moved fixture rail and slot fields") {
                     let rows = try harness.rows()
                     let rail = try harness.status().workspaces?.rail
@@ -166,7 +166,7 @@ extension Acceptance {
                 // the next key still applies to it: Up from a floating window
                 // is previous in arrival order, the last upper-rail tile.
                 try requireFinalState("tessel retired the closed dialog") { try harness.row(dialog) == nil }
-                try desktop.expectShown(ids[0])
+                try desktop.expectFocus(ids[0])
             }
             try step("real scroll hotkeys reveal the next destination") {
                 try desktop.post(kVK_ANSI_K)

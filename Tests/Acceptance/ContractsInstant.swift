@@ -13,15 +13,14 @@ extension Acceptance.Contracts {
         try #require(try write(id, "AXPosition", origin) == 0)
         try #require(try write(id, "AXSize", [600, 400]) == 0)
         try requireFinalState("baseline fixture size") { try native("retained", ["id": id]).window?.frame.suffix(2) == [600, 400] }
-        try native("enhancedUI", ["enabled": true])
-        try #require(try write(id, "AXSize", [900, 400]) == 0)
-        try #require(try write(id, "AXPosition", origin) == 0)
+        let enabled = try native("enhancedUI", ["enabled": true])
+        try #require(enabled.enhancedUI == true && [Int32(0), -25208].contains(enabled.result ?? 1))
+        try #require(try native("writeSizeThenPosition", ["id": id, "frame": [origin[0] + 200, origin[1], 900, 400]]).results == [0, 0])
         try requireFinalState("enhanced UI loses the size followed by position") {
             try native("retained", ["id": id]).window?.frame.suffix(2) == [600, 400]
         }
         try native("enhancedUI", ["enabled": false])
-        try #require(try write(id, "AXSize", [900, 400]) == 0)
-        try #require(try write(id, "AXPosition", origin) == 0)
+        try #require(try native("writeSizeThenPosition", ["id": id, "frame": [origin[0], origin[1], 900, 400]]).results == [0, 0])
         try native("enhancedUI", ["enabled": true])
         try requireFinalState("disabling enhanced UI around the writes preserves the requested size and restores the flag") {
             try native("retained", ["id": id]).window?.frame.suffix(2) == [900, 400] && native("enhancedUI").enhancedUI == true

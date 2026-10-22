@@ -96,7 +96,11 @@ EOF
         sleep 0.5
     done
 fi
-swift test --package-path "$root" --no-parallel "${filters[@]}"
+configuration=(-c debug)
+# Pixel comparisons scan full recordings. Optimize that opt-in harness so its
+# analysis does not turn the bounded capture into minutes of debug-loop work.
+[[ ${TESSEL_CAPTURE_INSTANT:-} == 1 ]] && configuration=(-c release)
+swift test --package-path "$root" "${configuration[@]}" --no-parallel "${filters[@]}"
 if (( full_run )); then
     # Reaching this point requires every selected suite to have passed. Dirty
     # checkouts still verify, but they cannot attest to a committed revision.

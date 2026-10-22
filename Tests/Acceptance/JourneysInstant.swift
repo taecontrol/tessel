@@ -13,6 +13,7 @@ extension Acceptance.Journeys {
         let initial = try desktop.observe()
         let selected = try #require(initial.windows.first { $0.focused && ids.contains($0.id) })
         let id = selected.id
+        try harness.observer.command("contract", ["operation": "snapshot", "pid": fixture.pid])
         try harness.observer.command("contract", ["operation": "pointerStart", "pid": fixture.pid])
         try harness.observer.command("contract", ["operation": "dragResize", "pid": fixture.pid, "id": id, "delta": -120])
         try requireFinalState("all twenty posted drag steps and their release were delivered") {

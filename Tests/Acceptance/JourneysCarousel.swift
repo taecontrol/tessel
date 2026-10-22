@@ -8,9 +8,8 @@ extension Acceptance.Journeys {
         try step("Reduce Motion makes a configured carousel move instant (wiring)") {
             harness.stopApp()
             // The harness verifies that tessel reports a zero effective duration.
-            try harness.startApp(reduceMotion: true)
             defer { harness.stopApp(); try? harness.startApp() }
-            let ids = try desktop.railSetup([0.6, 0.6], duration: 400)
+            let ids = try desktop.railSetup([0.6, 0.6], duration: 400, reduceMotion: true)
             let work = try harness.stageWork()
             try desktop.post(kVK_ANSI_L)
             try desktop.expectFocus(ids[1])
@@ -27,9 +26,15 @@ extension Acceptance.Journeys {
     func carouselCardsKeepCrossAppOrderAndFocus() throws {
         let other = try FixtureSession(directory:harness.directory,number:harness.otherFixtures.count+1)
         harness.otherFixtures.append(other)
-        let a = try fixture.open(kind:"heavyText",key:"topA"), c = try fixture.open(kind:"web",key:"bottomA")
-        let b = try other.open(kind:"web",key:"topB"), d = try other.open(kind:"heavyText",key:"bottomB")
+        harness.stopApp()
+        let visible = try desktop.observe().area
+        let fraction = ((visible[2] - 30) / 2) / (visible[2] - 20)
+        let a = try fixture.open(kind:"heavyText",key:"topA", ["widthFraction": fraction]), c = try fixture.open(kind:"web",key:"bottomA", ["widthFraction": fraction])
+        let b = try other.open(kind:"web",key:"topB", ["widthFraction": fraction]), d = try other.open(kind:"heavyText",key:"bottomB", ["widthFraction": fraction])
         let top = [a,b], bottom = [c,d], ids = top+bottom
+        try desktop.activate(key:"topA")
+        try desktop.writeConfig("[animation]\nduration = 400\n")
+        try harness.startApp(fixtureReady: false)
         try requireFinalState("all mixed-app fixture windows are catalogued") { Set(try harness.rows().map(\.id)) == Set(ids) }
         try desktop.activate(key:"topA")
         try desktop.configure("[experiments]\ncarousel = true\n[animation]\nduration = 400\n",layout:"carousel")
@@ -38,7 +43,7 @@ extension Acceptance.Journeys {
             // its focus before the command.
             try desktop.activate(key:"bottomA"); try desktop.expectFocus(c); try desktop.post(kVK_ANSI_J,shift:true)
             try requireFinalState("the first bottom fixture is in rail two") { try harness.row(c)?.rail == 2 }
-            if try !finalState({ try desktop.shown(c, in: desktop.observe()) }) {
+            if try !finalState({ try desktop.focused(c, in: desktop.observe()) }) {
                 let state = try desktop.observe()
                 throw HarnessError("first card: focus \(state.windows.filter(\.focused).map(\.id)), frames \(state.windows.map { "\($0.id):\($0.frame) visible=\($0.visible)" }), area \(state.area)")
             }

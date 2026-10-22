@@ -13,6 +13,7 @@ struct FixtureContractError: Error, CustomStringConvertible {
 final class FixtureContracts: NSObject {
     private let motionProbe = FixtureMotionProbe()
     private let stage = FixtureStage()
+    private let instantRecording = FixtureInstantRecording()
     private var handles: [UInt32: AXUIElement] = [:]
     private var bars: [AXUIElement] = []
     private var captured: [String: CFTypeRef] = [:]
@@ -75,6 +76,11 @@ final class FixtureContracts: NSObject {
                     return "\(window[kCGWindowOwnerName as String] as? String ?? "?")@\(layer)"
                 }
             return ["foreground": ["front \(front?.bundleIdentifier ?? front?.localizedName ?? "none")"] + owners]
+        case "instantRecordingStart", "instantRecordingStop":
+            guard let pids = command["pids"] as? [pid_t], !pids.isEmpty, pids.allSatisfy({ FixtureProbe.isFixture($0) }) else {
+                throw FixtureContractError("instant recording accepts signed fixture processes only")
+            }
+            return try instantRecording.command(command)
         case "screenRecording": return stage.preflight()
         case "stageOverlayShow": return stage.showOverlay()
         case "stageOverlayHide": stage.hideOverlay(); return [:]
@@ -146,13 +152,18 @@ final class FixtureContracts: NSObject {
             return [:]
         case "enhancedUI":
             let attribute = "AXEnhancedUserInterface" as CFString
+            var writeResult: AXError?
             if let enabled = command["enabled"] as? Bool {
-                let result = AXUIElementSetAttributeValue(application, attribute, enabled ? kCFBooleanTrue : kCFBooleanFalse)
-                guard result == .success else { throw FixtureContractError("fixture enhanced UI write failed: \(result.rawValue)") }
+                writeResult = AXUIElementSetAttributeValue(application, attribute, enabled ? kCFBooleanTrue : kCFBooleanFalse)
             }
             var value: CFTypeRef?
             let result = AXUIElementCopyAttributeValue(application, attribute, &value)
-            return ["result": result.rawValue, "enhancedUI": value as Any? ?? NSNull()]
+            // AppKit may apply this private attribute while answering
+            // notImplemented. The readback, not that status, proves the Given.
+            if let enabled = command["enabled"] as? Bool, (value as? Bool) != enabled {
+                throw FixtureContractError("enhanced UI readback differs after write: \(writeResult?.rawValue ?? result.rawValue)")
+            }
+            return ["result": writeResult?.rawValue ?? result.rawValue, "enhancedUI": value as Any? ?? NSNull()]
         case "dragResize":
             let window = try retained(command, pid: pid)
             let values = frame(position: read(window, kAXPositionAttribute).value, size: read(window, kAXSizeAttribute).value)
@@ -202,6 +213,16 @@ final class FixtureContracts: NSObject {
         case "readCapture":
             return ["capturedFrame": frame(position: captured["position"], size: captured["size"]),
                     "capturedFocus": element(captured["focused"]).map(id) ?? 0]
+        case "writeSizeThenPosition":
+            let window = try retained(command, pid: pid)
+            guard let target = command["frame"] as? [Double], target.count == 4 else { throw FixtureContractError("paired geometry needs a native frame") }
+            var point = CGPoint(x: target[0], y: target[1]), size = CGSize(width: target[2], height: target[3])
+            let position = AXValueCreate(.cgPoint, &point)!, dimensions = AXValueCreate(.cgSize, &size)!
+            // Keep both writes in one client burst, as in the app. Another
+            // command/reply between them gives AppKit time to finish resizing.
+            let sized = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, dimensions)
+            let moved = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, position)
+            return ["results": [sized.rawValue, moved.rawValue]]
         case "write":
             let window = try retained(command, pid: pid)
             let attribute = command["attribute"] as? String ?? ""

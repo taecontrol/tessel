@@ -175,7 +175,7 @@ struct Desktop {
         return (a, b)
     }
 
-    func railSetup(_ widths: [Double] = Array(repeating: 0.45, count: 5), firstIn firstSession: FixtureSession? = nil, duration: Int = 80, configuration: String = "") throws -> [UInt32] {
+    func railSetup(_ widths: [Double] = Array(repeating: 0.45, count: 5), firstIn firstSession: FixtureSession? = nil, duration: Int = 80, reduceMotion: Bool = false, configuration: String = "") throws -> [UInt32] {
         harness.stopApp()
         let ids = try widths.enumerated().map { index, width in
             let session = index == 0 ? firstSession ?? fixture : fixture
@@ -183,7 +183,7 @@ struct Desktop {
         }
         try activate(firstSession, key: "w0")
         try writeConfig(configuration + "[animation]\nduration = \(duration)\n")
-        try harness.startApp(fixtureReady: false)
+        try harness.startApp(fixtureReady: false, reduceMotion: reduceMotion)
         try requireFinalState("every rail setup window listed") { Set(try harness.rows().map(\.id)) == Set(ids) }
         // The focused first window keeps its width at the rail's left end.
         var last = "no observation"

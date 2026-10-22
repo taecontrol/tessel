@@ -56,7 +56,7 @@ package enum Assumption: String, CaseIterable, Sendable {
 
     package var statement: String {
         switch self {
-        case .enhancedUIResize: "With AXEnhancedUserInterface enabled, a size followed by position loses the size; disabling it around the write and restoring it preserves the requested geometry."
+        case .enhancedUIResize: "With AXEnhancedUserInterface enabled, a size followed by position loses the size; disabling it around the write and restoring it preserves the requested geometry. AppKit may apply the flag while returning notImplemented."
         case .axResizeAnchoring: "AXSize can be constrained by the current positive x and by the current top against the screen bottom; moving first allows the requested size."
         case .pointerPressNotifications: "An NSEvent global monitor receives another app's mouse press before drag events and its release after them."
         case .axVerticalClamping: "AXPosition keeps the top below the menu bar and at least 32 points visible at the screen bottom."

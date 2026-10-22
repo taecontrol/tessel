@@ -291,6 +291,8 @@ extension SimulatedMac {
             assume(.enhancedUIResize)
             apps[pid]?.enhancedUserInterface = enabled
             if !enabled { apps[pid]?.pendingEnhancedSizes.removeAll() }
+            // AppKit applies the private flag despite this reported status.
+            return .other(-25208)
         case (.application(let pid), .frontmost, .bool(true)):
             assume(.applicationActivation)
             activateFromAX(pid)

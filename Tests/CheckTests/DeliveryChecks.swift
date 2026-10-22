@@ -49,9 +49,16 @@ import Testing
             #expect(try repo.check(["verification-evidence", "--base", repo.base, "--head", head, "--body-file", repo.body(body)]).status != 0)
         }
         #expect(try repo.check(["verification-evidence", "--base", repo.base, "--head", head, "--body-file", repo.body(repo.block(head: head))]).status == 0)
-        let docs = try RepositoryFixture(); defer { docs.remove() }
-        let docHead = try docs.commit(path: "docs/guide.md", content: "A guide\n")
-        #expect(try docs.check(["verification-evidence", "--base", docs.base, "--head", docHead, "--body-file", docs.body("")]).status == 0)
+        for path in ["Tests/Acceptance/Generic.swift", "Tests/Fixture/Generic.swift", "Tools/Build/Generic.swift", "scripts/generic"] {
+            let real = try RepositoryFixture(); defer { real.remove() }
+            let realHead = try real.commit(path: path, content: "generic\n")
+            #expect(try real.check(["verification-evidence", "--base", real.base, "--head", realHead, "--body-file", real.body("")]).status != 0)
+        }
+        for path in ["docs/guide.md", "Tests/Simulator/Generic.swift", "Tests/PolicyTests/Generic.swift"] {
+            let exempt = try RepositoryFixture(); defer { exempt.remove() }
+            let exemptHead = try exempt.commit(path: path, content: "generic\n")
+            #expect(try exempt.check(["verification-evidence", "--base", exempt.base, "--head", exemptHead, "--body-file", exempt.body("")]).status == 0)
+        }
     }
 
     @Test("#33 E23: a clean verified head produces evidence, a dirty or changed head cannot")
