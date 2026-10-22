@@ -43,7 +43,13 @@ import Testing
         let text = Self.config + "[animation]\nduration = \(duration)\n"
         tessel.changeConfig(text)
     }
-    func press(_ key: String) { s.step(key) { tessel.pressKey(key) }; s.settle() }
+    func press(_ key: String) {
+        s.step(key) {
+            if WorkspaceCommand(key) != nil { tessel.press(key) }
+            else { tessel.pressKey(key) }
+        }
+        s.settle()
+    }
     func select(_ id: UInt32) { app.select(id); s.settle() }
     func open(minimum: Double = 1, maximum: Double = 100_000) -> UInt32 {
         var spec = WindowSpec(frame: CGRect(x: 40, y: 60, width: 451, height: 400),

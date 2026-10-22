@@ -37,7 +37,7 @@ import Testing
         let budget = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appending(path: "Tests/Acceptance/resource-budget.json"))) as! [String: Any]
         #expect(budget["interruptWakeups"] as? Int == 11 && budget["cpuNanoseconds"] as? Int == 100_000_000 && budget["footprintBytes"] as? Int == 30_000_000)
         let latency = try String(contentsOf: root.appending(path: "Tests/Acceptance/Latency.swift"), encoding: .utf8)
-        let declaration = try #require(latency.range(of: #"\blet\s+limit\s*:\s*UInt64\s*=\s*[0-9_]+"#, options: .regularExpression))
+        let declaration = try #require(latency.range(of: #"(?m)^[\t ]*let[\t ]+limit[\t ]*:[\t ]*UInt64[\t ]*=[\t ]*[0-9_]+[\t ]*$"#, options: .regularExpression))
         let value = latency[declaration].split(separator: "=").last!.filter { $0.isNumber }
         #expect(UInt64(value) == 200_000_000)
     }
