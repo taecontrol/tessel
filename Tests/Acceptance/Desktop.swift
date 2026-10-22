@@ -183,11 +183,13 @@ struct Desktop {
         return (a, b)
     }
 
-    func railSetup(_ widths: [Double] = Array(repeating: 0.45, count: 5), firstIn firstSession: FixtureSession? = nil, duration: Int = 80, reduceMotion: Bool = false, configuration: String = "") throws -> [UInt32] {
+    func railSetup(_ widths: [Double] = Array(repeating: 0.45, count: 5), firstIn firstSession: FixtureSession? = nil, duration: Int = 80, reduceMotion: Bool = false, palette: Bool = false, configuration: String = "") throws -> [UInt32] {
         harness.stopApp()
         let ids = try widths.enumerated().map { index, width in
             let session = index == 0 ? firstSession ?? fixture : fixture
-            return try session.open(key: "w\(index)", ["widthFraction": width])
+            var arguments: [String: Any] = ["widthFraction": width]
+            if palette { arguments["color"] = index }
+            return try session.open(key: "w\(index)", arguments)
         }
         try activate(firstSession, key: "w0")
         try writeConfig(configuration + "[animation]\nduration = \(duration)\n")
