@@ -20,6 +20,7 @@ package enum AXAttribute: String, Sendable {
     case size = "AXSize", position = "AXPosition", role = "AXRole", tabs = "AXTabs"
     case contents = "AXContents", children = "AXChildren", frontmost = "AXFrontmost"
     case main = "AXMain", window = "AXWindow"
+    case enhancedUserInterface = "AXEnhancedUserInterface"
 }
 
 package enum AXNotification: String, Sendable {

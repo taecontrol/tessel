@@ -46,6 +46,7 @@ package enum Assumption: String, CaseIterable, Sendable {
     case axRaiseAcrossApplications = "ax-raise-across-applications"
     case closetAXIdentity = "closet-ax-identity"
     case closetSizeLoss = "closet-size-loss"
+    case enhancedUIResize = "enhanced-ui-resize"
     case screenRecordingPreflight = "screen-recording-preflight"
     case stageWholeWindowCapture = "stage-whole-window-capture"
     case stageOverlay = "stage-overlay"
@@ -55,6 +56,7 @@ package enum Assumption: String, CaseIterable, Sendable {
 
     package var statement: String {
         switch self {
+        case .enhancedUIResize: "With AXEnhancedUserInterface enabled, a size followed by position loses the size; disabling it around the write and restoring it preserves the requested geometry."
         case .axResizeAnchoring: "AXSize can be constrained by the current positive x and by the current top against the screen bottom; moving first allows the requested size."
         case .pointerPressNotifications: "An NSEvent global mouse-down monitor receives a press delivered to another app before subsequent drag events."
         case .axVerticalClamping: "AXPosition keeps the top below the menu bar and at least 32 points visible at the screen bottom."

@@ -109,6 +109,7 @@ struct NativeContractReply: Codable {
         let ordinary: [UInt64]
         let all: [UInt64]
     }
+    let enhancedUI: Bool?
     let result: Int32?
     let writeReturnedAt: Double?
     let results: [Int32]?

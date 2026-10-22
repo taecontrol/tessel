@@ -93,6 +93,7 @@ extension SimulatedMac {
             mac.scheduler.call("ClosetPort.hide windows=\(windows)")
             mac.recordVisibility(windows, showing: false)
             move(windows, to: space)
+            mac.recordPresentation("hide")
         }
         func show(_ windows: [UInt32]) {
             mac.assume(.closetMoves)
@@ -107,6 +108,7 @@ extension SimulatedMac {
             }
             mac.recordVisibility(windows, showing: true)
             move(windows, to: mac.active)
+            mac.recordPresentation("show")
         }
         func stop(returning windows: [UInt32]) {
             mac.assume(.closetMoves)

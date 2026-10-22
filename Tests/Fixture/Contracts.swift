@@ -144,6 +144,35 @@ final class FixtureContracts: NSObject {
             CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: target, mouseButton: .left)?.post(tap: .cghidEventTap)
             if let oldPointer { CGWarpMouseCursorPosition(oldPointer) }
             return [:]
+        case "enhancedUI":
+            let attribute = "AXEnhancedUserInterface" as CFString
+            if let enabled = command["enabled"] as? Bool {
+                let result = AXUIElementSetAttributeValue(application, attribute, enabled ? kCFBooleanTrue : kCFBooleanFalse)
+                guard result == .success else { throw FixtureContractError("fixture enhanced UI write failed: \(result.rawValue)") }
+            }
+            var value: CFTypeRef?
+            let result = AXUIElementCopyAttributeValue(application, attribute, &value)
+            return ["result": result.rawValue, "enhancedUI": value as Any? ?? NSNull()]
+        case "dragResize":
+            let window = try retained(command, pid: pid)
+            let values = frame(position: read(window, kAXPositionAttribute).value, size: read(window, kAXSizeAttribute).value)
+            guard values.count == 4, NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+                  fixtureCGFrames([pid])[id(window)] != nil else { throw FixtureContractError("drag needs a visible frontmost fixture") }
+            let delta = command["delta"] as? Double ?? -100
+            let start = CGPoint(x: values[0] + values[2] - 1, y: values[1] + values[3] / 2)
+            let pointer = CGEvent(source: nil)?.location
+            Task { @MainActor in
+                CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: start, mouseButton: .left)?.post(tap: .cghidEventTap)
+                for step in 1...20 {
+                    try? await Task.sleep(for: .milliseconds(20))
+                    let point = CGPoint(x: start.x + delta * Double(step) / 20, y: start.y)
+                    CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
+                }
+                let end = CGPoint(x: start.x + delta, y: start.y)
+                CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: end, mouseButton: .left)?.post(tap: .cghidEventTap)
+                if let pointer { CGWarpMouseCursorPosition(pointer) }
+            }
+            return [:]
         case "snapshot": return snapshot(application, pid: pid)
         case "barOwner":
             guard let index = command["bar"] as? Int, bars.indices.contains(index) else { throw FixtureContractError("retain a native bar before reading its owner") }

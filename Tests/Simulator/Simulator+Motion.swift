@@ -28,7 +28,14 @@ extension SimulatedMac {
         /// The AXRaise target, when this effect followed that action.
         package let raisedWindow: UInt32?
     }
+    package struct PresentationState: Sendable {
+        package let operation: String
+        package let traceIndex: Int
+        package let frames: [UInt32: CGRect]
+        package let order: [UInt32]
+    }
     struct MotionState {
+        var states: [PresentationState] = []
         var writes: [GeometryWrite] = []
         var visibility: [VisibilityChange] = []
         var focusRequests: [FocusRequest] = []
@@ -41,6 +48,7 @@ extension SimulatedMac {
     struct WeakPreference { weak var value: PreferenceToken? }
     struct WeakPointer { weak var value: PointerToken? }
     @MainActor final class PointerToken: MotionPreferenceObservation {
+        var release: (@MainActor @Sendable () -> Void)?
         let receive: @MainActor @Sendable () -> Void
         init(_ receive: @escaping @MainActor @Sendable () -> Void) { self.receive = receive }
     }
@@ -51,9 +59,19 @@ extension SimulatedMac {
 
     @MainActor package var motionPreferences: any MotionPreferencePort { Preferences(mac: self) }
     @MainActor package var pointerActivity: any PointerActivityPort { PointerActivity(mac: self) }
+    @MainActor package func pointerDown() { pressPointer() }
+    @MainActor package func pointerUp() {
+        for box in motion.pointers { box.value?.release?() }
+    }
     @MainActor func pressPointer() {
         assume(.pointerPressNotifications)
         for box in motion.pointers { box.value?.receive() }
+    }
+    @MainActor package var presentationStates: [PresentationState] { motion.states }
+    func recordPresentation(_ operation: String) {
+        let order = visibleIDs()
+        motion.states.append(PresentationState(operation: operation, traceIndex: scheduler.trace.count,
+            frames: Dictionary(uniqueKeysWithValues: order.compactMap { id in windows[id].map { (id, $0.spec.frame) } }), order: order))
     }
     @MainActor package var geometryWrites: [GeometryWrite] { motion.writes }
     @MainActor package var visibilityChanges: [VisibilityChange] { motion.visibility }
@@ -73,10 +91,11 @@ extension SimulatedMac {
         }
     }
     @MainActor package func clearMotionHistory() {
-        motion.writes.removeAll(); motion.visibility.removeAll(); motion.focusRequests.removeAll(); motion.focusEffects.removeAll()
+        motion.states.removeAll(); motion.writes.removeAll(); motion.visibility.removeAll(); motion.focusRequests.removeAll(); motion.focusEffects.removeAll()
         clearStageHistory()
     }
     func recordFocusEffect(raisedWindow: UInt32? = nil) {
+        recordPresentation("focus")
         let window = front.flatMap { apps[$0]?.key }
         motion.focusEffects.append(NativeFocus(at: scheduler.now, window: window, hidden: window.map(isCloseted) ?? false, raisedWindow: raisedWindow))
     }
@@ -92,6 +111,7 @@ extension SimulatedMac {
     }
     func finishGeometry(_ id: UInt32, index: Int) {
         motion.writes[index].accepted = windows[id]!.spec.frame
+        recordPresentation("geometry")
     }
     func recordVisibility(_ ids: [UInt32], showing: Bool) {
         motion.visibility.append(VisibilityChange(at: scheduler.now, windows: ids, showing: showing,

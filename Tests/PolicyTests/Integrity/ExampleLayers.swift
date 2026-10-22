@@ -12,7 +12,7 @@ enum IntegritySources {
 }
 
 enum ExampleLayers {
-    enum Layer: String { case policy = "P", journey = "J", latency = "L", resources = "R", capture = "X" }
+    enum Layer: String { case contract = "C", tooling = "T", policy = "P", journey = "J", latency = "L", resources = "R", capture = "X" }
     struct Tag {
         let id: String
         let layer: Layer?
@@ -89,6 +89,8 @@ enum ExampleLayers {
     }
 
     private static func layer(path: String, function: String, step: Bool) -> Layer? {
+        if path.hasPrefix("Tests/Acceptance/Contracts") { return .contract }
+        if path.hasPrefix("Tests/CheckTests/") { return .tooling }
         if path.hasPrefix("Tests/PolicyTests/Scenarios/") && !step { return .policy }
         if path.hasPrefix("Tests/Acceptance/Journeys") && path.hasSuffix(".swift") { return .journey }
         if path == "Tests/Acceptance/Latency.swift" && !step { return .latency }

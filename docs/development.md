@@ -943,7 +943,31 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #26 E23 | P |
 | #26 E24 | R |
 | #26 E25 | P |
+| #33 E1 | P |
+| #33 E2 | P |
+| #33 E3 | P |
+| #33 E4 | T |
+| #33 E5 | P |
+| #33 E6 | P |
+| #33 E7 | P |
+| #33 E8 | C |
+| #33 E9 | P |
+| #33 E10 | P |
+| #33 E11 | P |
+| #33 E12 | P |
+| #33 E13 | P |
+| #33 E14 | P |
+| #33 E15 | J |
+| #33 E16 | P |
+| #33 E17 | P |
 | #33 E18 | P |
+| #33 E19 | C |
+| #33 E20 | X |
+| #33 E21 | T |
+| #33 E22 | T |
+| #33 E23 | T |
+| #33 E24 | T |
+<!-- Pending capture: #33 E20 -->
 
 E21 has an opt-in executable capture in `CapturesCarousel.swift`; it needs a
 pixel recording of the stage before the owner can review it again. All mapped
