@@ -13,7 +13,7 @@ import Testing
             scenario.expect("missing config is reported as defaults", config.state == "defaults")
             scenario.expect("missing config has no error", config.error == nil)
             scenario.expect("every effective setting uses its default", config.effective == Configuration())
-            scenario.expect("experiments are off", !tessel.status.enabled)
+            scenario.expect("kept experiments are active by default", tessel.status.enabled)
             scenario.expect("startup publishes the same default status", tessel.configurationPublications.last?.status.state == "defaults")
         })
     }

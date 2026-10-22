@@ -19,28 +19,6 @@ import Testing
         })
     }
 
-    @Test("#19 E24: disabling only the layer preserves explicit carousel workspace visibility")
-    func explicitCarouselKeepsInactiveFloatsHidden() {
-        requireLayer(Scenario.run("layer disabled while carousel stays explicitly enabled") { s in
-            let f = LayerFixture(s), remote = f.floats[0], local = f.floats[1]
-            f.press("toggle layer"); f.press("send 3"); f.press("workspace 1"); f.press("toggle layer")
-            f.tessel.changeConfig("[experiments]\ncarousel = true\nlayer = false\n[animation]\nduration = 0\n"); s.settle()
-            s.expect("explicit carousel remains enabled", f.tessel.status.enabled && f.tessel.status.layout == "carousel")
-            f.visible([local], true); f.visible([remote], false)
-            f.key("alt-z"); f.visible([local], true)
-            f.press("workspace 3"); f.focus(remote)
-            f.visible([remote], true); f.visible([local], false)
-            // Re-enabling over an all-floating workspace transfers focus to
-            // the desktop before hiding its last native key window.
-            f.mac.clearMotionHistory()
-            f.tessel.changeConfig(LayerFixture.config); s.settle()
-            f.state("hidden", focused: false); f.visible([remote, local], false)
-            s.expect("re-enabling transfers native focus before the closet move", f.mac.visibilityChanges.allSatisfy { change in
-                change.showing || (change.focusedWindow.map { !change.windows.contains($0) } ?? true)
-            })
-        })
-    }
-
     @Test("#19 E26: a delayed cross-app focus confirmation completes the layer exit safely", arguments: DeferredActivationCompletion.allCases)
     func exitAfterDelayedActivation(_ completion: DeferredActivationCompletion) {
         requireLayer(Scenario.run("layer exit after deferred activation \(completion.rawValue)") { s in

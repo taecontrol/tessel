@@ -1,9 +1,10 @@
+import CoreGraphics
 import Simulator
 import Testing
 @testable import Policy
 
 @Suite @MainActor struct RailOrderingRegressions {
-    @Test("#2 E25: a queued raise never restores a window minimized while AXMain returns", arguments: [Layout.stack, .carousel], MinimizedRaiseReply.allCases)
+    @Test("#2 E25: a queued raise never restores a window minimized while AXMain returns", arguments: [Layout.carousel], MinimizedRaiseReply.allCases)
     func minimizeBetweenFocusWrites(_ layout: Layout, _ reply: MinimizedRaiseReply) {
         for writes in WriteOrder.allCases {
             requireScenario(Scenario.run("minimize between focus writes in \(layout), reply=\(reply)", writes: writes) { s in
@@ -49,43 +50,50 @@ import Testing
         })
     }
 
+    private func initialBackground(_ s: Scenario, fraction: Double) -> (Tessel, Simulator.SimulatedApp, [UInt32], UInt32) {
+        let mac = s.mac, app = mac.launch(), area = WorkspaceScenarios.area(mac)
+        let ids = (0..<2).map { _ in app.open(WindowSpec(frame: CGRect(x: 40, y: 60, width: floor(area.width * fraction), height: 400))) }
+        app.select(ids[0])
+        let background = mac.launch(), c = background.open(WindowSpec(), background: true)
+        let tessel = s.startTessel(text: "[animation]\nduration = 0\n")
+        let held = mac.pause(after: .call("AccessibilityPort.copy AXWindows \(background.alias) pid=\(background.pid)"))
+        if case .paused = held {} else { s.expect("initial background enumeration is held", false) }
+        _ = mac.scheduler.run()
+        s.expect("the front app is known before background discovery", Set(tessel.windows.map(\.id)) == Set(ids))
+        mac.scheduler.resume()
+        return (tessel, app, ids, c)
+    }
+
     @Test("late initial enumeration cannot re-expand after a reorder")
     func lateInitialEnumerationAfterMove() {
         requireScenario(Scenario.run("initial background read across keyboard reorder", writes: .readsFirst) { s in
-            let f = RailFixture(s, widths: [0.5, 0.5]), a = f.ids[0], b = f.ids[1]
-            f.tessel.configure(.off); s.settle()
-            let background = f.mac.launch()
-            let c = background.open(WindowSpec(), background: true)
-            f.tessel.configure(.carousel)
-            f.tessel.press("move right")
-            let held = f.mac.pause(after: .call("AccessibilityPort.copy AXHidden \(f.app.alias) pid=\(f.app.pid)"))
-            if case .paused = held {} else { s.expect("the keyboard presentation is outstanding: \(held)", false) }
-            let independent = f.mac.scheduler.run()
-            if case .paused = independent {} else { s.expect("the background snapshot runs while keyboard AX is held: \(independent)", false) }
-            s.expect("the background application's initial window is published", f.tessel.windows.contains { $0.id == c })
-            s.settle(); f.focus(a); f.order([b, a, c])
-            f.near(f.frame(a).maxX, f.area.maxX, "keyboard reorder retains its complete target")
+            let (t, app, ids, c) = initialBackground(s, fraction: 0.5)
+            t.press("move right")
+            let held = s.mac.pause(after: .call("AccessibilityPort.copy AXHidden \(app.alias) pid=\(app.pid)"))
+            if case .paused = held {} else { s.expect("the keyboard presentation is outstanding", false) }
+            _ = s.mac.scheduler.run()
+            s.expect("background discovery publishes while keyboard AX waits", t.windows.contains { $0.id == c })
+            s.settle()
+            s.expect("the reorder retains native focus", s.mac.focusedWindow == ids[0])
+            let order = t.windows.sorted { ($0.slot ?? 0) < ($1.slot ?? 0) }.map(\.id)
+            s.expect("initial discovery preserves the completed reorder", order == [ids[1], ids[0], c])
+            s.expect("the reordered tile stays complete", s.mac.isFullyOnScreen(ids[0]))
         })
     }
 
-    @Test("#2 E2: background discovery preserves an outstanding keyboard selection", arguments: [Layout.stack, .carousel])
-    func initialBackgroundReadPreservesKeyboardFocus(layout: Layout) {
-        requireScenario(Scenario.run("initial background read across keyboard focus in \(layout)", writes: .readsFirst) { s in
-            let f = RailFixture(s, widths: [0.25, 0.25]), a = f.ids[0], b = f.ids[1]
-            f.tessel.configure(.off); s.settle()
-            let background = f.mac.launch()
-            let c = background.open(WindowSpec(), background: true)
-            f.tessel.configure(layout)
-            f.tessel.press(layout == .carousel ? "focus right" : "focus next")
-            let held = f.mac.pause(after: .call("AccessibilityPort.copy AXHidden \(f.app.alias) pid=\(f.app.pid)"))
-            if case .paused = held {} else { s.expect("the keyboard presentation is outstanding: \(held)", false) }
-            let independent = f.mac.scheduler.run()
-            if case .paused = independent {} else { s.expect("the background snapshot runs while keyboard AX is held: \(independent)", false) }
-            s.expect("the background application's initial window is published", f.tessel.windows.contains { $0.id == c })
-            s.expect("the keyboard focus write has not executed yet", f.mac.focusedWindow == a)
-            s.settle(); f.focus(b)
-            s.expect("initial discovery keeps the keyboard destination's workspace", f.tessel.status.active == 1)
+    @Test("#2 E2: background discovery preserves an outstanding keyboard selection")
+    func initialBackgroundReadPreservesKeyboardFocus() {
+        requireScenario(Scenario.run("initial background read across keyboard focus", writes: .readsFirst) { s in
+            let (t, app, ids, c) = initialBackground(s, fraction: 0.25)
+            t.press("focus right")
+            let held = s.mac.pause(after: .call("AccessibilityPort.copy AXHidden \(app.alias) pid=\(app.pid)"))
+            if case .paused = held {} else { s.expect("the keyboard presentation is outstanding", false) }
+            _ = s.mac.scheduler.run()
+            s.expect("background discovery publishes before the focus write", t.windows.contains { $0.id == c })
+            s.expect("the old focus remains while its worker waits", s.mac.focusedWindow == ids[0])
+            s.settle()
+            s.expect("initial discovery preserves the keyboard destination", s.mac.focusedWindow == ids[1] && s.mac.isFullyOnScreen(ids[1]))
+            s.expect("the destination stays on workspace one", t.status.active == 1)
         })
     }
-
 }

@@ -64,105 +64,27 @@ extension Acceptance {
                         && rows.filter { tabIDs.contains($0.id) }.map(\.tabs).sorted() == [1, 1, 3]
                 }
             }
-            try desktop.clear()
-            let window = try fixture.open()
-            try desktop.activate()
-            try step("#2 E1 experiment off leaves frames and ordinary keys alone") {
-                let frame = try #require(try desktop.window(window)).frame
-                try desktop.expectPassedKey(kVK_ANSI_1)
-                try #require(try desktop.window(window)?.frame == frame)
-                let status = try #require(try harness.status().workspaces)
-                try #require(!status.enabled && status.reason == "experiment off")
-            }
-            try step("rails off leaves rail hotkeys unregistered") {
-                for enabled in [false, true] {
-                    if enabled {
-                        try desktop.configure(desktop.stack, layout: "stack")
-                        try desktop.expectShown(window)
-                    }
-                    let frame = try #require(try desktop.window(window)).frame
-                    for (code, shift) in [(kVK_ANSI_H, false), (kVK_ANSI_L, false), (kVK_ANSI_H, true),
-                                          (kVK_ANSI_J, true), (kVK_ANSI_K, true), (kVK_ANSI_L, true)] {
-                        try desktop.expectPassedKey(code, shift: shift)
-                    }
-                    try #require(try desktop.window(window)?.frame == frame)
-                }
-                try desktop.configure(desktop.stack + "[keys]\nalt-h = 'focus right'\nalt-shift-h = 'move down'\n", layout: "stack")
-                let frame = try #require(try desktop.window(window)).frame
-                try desktop.expectPassedKey(kVK_ANSI_H)
-                try desktop.expectPassedKey(kVK_ANSI_H, shift: true)
-                try #require(try desktop.window(window)?.frame == frame)
-            }
         }
 
         @Test("switch journey")
         func switchWorkspaces() throws {
-            var windows = [try fixture.open(key: "digit1")]
-            try desktop.activate(key: "digit1")
-            try desktop.configure(desktop.stack, layout: "stack")
-            try desktop.expectShown(windows[0])
-            try step("#2 E31 status lists all default shortcuts and each works") {
+            let ids = try desktop.railSetup([0.5, 0.5], duration: 0)
+            try step("#2 E31 default workspace and send shortcuts reach every workspace") {
                 let keys = try #require(try harness.status().workspaces).keys
-                try #require(keys.count == 22)
-                for number in 1...10 {
-                    let digit = number == 10 ? 0 : number
-                    try #require(keys["alt-\(digit)"] == "workspace \(number)")
-                    try #require(keys["alt-shift-\(digit)"] == "send \(number)")
-                }
-                try #require(keys["alt-j"] == "focus next" && keys["alt-k"] == "focus previous")
+                try #require(keys["alt-j"] == "focus down" && keys["alt-k"] == "focus up" && keys["alt-z"] == "toggle layer")
                 for number in 2...10 {
-                    let window = try fixture.open(key: "digit\(number)")
-                    windows.append(window)
-                    try desktop.expectShown(window)
-                    try requireFinalState("the new fixture assigned before sending") { try harness.row(window)?.workspace != nil }
                     try desktop.key(number, send: true)
-                    try desktop.expectShown(window)
-                    try requireFinalState("the default send binding and workspace status") {
-                        try harness.row(window)?.workspace == number && harness.status().workspaces?.active == number
-                    }
+                    try desktop.expectFocus(ids[0])
+                    try requireFinalState("the numeric send selects its destination") { try harness.status().workspaces?.active == number && harness.row(ids[0])?.workspace == number }
                 }
-                try desktop.key(1, send: true)
-                try desktop.expectShown(windows[9])
-                try requireFinalState("the default send-to-1 binding") {
-                    try harness.row(windows[9])?.workspace == 1 && harness.status().workspaces?.active == 1
-                }
-                try desktop.key(10, send: true)
-                try desktop.expectShown(windows[9])
-                try requireFinalState("the digit fixture returned to workspace 10") {
-                    try harness.row(windows[9])?.workspace == 10 && harness.status().workspaces?.active == 10
-                }
-                for number in 1...10 {
-                    try desktop.key(number)
-                    try desktop.expectShown(windows[number - 1])
-                    try desktop.expectMenu("Workspace \(number)")
-                    try #require(try harness.status().workspaces?.active == number)
-                }
-                try desktop.key(1)
-                try desktop.expectShown(windows[0])
-                var cycleWindows: [UInt32] = []
-                for key in ["cycle1", "cycle2"] {
-                    let sibling = try fixture.open(key: key)
-                    cycleWindows.append(sibling)
-                    try desktop.expectShown(sibling)
-                    try requireFinalState("the cycle fixture assigned") { try harness.row(sibling)?.workspace == 1 }
-                }
-                try desktop.post(kVK_ANSI_J)
-                try desktop.expectShown(windows[0])
-                try desktop.post(kVK_ANSI_K)
-                try desktop.expectShown(cycleWindows[1])
-                try fixture.command("close", ["key": "cycle1"])
-                try fixture.command("close", ["key": "cycle2"])
-                try desktop.expectShown(windows[0])
-                try requireFinalState("the cycle fixtures retired before testing overrides") {
-                    Set(try harness.rows().map(\.id)).isDisjoint(with: cycleWindows)
-                }
+                try desktop.key(1); try desktop.expectFocus(ids[1])
+                try desktop.key(10); try desktop.expectFocus(ids[0])
             }
             try step("#2 E32 custom modifiers and every ANSI letter reach merged bindings") {
-                try desktop.configure(desktop.stack + "[keys]\nctrl-alt-shift-cmd-g = 'workspace 2'\n", layout: "stack")
+                try desktop.configure("[keys]\nctrl-alt-shift-cmd-g = 'workspace 1'\nalt-2 = ''\n", layout: "carousel")
                 try desktop.post(kVK_ANSI_G, modifiers: ["alt", "shift", "ctrl", "cmd"])
-                try desktop.expectShown(windows[1])
-                try desktop.key(1)
-                try desktop.expectShown(windows[0])
+                try desktop.expectFocus(ids[1])
+                try desktop.expectPassedKey(kVK_ANSI_2)
                 let letters = [("a", kVK_ANSI_A), ("b", kVK_ANSI_B), ("c", kVK_ANSI_C), ("d", kVK_ANSI_D),
                     ("e", kVK_ANSI_E), ("f", kVK_ANSI_F), ("g", kVK_ANSI_G), ("h", kVK_ANSI_H),
                     ("i", kVK_ANSI_I), ("j", kVK_ANSI_J), ("k", kVK_ANSI_K), ("l", kVK_ANSI_L),
@@ -171,18 +93,11 @@ extension Acceptance {
                     ("u", kVK_ANSI_U), ("v", kVK_ANSI_V), ("w", kVK_ANSI_W), ("x", kVK_ANSI_X),
                     ("y", kVK_ANSI_Y), ("z", kVK_ANSI_Z)]
                 for (letter, code) in letters {
-                    try desktop.configure(desktop.stack + "[keys]\nalt-\(letter) = 'workspace 2'\n", layout: "stack")
+                    try desktop.configure("[keys]\nalt-\(letter) = 'workspace 10'\n", layout: "carousel")
                     try desktop.post(code)
-                    try desktop.expectShown(windows[1])
-                    try desktop.key(1)
-                    try desktop.expectShown(windows[0])
+                    try desktop.expectFocus(ids[0])
+                    try desktop.key(1); try desktop.expectFocus(ids[1])
                 }
-                try desktop.configure(desktop.stack + "[keys]\nalt-1 = 'workspace 2'\nalt-2 = ''\n", layout: "stack")
-                try desktop.expectPassedKey(kVK_ANSI_2)
-                try desktop.expectShown(windows[0])
-                try desktop.key(1)
-                try desktop.expectShown(windows[1])
-                try #require(try harness.status().workspaces?.keys["alt-j"] == "focus next")
             }
         }
 
@@ -194,16 +109,16 @@ extension Acceptance {
             try requireFinalState("both send journey fixtures listed") {
                 Set(try harness.rows().map(\.id)) == Set([previous, sent])
             }
-            try desktop.configure(desktop.stack, layout: "stack")
-            try desktop.expectShown(sent)
+            try desktop.configure(desktop.carousel, layout: "carousel")
+            try desktop.expectFocus(sent)
             try step("a real send follows its window and the previous workspace stays reachable") {
                 try desktop.key(3, send: true)
-                try desktop.expectShown(sent)
+                try desktop.expectFocus(sent)
                 try requireFinalState("the sent fixture membership and active workspace") {
                     try harness.row(sent)?.workspace == 3 && harness.status().workspaces?.active == 3
                 }
                 try desktop.key(1)
-                try desktop.expectShown(previous)
+                try desktop.expectFocus(previous)
             }
             try step("#2 E35 CLI reports workspace and visibility without titles") {
                 try requireFinalState("the CLI workspace and visibility fields") {
@@ -292,9 +207,9 @@ extension Acceptance {
         func reload() throws {
             let window = try fixture.open()
             try desktop.activate()
-            try step("saving config changes the live layout and gap") {
-                try desktop.configure(desktop.stack + "[gaps]\nouter = 20\n", layout: "stack")
-                try desktop.expectShown(window, gap: 20)
+            try step("saving config changes the live gap") {
+                try desktop.configure(desktop.carousel + "[gaps]\nouter = 20\n", layout: "carousel")
+                try desktop.expectFocus(window)
                 try #require(try harness.status().workspaces?.gaps.outer == 20)
             }
             try step("atomic replacement reloads the file watcher and rail layout") {
@@ -306,8 +221,7 @@ extension Acceptance {
                     let status = try harness.status(), observation = try desktop.observe()
                     return status.config.revision > revision && status.workspaces?.layout == "carousel"
                         && status.workspaces?.gaps.outer == 11 && observation.windows.contains {
-                            $0.id == window && desktop.near($0.frame, [observation.area[0] + 11, observation.area[1] + 11,
-                                observation.area[2] - 22, observation.area[3] - 22])
+                            $0.id == window && abs($0.frame[1] - observation.area[1] - 11) <= 1 && abs($0.frame[3] - observation.area[3] + 22) <= 1
                         }
                 }
             }
@@ -323,15 +237,16 @@ extension Acceptance {
                     return config.state == "loaded" && config.error == nil && config.revision > revision
                 }
             }
-            try step("deleting config restores defaults and releases live keys") {
+            try step("deleting config restores defaults while management remains active") {
                 try FileManager.default.removeItem(at: harness.configFile)
                 try requireFinalState("default configuration after deletion") {
                     let status = try harness.status()
-                    return status.config.state == "defaults" && status.config.error == nil && status.workspaces?.enabled == false
+                    return status.config.state == "defaults" && status.config.error == nil && status.workspaces?.enabled == true
                 }
                 try desktop.expectInside([window])
                 try desktop.activate()
-                try desktop.expectPassedKey(kVK_ANSI_L)
+                try desktop.post(kVK_ANSI_L)
+                try desktop.expectFocus(window)
             }
         }
     }

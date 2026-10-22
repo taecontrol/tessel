@@ -58,7 +58,7 @@ package enum Assumption: String, CaseIterable, Sendable {
         switch self {
         case .enhancedUIResize: "With AXEnhancedUserInterface enabled, a size followed by position loses the size; disabling it around the write and restoring it preserves the requested geometry."
         case .axResizeAnchoring: "AXSize can be constrained by the current positive x and by the current top against the screen bottom; moving first allows the requested size."
-        case .pointerPressNotifications: "An NSEvent global mouse-down monitor receives a press delivered to another app before subsequent drag events."
+        case .pointerPressNotifications: "An NSEvent global monitor receives another app's mouse press before drag events and its release after them."
         case .axVerticalClamping: "AXPosition keeps the top below the menu bar and at least 32 points visible at the screen bottom."
         case .axHorizontalSliver: "AXPosition accepts a one-point horizontal sliver, but a wholly off-screen window snaps back to show 40 points."
         case .axRaiseAcrossApplications: "AXMain selects a background app's card without activation, then AXRaise reorders it; a frontmost app window may remain above a raised background window, and closet return preserves earlier order."

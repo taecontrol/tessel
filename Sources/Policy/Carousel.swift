@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// A bounded strip per rail. Nominal widths survive stretching, and a window
+/// A bounded strip per rail. Nominal widths leave unused space to the right; a window
 /// keeps its width at either end of the rail;
 /// the presenter supplies accepted sizes without making navigation decisions.
 struct Carousel {
@@ -80,13 +80,17 @@ struct Carousel {
     }
 
     /// Width changes reported by the mouse are exact, not a preset selection.
-    mutating func adoptWidth(_ id: UInt32, _ value: Double) {
+    mutating func adoptWidth(_ id: UInt32, _ value: Double, left: Double? = nil) {
         guard let p = location(id), var ws = workspaces[p.workspace] else { return }
-        let x = geometry(ws.rails[p.rail])[p.slot].minX
-        ws.rails[p.rail].tiles[p.slot].preset = nil
-        ws.rails[p.rail].tiles[p.slot].size.width = min(width, value)
+        let x = left ?? geometry(ws.rails[p.rail])[p.slot].minX
+        var tile = ws.rails[p.rail].tiles[p.slot]
+        tile.preset = nil
+        tile.size.width = min(width, value)
+        // User acceptance disproves a learned intrinsic limit in that direction.
+        if value > tile.maximum + 1 { tile.maximum = .infinity }
+        if value < tile.minimum - 1 { tile.minimum = 1 }
+        ws.rails[p.rail].tiles[p.slot] = tile
         anchor(&ws.rails[p.rail], id: id, x: x)
-        reveal(&ws.rails[p.rail])
         workspaces[p.workspace] = ws
     }
 
@@ -96,6 +100,7 @@ struct Carousel {
     mutating func accept(_ id: UInt32, requested: CGSize, accepted: CGSize, learnBounds: Bool = true) {
         guard let p = location(id), var ws = workspaces[p.workspace] else { return }
         var tile = ws.rails[p.rail].tiles[p.slot]
+        let previousWidth = nominal(tile)
         if learnBounds { tile.size.height = accepted.height }
         if learnBounds && accepted.width > requested.width + 1 { tile.minimum = accepted.width }
         if learnBounds && accepted.width < requested.width - 1 { tile.maximum = accepted.width }
@@ -107,7 +112,7 @@ struct Carousel {
             tile.size.width = min(tile.maximum, max(tile.minimum, tile.size.width))
         }
         ws.rails[p.rail].tiles[p.slot] = tile
-        reveal(&ws.rails[p.rail])
+        if abs(nominal(tile) - previousWidth) > 1 { reveal(&ws.rails[p.rail]) }
         workspaces[p.workspace] = ws
     }
     mutating func select(_ id: UInt32) {
@@ -122,7 +127,8 @@ struct Carousel {
     mutating func appendInitial(_ tile: Tile, workspace: Int) {
         var ws = workspaces[workspace] ?? Workspace()
         if ws.rails.isEmpty { ws.rails.append(makeRail()) }
-        ws.rails[0].tiles.append(tile)
+        let index = ws.rails[0].tiles.firstIndex { $0.id > tile.id } ?? ws.rails[0].tiles.endIndex
+        ws.rails[0].tiles.insert(tile, at: index)
         if ws.rails[0].focused == nil { ws.rails[0].focused = tile.id }
         workspaces[workspace] = ws
     }
@@ -251,20 +257,7 @@ struct Carousel {
     private func geometry(_ rail: Rail) -> [CGRect] {
         let m = strip(rail), n = rail.tiles.count
         guard n > 0 else { return [] }
-        var widths = m.widths, xs = m.starts.map { $0 - rail.offset }
-        if m.total < width {
-            // Accepted maxima cap a tile; remaining capacity goes to its peers.
-            var free = Set(0..<n), remaining = max(0, width - gap * Double(n - 1))
-            while !free.isEmpty {
-                let indices = free.sorted(), sum = indices.reduce(0.0) { $0 + m.widths[$1] }
-                let scale = remaining / max(1, sum)
-                let capped = indices.filter { m.widths[$0] * scale > rail.tiles[$0].maximum }
-                if capped.isEmpty { for j in indices { widths[j] = m.widths[j] * scale }; break }
-                for j in capped { widths[j] = rail.tiles[j].maximum; remaining -= widths[j]; free.remove(j) }
-            }
-            var x = 0.0
-            for j in 0..<n { xs[j] = x; x += widths[j] + gap }
-        }
+        let widths = m.widths, xs = m.starts.map { $0 - rail.offset }
         return (0..<n).map { CGRect(x: xs[$0], y: 0, width: widths[$0], height: rail.tiles[$0].size.height) }
     }
     private func whole(_ rail: Rail) -> [Int] {

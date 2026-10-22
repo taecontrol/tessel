@@ -92,31 +92,6 @@ import Testing
         }
     }
 
-    @Test("#26 E5: short rails stretch proportionally without changing nominal widths", arguments: [[1.0/3,1.0/3],[1.0/3,0.5]])
-    func shortRailStretchPreservesNominalWidths(presets: [Double]) {
-        requireCarousel(Scenario.run("proportional short rail") { s in
-            let f = CarouselFixture(s, presets: presets), a = f.ids[0], b = f.ids[1]
-            let scale = (f.area.width-10)/(f.width(presets[0])+f.width(presets[1]))
-            f.near(f.frame(a).width, f.width(presets[0])*scale, "first width stretches proportionally")
-            f.near(f.frame(b).width, f.width(presets[1])*scale, "second width stretches proportionally")
-            f.near(f.frame(a).minX, f.area.minX, "short rail left edge")
-            f.near(f.frame(b).maxX, f.area.maxX, "short rail fills right edge")
-            _ = f.open()
-            f.near(f.frame(a).width, f.width(presets[0]), "first nominal width survives stretching")
-            f.near(f.frame(b).width, f.width(presets[1]), "second nominal width survives stretching")
-        })
-        if presets == [1.0/3, 1.0/3] {
-            requireCarousel(Scenario.run("short rail redistributes a capped peer's width") { s in
-                // A maximum known from the start: no rail end ever resizes a window.
-                let f = CarouselFixture(s, presets: presets, duration: 0, maximumFractions: [0: 0.4]), a = f.ids[0], b = f.ids[1]
-                let cap = f.area.width * 0.4
-                f.near(f.frame(a).width, cap, "the capped tile retains its maximum")
-                f.near(f.frame(b).minX, f.frame(a).maxX + 10, "the remaining tile follows the capped peer")
-                f.near(f.frame(b).maxX, f.area.maxX, "the remaining tile fills the area")
-                f.invariants("capped short rail")
-            })
-        }
-    }
 
     @Test("#26 E6: full-width neighbours are never left as a split pair")
     func fullWidthWindowsAlwaysRestWhole() {

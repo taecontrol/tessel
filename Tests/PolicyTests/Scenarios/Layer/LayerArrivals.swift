@@ -29,43 +29,6 @@ import Testing
             f.press("toggle layer")
             s.expect("returning to the rail selects the attached sheet", f.mac.focusedWindow == sheet && !f.mac.isInCloset(sheet))
         })
-        requireLayer(Scenario.run("a pending failed-fill classification arrives after layer enabling", writes: .readsFirst) { s in
-            let mac = s.mac, app = mac.launch()
-            let tile = app.open(), oldFloat = app.open(WindowSpec(subrole: "AXFloatingWindow"), background: true)
-            app.select(tile)
-            let t = s.startTessel(.stack); s.settle()
-            let constrained = app.open(WindowSpec(maximumSize: CGSize(width: 500, height: 300)))
-            // Stack learns a failed fill after placement. Carousel normally
-            // learns height bounds and keeps tiles; do not invent a different
-            // classification rule just to exercise a late catalog transition.
-            let discovered = mac.pause(after: .read(app))
-            if case .paused = discovered {} else { s.expect("the new tile's discovery read is captured: \(discovered)", false); return }
-            s.expect("discovery is withheld before its publication", !t.windows.contains { $0.id == constrained })
-            let delivered = mac.deliver(app)
-            if case .paused = delivered {} else { s.expect("the new tile's discovery is published: \(delivered)", false); return }
-            s.expect("the constrained window is initially published as a tile", t.windows.first { $0.id == constrained }?.state == .tiled)
-            let readback = mac.pause(after: .call("AccessibilityPort.copy AXSize window \(constrained) \(app.alias)"))
-            if case .paused = readback {} else { s.expect("stack placement reaches the constrained size readback: \(readback)", false); return }
-            s.expect("the app has accepted its constrained size before classification", mac.frame(constrained)?.size == CGSize(width: 500, height: 300))
-            mac.scheduler.resume()
-            let learned = mac.pause(after: .read(app))
-            if case .paused = learned {} else { s.expect("the failed-fill snapshot reaches its paired read before publication: \(learned)", false); return }
-            s.expect("the learned classification is still withheld", t.windows.first { $0.id == constrained }?.state == .tiled)
-            t.changeConfig(LayerFixture.config)
-            let reloaded = mac.scheduler.run()
-            if case .paused = reloaded {} else { s.expect("config reload runs while publication is held: \(reloaded)", false) }
-            s.expect("the layer config is accepted before the classification arrives", t.configuration.error == nil && t.configuration.effective.layerEnabled)
-            s.expect("enabling the layer does not publish the held classification", t.windows.first { $0.id == constrained }?.state == .tiled)
-            let classified = mac.deliver(app)
-            if case .paused = classified {} else { s.expect("the learned classification is delivered to the layer: \(classified)", false); return }
-            s.expect("delivery publishes the late failed-fill reason", t.windows.first { $0.id == constrained }?.reason == "cannot fill the screen")
-            s.settle()
-            let row = t.windows.first { $0.id == constrained }, layer = encodedObject(t.status)["layer"] as? [String: Any]
-            s.expect("the late catalog transition is an actual constrained float", row?.state == .floats && row?.reason == "cannot fill the screen")
-            s.expect("the newly classified float is shown alone", layer?["state"] as? String == "single" && layer?["focused"] as? Bool == true)
-            s.expect("the constrained float owns visible keyboard focus", mac.focusedWindow == constrained && mac.isVisible(constrained) && !mac.isInCloset(constrained))
-            s.expect("the earlier float stays hidden", mac.isInCloset(oldFloat) && !mac.isVisible(oldFloat))
-        })
     }
 
     @Test("#19 E13: a single float can hide, expand and navigate in every direction, or pin the whole layer", arguments: ["toggle layer", "focus left", "focus down", "focus up", "focus right", "pin layer"])

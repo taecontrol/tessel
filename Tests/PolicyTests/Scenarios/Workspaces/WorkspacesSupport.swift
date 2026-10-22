@@ -23,9 +23,9 @@ import Simulator
         if !floating {
             let expected = area(mac, gap: gap)
             let actual = mac.frame(id) ?? .zero
-            scenario.expect("window \(id) fills \(expected) within one point (actual \(actual))",
-                            abs(actual.minX - expected.minX) <= 1 && abs(actual.minY - expected.minY) <= 1
-                                && abs(actual.width - expected.width) <= 1 && abs(actual.height - expected.height) <= 1)
+            scenario.expect("window \(id) fills the rail height at its nominal width (actual \(actual))",
+                            abs(actual.minY - expected.minY) <= 1 && abs(actual.height - expected.height) <= 1
+                                && actual.minX >= expected.minX - 1 && actual.maxX <= expected.maxX + 1)
         }
     }
 
@@ -42,8 +42,10 @@ import Simulator
     }
 
     static func split(_ scenario: Scenario) -> (SimulatedApp, Tessel) {
-        let app = scenario.mac.launch(windows: 2)
-        let tessel = scenario.startTessel(.stack)
+        let app = scenario.mac.launch()
+        _ = app.open(WindowSpec(frame: area(scenario.mac)))
+        _ = app.open(WindowSpec(frame: area(scenario.mac)))
+        let tessel = scenario.startTessel(.carousel)
         scenario.settle()
         shown(scenario, 2)
         press(scenario, tessel, "send 2", shown: 2)

@@ -5,7 +5,7 @@ import Testing
 
 @Suite @MainActor struct CarouselShutdown {
     @Test("#19 U-quit-capture-drain: quit clears the stage immediately and waits for every capture before returning windows",
-          arguments: ["success", "failure", "disabled"], WriteOrder.allCases)
+          arguments: ["success", "failure"], WriteOrder.allCases)
     func quitWaitsForInFlightCaptures(_ outcome: String, _ order: WriteOrder) {
         requireScenario(Scenario.run("quit with pending captures \(outcome)", writes: order) { s in
             let f = LayerFixture(s, duration: 250)
@@ -16,11 +16,6 @@ import Testing
             f.tessel.press("focus right")
             s.expect("motion submits captures", !f.mac.stageCaptureRequests.isEmpty && f.mac.stage.capturesPending)
             s.after(milliseconds: 1, "quit while native capture replies are outstanding") {
-                if outcome == "disabled" {
-                    f.tessel.configure(.off)
-                    s.expect("disable returns windows while the process stays alive", !f.tessel.status.enabled
-                             && (f.tiles + f.floats).allSatisfy { !f.mac.isInCloset($0) })
-                }
                 f.tessel.quit()
                 s.expect("quit waits even after a clear", f.tessel.quitCompletions == 0 && f.mac.stage.capturesPending)
                 s.expect("the stage is already clear", f.mac.stageEvents.last?.kind == .clear)
@@ -64,7 +59,7 @@ import Testing
             s.expect("quit does not finish on submission", f.tessel.quitCompletions == 0)
             s.after(milliseconds: 250, "repeat quit and attempt to reload during shutdown") {
                 f.tessel.quit()
-                f.tessel.configure(.off)
+                f.tessel.configure(.carousel)
                 s.expect("a reload does not run cleanup during the wait", f.tessel.status.enabled)
             }
             s.after(milliseconds: 499, "the bound has not expired") {

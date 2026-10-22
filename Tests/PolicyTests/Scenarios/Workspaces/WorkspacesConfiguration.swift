@@ -2,9 +2,9 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct WorkspaceConfiguration {
-    @Test("#2 E33: gaps obey TOML number grammar even with the experiment off")
+    @Test("#2 E33: gaps obey TOML number grammar with default management")
     func numberGrammar() {
-        requireScenario(Scenario.run("gap grammar with experiment off") { scenario in
+        requireScenario(Scenario.run("gap grammar with default management") { scenario in
             let tessel = scenario.startTessel()
             scenario.settle()
             for (literal, expected) in [("0x14", 20.0), ("0o24", 20.0), ("0b10100", 20.0), ("1_0.5", 10.5), ("+2e1", 20.0)] {
@@ -12,7 +12,7 @@ import Testing
                 scenario.step("load outer = \(literal)") { tessel.changeConfig("[gaps]\nouter = \(literal)\n") }
                 scenario.settle()
                 scenario.expect("\(literal) parses as \(expected)", tessel.status.gaps.outer == expected && tessel.configuration.revision > revision)
-                scenario.expect("parsing does not enable the experiment", !tessel.status.enabled)
+                scenario.expect("parsing retains management", tessel.status.enabled)
             }
             for literal in [".1", "1.", "01", "1__0", "inf", "nan", "9223372036854775808"] {
                 tessel.changeConfig("[gaps]\nouter = 20 # before \(literal)\n")
@@ -21,7 +21,7 @@ import Testing
                 scenario.step("reject outer = \(literal)") { tessel.changeConfig("[gaps]\nouter = \(literal)\n") }
                 scenario.settle()
                 scenario.expect("\(literal) reports line 2", tessel.configuration.error?.line == 2)
-                scenario.expect("invalid number retains the accepted configuration", tessel.configuration.revision == revision && tessel.status.gaps.outer == 20 && !tessel.status.enabled)
+                scenario.expect("invalid number retains the accepted configuration", tessel.configuration.revision == revision && tessel.status.gaps.outer == 20 && tessel.status.enabled)
             }
         })
     }
@@ -54,7 +54,7 @@ import Testing
                     tessel.pressKey("alt-1")
                     scenario.settle()
                     WorkspaceScenarios.shown(scenario, 2)
-                } else { scenario.expect("the experiment stays disabled", !tessel.status.enabled) }
+                } else { scenario.expect("management stays active", tessel.status.enabled) }
             }
         })
     }

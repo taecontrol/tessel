@@ -41,7 +41,7 @@ enum ConfigParser {
             switch (table, key) {
             case ("experiments", "workspaces"), ("experiments", "carousel"), ("experiments", "layer"):
                 guard ["true", "false"].contains(value) else { throw ConfigError(line: lineNumber, message: "\(key) must be a boolean") }
-                configuration.experiments[key] = value == "true"
+                // Kept experiments accept their former keys as inert compatibility input.
             case ("animation", "duration"):
                 guard let duration = number(value, integer: true), (0...1000).contains(duration) else {
                     throw ConfigError(line: lineNumber, message: "duration must be a TOML integer from 0 to 1000")
@@ -59,7 +59,7 @@ enum ConfigParser {
             default: throw ConfigError(line: lineNumber, message: "Unknown configuration key")
             }
         }
-        let defaults = configuration.layerEnabled ? KeyChord.layerDefaults : configuration.carouselEnabled ? KeyChord.carouselDefaults : KeyChord.defaults
+        let defaults = KeyChord.layerDefaults
         configuration.keys = defaults.merging(overrides) { _,new in new }
         return configuration
     }

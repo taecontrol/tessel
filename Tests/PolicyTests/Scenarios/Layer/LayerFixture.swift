@@ -36,7 +36,7 @@ enum LayerMode: String, CaseIterable {
         s.settle()
         if !startup { tessel.changeConfig(text); s.settle() }
         s.expect("layer configuration is accepted (actual: \(tessel.configuration.error?.message ?? tessel.configuration.state))",
-                 tessel.configuration.error == nil && tessel.configuration.effective.experiments["layer"] == true)
+                 tessel.configuration.error == nil)
         s.expect("layer enables the carousel", tessel.status.enabled && tessel.status.layout == "carousel")
         s.expect("every invented window reaches the catalog", Set(tessel.windows.map(\.id)) == Set(tiles + floats))
     }

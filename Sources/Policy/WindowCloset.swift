@@ -9,8 +9,8 @@ final class WindowCloset {
     private let mechanics: any ClosetPort
     init(mechanics: any ClosetPort) { self.mechanics = mechanics }
     func start() throws { try mechanics.start() }
-    func hide(_ windows: [UInt32]) { mechanics.hide(windows.sorted()) }
-    func show(_ windows: [UInt32]) { mechanics.show(windows.sorted()) }
+    func hide(_ windows: [UInt32]) { if !windows.isEmpty { mechanics.hide(windows.sorted()) } }
+    func show(_ windows: [UInt32]) { if !windows.isEmpty { mechanics.show(windows.sorted()) } }
     func stop(returning windows: [UInt32]) { mechanics.stop(returning: windows.sorted()) }
 
     /// Ordinary memberships omit hidden Spaces. Wide memberships distinguish a

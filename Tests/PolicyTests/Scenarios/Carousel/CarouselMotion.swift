@@ -152,29 +152,6 @@ import Testing
         })
     }
 
-    @Test("disabling or switching layout during motion clears the stage")
-    func disablingDuringMotionClearsTheStage() {
-        requireCarousel(Scenario.run("disable an active carousel") { s in
-            let f = CarouselFixture(s), a = f.ids[0], b = f.ids[1]
-            f.press("alt-l"); f.mac.clearMotionHistory(); f.tessel.pressKey("alt-l")
-            s.after(milliseconds: 60, "disable during movement") { f.tessel.changeConfig("") }
-            s.settle()
-            s.expect("the experiment is disabled", !f.tessel.status.enabled)
-            s.expect("the stage cleared", f.mac.stageEvents.last?.kind == .clear)
-            f.app.groupTabs([a,b], selected: a); s.settle()
-            s.expect("ordinary native-tab notifications are observed after motion is disabled", f.tessel.windows.contains { $0.id == a && $0.tabs == 2 })
-        })
-        requireCarousel(Scenario.run("stack replaces an active carousel") { s in
-            let f = CarouselFixture(s)
-            f.press("alt-l"); f.mac.clearMotionHistory()
-            f.tessel.pressKey("alt-l")
-            s.after(milliseconds: 60, "switch to stack during motion") { f.tessel.configure(.stack) }
-            s.settle()
-            s.expect("the new layout is stack", f.tessel.status.layout == "stack")
-            s.expect("the stage cleared and stayed clear", f.mac.stageEvents.last?.kind == .clear)
-        })
-    }
-
     @Test("instant growth moves left before resizing and does not learn the screen edge as an app maximum")
     func instantGrowthAtTheRightEdge() {
         requireCarousel(Scenario.run("instant width at the right edge") { s in

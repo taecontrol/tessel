@@ -17,7 +17,7 @@ import Testing
             let result = Scenario.run("#22 \(path.rawValue), capture-before-send=\(captureBeforeSend)", writes: writes) { scenario in
                 let mac = scenario.mac
                 let app = mac.launch(windows: 2)
-                let tessel = scenario.startTessel(.stack)
+                let tessel = scenario.startTessel(.carousel)
                 scenario.settle()
                 WorkspaceScenarios.shown(scenario, 2)
                 var publications: [(Int, [UInt32])] = []

@@ -97,8 +97,9 @@ import Testing
         guard !rows.isEmpty else { return } // Closing the final tile intentionally leaves an empty workspace.
         let frames = rows.filter { mac.isVisible($0.id) }.map { frame($0.id) }
         s.expect("\(context): a populated rail is never empty on screen", frames.contains { $0.intersects(area) })
-        for uncovered in uncoveredWidths(in: area, coveredBy: frames) {
-            s.expect("\(context): no uncovered span exceeds the gap (\(uncovered))", uncovered <= 11)
+        let sorted = frames.sorted { $0.minX < $1.minX }
+        for (left, right) in zip(sorted, sorted.dropFirst()) {
+            s.expect("\(context): interior spacing stays at the configured gap (\(rows.map(\.id)), \(frames))", abs(right.minX - left.maxX - 10) <= 1)
         }
         s.expect("\(context): focus belongs to a complete visible tile", rows.contains { $0.id == mac.focusedWindow && mac.isVisible($0.id) && contains(frame($0.id)) })
     }

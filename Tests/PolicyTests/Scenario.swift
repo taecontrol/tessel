@@ -5,7 +5,7 @@ import Simulator
 import Testing
 @testable import Policy
 
-enum Layout: String, CaseIterable, Sendable { case off, stack, carousel }
+enum Layout: String, CaseIterable, Sendable { case carousel }
 
 @MainActor final class Tessel {
     let workspaces: Workspaces
@@ -19,7 +19,7 @@ enum Layout: String, CaseIterable, Sendable { case off, stack, carousel }
     private(set) var quitCompletions = 0
     private(set) var quitReadyAt: Int?
 
-    init(on mac: SimulatedMac, configuration: Layout = .off, text: String? = nil,
+    init(on mac: SimulatedMac, configuration: Layout = .carousel, text: String? = nil,
          makeCloset: (() throws -> any ClosetPort)? = nil) {
         self.mac = mac
         let input = ConfigurationInput()
@@ -43,12 +43,12 @@ enum Layout: String, CaseIterable, Sendable { case off, stack, carousel }
             self.configurationPublications.append((mac.scheduler.now, status))
             self.workspaces.configure(status.effective)
         }
-        if configuration != .off { configure(configuration) }
+        // All installations start in the same layout.
     }
 
     func configure(_ layout: Layout) {
         mac.action("configure \(layout.rawValue)")
-        input.data = Data((layout == .off ? "" : "[experiments]\n\(layout == .carousel ? "carousel" : "workspaces") = true\n").utf8)
+        input.data = Data()
         input.unreadable = false
         config.reload()
     }
@@ -153,7 +153,7 @@ struct ScenarioResult {
         mac.scheduler.writeOrder = writes
         schedule = [name, "writes=\(writes.rawValue)"]
     }
-    func startTessel(_ configuration: Layout = .off, text: String? = nil,
+    func startTessel(_ configuration: Layout = .carousel, text: String? = nil,
                      makeCloset: (() throws -> any ClosetPort)? = nil) -> Tessel {
         let tessel = Tessel(on: mac, configuration: configuration, text: text, makeCloset: makeCloset)
         tessels.append(tessel)

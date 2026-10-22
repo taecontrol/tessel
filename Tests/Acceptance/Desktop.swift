@@ -6,8 +6,7 @@ import Foundation
 struct Desktop {
     var harness: Harness { Harness.shared }
     var fixture: FixtureSession { harness.fixture }
-    let stack = "[experiments]\nworkspaces = true\n"
-    let carousel = "[experiments]\ncarousel = true\n"
+    let carousel = ""
 
     func writeConfig(_ text: String) throws {
         try Data(text.utf8).write(to: harness.configFile)
@@ -157,12 +156,14 @@ struct Desktop {
     }
 
     func split() throws -> (UInt32, UInt32) {
-        let a = try fixture.open(key: "a"), b = try fixture.open(key: "b")
+        harness.stopApp()
+        let a = try fixture.open(key: "a", ["widthFraction": 1.0]), b = try fixture.open(key: "b", ["widthFraction": 1.0])
         try activate(key: "b")
+        try writeConfig("[animation]\nduration = 0\n")
+        try harness.startApp(fixtureReady: false)
         try requireFinalState("both workspace setup fixtures listed") {
             Set(try harness.rows().map(\.id)) == Set([a, b])
         }
-        try configure(stack, layout: "stack")
         try expectShown(b)
         try key(2, send: true)
         try expectShown(b)
@@ -174,14 +175,16 @@ struct Desktop {
         return (a, b)
     }
 
-    func railSetup(_ widths: [Double] = Array(repeating: 0.45, count: 5), firstIn firstSession: FixtureSession? = nil, duration: Int = 80) throws -> [UInt32] {
+    func railSetup(_ widths: [Double] = Array(repeating: 0.45, count: 5), firstIn firstSession: FixtureSession? = nil, duration: Int = 80, configuration: String = "") throws -> [UInt32] {
+        harness.stopApp()
         let ids = try widths.enumerated().map { index, width in
             let session = index == 0 ? firstSession ?? fixture : fixture
             return try session.open(key: "w\(index)", ["widthFraction": width])
         }
         try activate(firstSession, key: "w0")
+        try writeConfig(configuration + "[animation]\nduration = \(duration)\n")
+        try harness.startApp(fixtureReady: false)
         try requireFinalState("every rail setup window listed") { Set(try harness.rows().map(\.id)) == Set(ids) }
-        try configure(carousel + "[animation]\nduration = \(duration)\n", layout: "carousel")
         // The focused first window keeps its width at the rail's left end.
         var last = "no observation"
         do {

@@ -79,6 +79,17 @@ import Testing
         })
     }
 
+    @Test("#33 E7: a late application resize cannot become an adopted mouse width")
+    func lateApplicationResizeDoesNotBecomeMouseInput() {
+        requireCarousel(Scenario.run("late enhanced-UI redraw") { s in
+            let f = CarouselFixture(s, presets: [0.5], duration: 0), id = f.ids[0]
+            f.press("alt-r")
+            f.app.resizeFromApplication(id, to: CGSize(width: f.width(0.5), height: f.area.height)); s.settle()
+            f.near(f.frame(id).width, f.width(2.0 / 3), "an unprompted app redraw preserves the selected preset")
+            f.press("alt-r"); f.near(f.frame(id).width, f.area.width, "the late redraw does not poison width learning")
+        })
+    }
+
     @Test("#33 E9: a larger accepted mouse width releases an obsolete learned maximum")
     func mouseWidthReleasesLearnedMaximum() {
         requireCarousel(Scenario.run("forget a contradicted maximum") { s in
@@ -108,24 +119,25 @@ import Testing
         })
     }
 
-    @Test("#33 E11; #33 E12; #33 E13; #33 E14: a held drag owns geometry, then reconciles once", arguments: ["right", "left", "height"])
-    func dragOwnsGeometryUntilRelease(_ edge: String) {
+    @Test("#33 E11; #33 E12; #33 E13; #33 E14: a held drag owns geometry, then reconciles once", arguments: ["right", "left", "height", "first-left"], [0, 250])
+    func dragOwnsGeometryUntilRelease(_ edge: String, _ duration: Int) {
         requireCarousel(Scenario.run("twenty-step \(edge) drag") { s in
-            let f = CarouselFixture(s, presets: [0.5, 0.5, 0.5], duration: 0), id = f.ids[1]
-            f.press("alt-l")
+            let f = CarouselFixture(s, presets: [0.5, 0.5, 0.5], duration: duration), id = f.ids[edge == "first-left" ? 0 : 1]
+            if edge != "first-left" { f.press("alt-l") }
             let start = f.frame(id)
             f.mac.clearMotionHistory(); f.mac.pointerDown()
             for step in 1...20 {
                 let dx = Double(step) * 5
                 if edge == "left" { f.app.drag(id, to: CGPoint(x: start.minX - dx, y: start.minY)) }
-                f.app.resize(id, to: CGSize(width: start.width + (edge == "height" ? 0 : dx), height: start.height - Double(step) * 2))
+                if edge == "first-left" { f.app.drag(id, to: CGPoint(x: start.minX + dx, y: start.minY)) }
+                f.app.resize(id, to: CGSize(width: start.width + (edge == "height" ? 0 : edge == "first-left" ? -dx : dx), height: start.height - Double(step) * 2))
                 s.settle()
                 s.expect("no geometry, main, focus, raise, capture or stage during held step \(step)", f.mac.geometryWrites.isEmpty && f.mac.focusRequests.isEmpty && f.mac.focusEffects.isEmpty && f.mac.stageEvents.isEmpty)
             }
             let released = f.frame(id)
             f.mac.clearMotionHistory(); f.mac.pointerUp(); s.settle()
             f.near(f.frame(id).width, released.width, "accepted width survives release")
-            f.near(f.frame(id).minX, released.minX, "released left edge survives when first tile does not leave a left gap")
+            f.near(f.frame(id).minX, edge == "first-left" ? f.area.minX : released.minX, "released left edge survives unless first-tile left alignment wins")
             f.near(f.frame(id).height, f.area.height, "height returns to rail")
             let sizes = f.mac.geometryWrites.filter { $0.window == id && $0.attribute == .size }
             s.expect("height is restored with exactly one size write", sizes.count == 1)

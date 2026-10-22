@@ -32,15 +32,6 @@ extension Acceptance {
             try desktop.expectShown(b)
             try desktop.expectMenu("Workspace 2")
             try copyCapture("E37-workspace-2")
-            try desktop.writeConfig("")
-            try requireFinalState("workspaces disabled for menu capture") { try harness.status().workspaces?.enabled == false }
-            try harness.observer.command("menu", ["pid": harness.appPID, "open": true, "keepOpen": true])
-            defer { _ = try? harness.observer.command("menu", ["pid": harness.appPID, "open": true, "press": false]) }
-            try requireFinalState("the disabled workspace menu open for capture") {
-                try harness.observer.command("menu", ["pid": harness.appPID, "open": true, "press": false,
-                    "keepOpen": true, "expected": "experiment off"]).menuContains == true
-            }
-            try copyCapture("E37-disabled-menu")
             harness.stopApp()
             try harness.startApp()
         }

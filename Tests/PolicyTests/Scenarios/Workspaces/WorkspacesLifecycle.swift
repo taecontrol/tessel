@@ -11,11 +11,11 @@ import Testing
             let result = Scenario.run("close last=\(last), read-before-close=\(readBeforeClose)", writes: writes) { scenario in
                 let app = scenario.mac.launch(windows: last ? 2 : 3)
                 let sent: UInt32 = last ? 2 : 3
-                let tessel = scenario.startTessel(.stack)
+                let tessel = scenario.startTessel(.carousel)
                 scenario.settle()
                 WorkspaceScenarios.press(scenario, tessel, "send 3", shown: sent)
                 WorkspaceScenarios.press(scenario, tessel, "workspace 1", shown: last ? 1 : 2)
-                if !last { WorkspaceScenarios.press(scenario, tessel, "focus previous", shown: 1) }
+                if !last { WorkspaceScenarios.press(scenario, tessel, "focus left", shown: 1) }
                 scenario.step(readBeforeClose ? "close during the focused-window read" : "close before the read") {
                     if readBeforeClose {
                         app.select(1)
@@ -44,7 +44,7 @@ import Testing
             _ = scenario.mac.launch(windows: 1)
             let other = scenario.mac.launch(windows: 1)
             let attached: UInt32? = sheet ? other.open(WindowSpec(subrole: "AXDialog", parent: 2)) : nil
-            let tessel = scenario.startTessel(.stack)
+            let tessel = scenario.startTessel(.carousel)
             scenario.settle()
             WorkspaceScenarios.press(scenario, tessel, "send 3", shown: 2, sheet: attached)
             WorkspaceScenarios.press(scenario, tessel, "workspace 1", shown: 1)
@@ -66,7 +66,7 @@ import Testing
         requireScenario(Scenario.run("presentation failure, cancelled=\(cancelled)", writes: .readsFirst) { scenario in
             let app = scenario.mac.launch(windows: 2)
             let empty = scenario.mac.launch()
-            let tessel = scenario.startTessel(.stack)
+            let tessel = scenario.startTessel(.carousel)
             scenario.settle()
             WorkspaceScenarios.press(scenario, tessel, "send 2", shown: 2)
             WorkspaceScenarios.press(scenario, tessel, "workspace 1", shown: 1)
@@ -83,7 +83,9 @@ import Testing
             empty.activate()
             scenario.settle()
             scenario.expect("read recovery does not acknowledge an unperformed focus", tessel.status.active == (cancelled ? 1 : 2))
-            scenario.expect("the actual focused window remains hidden", !scenario.mac.isVisible(1))
+            // #33 E18 keeps the old view until the replacement is ready.
+            // A failed destination never becomes visible or receives focus.
+            scenario.expect("the failed destination stays in the closet", !scenario.mac.isVisible(2))
             scenario.step("external activation explicitly selects the actual hidden focus") { app.activate(); app.select(1) }
             scenario.settle()
             WorkspaceScenarios.shown(scenario, 1)
@@ -123,7 +125,7 @@ import Testing
         requireScenario(Scenario.run("minimize, last=\(last)") { scenario in
             let app = scenario.mac.launch(windows: last ? 1 : 2)
             let id: UInt32 = last ? 1 : 2
-            let tessel = scenario.startTessel(.stack)
+            let tessel = scenario.startTessel(.carousel)
             scenario.settle()
             app.minimize(id, selecting: last ? nil : 1)
             scenario.settle()
@@ -162,7 +164,7 @@ import Testing
             if !last { _ = scenario.mac.launch(windows: 1) }
             let app = scenario.mac.launch(windows: 1)
             let id = app.windows[0]
-            let tessel = scenario.startTessel(.stack)
+            let tessel = scenario.startTessel(.carousel)
             scenario.settle()
             app.hide(omitWindows: true)
             scenario.settle()
@@ -201,7 +203,7 @@ import Testing
     func fullscreen(transientRoot: Bool) {
         requireScenario(Scenario.run("native fullscreen, auxiliary root=\(transientRoot)") { scenario in
             let app = scenario.mac.launch(windows: 2)
-            let tessel = scenario.startTessel(.stack)
+            let tessel = scenario.startTessel(.carousel)
             scenario.settle()
             let frame = scenario.mac.frame(2)
             let auxiliary = app.beginFullscreenTransition(2, publishingRoot: transientRoot)

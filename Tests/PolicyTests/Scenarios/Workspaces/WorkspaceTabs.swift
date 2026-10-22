@@ -10,7 +10,7 @@ import Testing
             let app = mac.launch(windows: 3)
             app.groupTabs([1, 2], selected: 1)
             app.select(3)
-            let tessel = scenario.startTessel(.stack)
+            let tessel = scenario.startTessel(.carousel)
             scenario.settle()
             WorkspaceScenarios.press(scenario, tessel, "send 3", shown: 3)
             WorkspaceScenarios.press(scenario, tessel, "workspace 1", shown: 1)
@@ -44,7 +44,7 @@ import Testing
         requireScenario(Scenario.run("native front replacement, inserting=\(inserting)", writes: writes) { scenario in
             let mac = scenario.mac
             let app = mac.launch(windows: 1)
-            let tessel = scenario.startTessel(.stack)
+            let tessel = scenario.startTessel(.carousel)
             scenario.settle()
             let first = app.open(), second = app.open(), third = app.open()
             app.groupTabs([first, second, third], selected: first)
@@ -54,7 +54,7 @@ import Testing
             let c = app.open()
             scenario.settle()
             WorkspaceScenarios.shown(scenario, c)
-            WorkspaceScenarios.press(scenario, tessel, "focus previous", shown: first)
+            WorkspaceScenarios.press(scenario, tessel, "focus left", shown: first)
             let replacement: UInt32
             if inserting { replacement = app.addTab(to: first) }
             else { replacement = second; app.selectTab(replacement) }
@@ -62,8 +62,8 @@ import Testing
             scenario.expect("replacement inherits membership without an extra row", tessel.windows.count == 3 && WorkspaceScenarios.row(tessel, replacement)?.workspace == 1)
             scenario.expect("replacement reports the native count", WorkspaceScenarios.row(tessel, replacement)?.tabs == (inserting ? 4 : 3))
             WorkspaceScenarios.shown(scenario, replacement)
-            WorkspaceScenarios.press(scenario, tessel, "focus next", shown: c)
-            WorkspaceScenarios.press(scenario, tessel, "focus previous", shown: replacement)
+            WorkspaceScenarios.press(scenario, tessel, "focus right", shown: c)
+            WorkspaceScenarios.press(scenario, tessel, "focus left", shown: replacement)
 
             let foreground = mac.launch(windows: 1)
             let d = foreground.windows[0]
@@ -81,10 +81,10 @@ import Testing
             WorkspaceScenarios.press(scenario, tessel, "workspace 1", shown: background)
             WorkspaceScenarios.press(scenario, tessel, "send 3", shown: background)
             for _ in 0..<4 {
-                WorkspaceScenarios.press(scenario, tessel, "workspace 1", shown: c)
+                WorkspaceScenarios.press(scenario, tessel, "workspace 1", shown: 1)
                 WorkspaceScenarios.press(scenario, tessel, "workspace 3", shown: background)
             }
-            WorkspaceScenarios.press(scenario, tessel, "workspace 1", shown: c)
+            WorkspaceScenarios.press(scenario, tessel, "workspace 1", shown: 1)
             scenario.expect("sent native group stays hidden after returning", !mac.isVisible(background))
             let hidden: UInt32
             if inserting { hidden = app.addTab(to: first) }
@@ -93,7 +93,7 @@ import Testing
             scenario.expect("hidden group's selected front retains workspace 3", tessel.windows.count == 4 && WorkspaceScenarios.row(tessel, hidden)?.workspace == 3)
             scenario.expect("external native selection returns to workspace 3", tessel.status.active == 3)
             WorkspaceScenarios.shown(scenario, hidden)
-            WorkspaceScenarios.press(scenario, tessel, "workspace 1", shown: c)
+            WorkspaceScenarios.press(scenario, tessel, "workspace 1", shown: 1)
             scenario.expect("replacement hides on return", !mac.isVisible(hidden))
         })
     }

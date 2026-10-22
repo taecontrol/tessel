@@ -26,11 +26,11 @@ import Testing
             f.near(f.frame(moved).minY, original.minY, "the redraw restores the logical top")
             let nominal = floor(f.area.width * 0.25)
             let half = (f.area.width - 10) / 2
-            let expectedWidth = trigger == "workspace" ? original.width : trigger == "arrival" ? nominal : half
-            f.near(f.frame(moved).width, expectedWidth, "redraw uses the current proportional or nominal width")
+            let expectedWidth = nominal
+            f.near(f.frame(moved).width, expectedWidth, "redraw preserves the nominal width")
             f.near(f.frame(moved).height, original.height, "redraw retains height")
             let expectedX = trigger == "arrival" ? f.area.minX + nominal + half + 20
-                : trigger == "rail" ? f.area.minX : trigger == "close" ? f.area.minX + half + 10 : original.minX
+                : trigger == "rail" ? f.area.minX : trigger == "close" ? f.area.minX + nominal + 10 : original.minX
             f.near(f.frame(moved).minX, expectedX, "redraw restores the logical x")
         })
     }

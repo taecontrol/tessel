@@ -72,6 +72,7 @@ extension SimulatedMac {
             return nil
         }
         private func finish(_ handle: Handle, operation: String, status: AXStatus, value: String = "", point: PausePoint? = nil) {
+            mac.recordPresentation(operation)
             mac.assume(.axReadDelivery)
             let cost = status == .cannotComplete ? max(1, Int((handle.timeout * 1_000).rounded())) : 1
             mac.scheduler.reply("AccessibilityPort.\(operation) reply \(handle.name) \(status.traceName)\(value.isEmpty ? "" : " " + value)",

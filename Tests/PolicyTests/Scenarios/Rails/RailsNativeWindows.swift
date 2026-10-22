@@ -102,23 +102,6 @@ import Testing
         })
     }
 
-    @Test("a mixed workspace restores its remembered dialog, including when a dialog closes while away", arguments: [false, true])
-    func mixedWorkspace(closedWhileAway: Bool) {
-        requireScenario(Scenario.run("mixed workspace dialog closed=\(closedWhileAway)") { s in
-            let f = RailFixture(s, widths: [0.25, 0.25]), a = f.ids[0]
-            let dialog = f.app.open(WindowSpec(subrole: "AXDialog"))
-            s.settle(); f.focus(dialog)
-            let original = f.frame(dialog)
-            let c = f.app.open(WindowSpec(frame: CGRect(x: 40, y: 60, width: 250, height: 400)))
-            s.settle(); f.focus(c); f.order([a, c, f.ids[1]])
-            f.press("send 2", focus: c)
-            if closedWhileAway { f.app.close(dialog); s.settle() }
-            f.press("workspace 1", focus: closedWhileAway ? a : dialog)
-            s.expect("the remembered tile remains visible below the dialog", f.mac.isVisible(a))
-            if !closedWhileAway { f.unchanged([dialog], [original]) }
-        })
-    }
-
     @Test("native tab replacement keeps rail, slot, width and remembered focus", arguments: ["ordinary", "background", "suspended-neighbor", "suspended-root", "detached"])
     func nativeTabs(mode: String) {
         requireScenario(Scenario.run("native tab replacement \(mode)") { s in
@@ -156,7 +139,7 @@ import Testing
             if mode == "background" { f.app.select(a) }
             s.settle(); f.order([next], rail: 2)
             s.expect("the former native root is retired", !f.tessel.windows.contains { $0.id == first })
-            f.near(f.frame(next).width, f.area.width, "the replacement fills its singleton rail")
+            f.near(f.frame(next).width, (f.area.width + 10) / 2 - 10, "the replacement retains its nominal half width")
             if mode == "background" { f.focus(a); f.press("focus down", focus: next) }
             else {
                 f.focus(next); f.press("focus up", focus: a); f.press("focus right", focus: b)

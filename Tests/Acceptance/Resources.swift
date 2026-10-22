@@ -51,7 +51,7 @@ extension Acceptance {
 
         @Test("#2 E36: resources across ten workspaces") func e36TwentyWindowsAcrossTenWorkspacesKeepTheFoundationBudget() throws {
             try harness.reset()
-            try desktop.configure(desktop.stack, layout: "stack")
+            try desktop.configure(desktop.carousel, layout: "carousel")
             for index in 0..<20 {
                 print("E36 preparing fixture window \(index + 1)/20")
                 fflush(nil)
@@ -59,10 +59,10 @@ extension Acceptance {
                 // The fixture app stays frontmost, so AppKit keys each later
                 // window as it opens; activating it again would re-observe them all.
                 if index == 0 { try desktop.activate(key: "idle\(index)") }
-                try desktop.expectShown(window)
+                try desktop.expectFocus(window)
                 if index.isMultiple(of: 2), index > 0 {
                     try desktop.key(index / 2 + 1, send: true)
-                    try desktop.expectShown(window)
+                    try desktop.expectFocus(window)
                 }
             }
             try requireFinalState("twenty fixtures across ten workspaces") {
@@ -75,7 +75,7 @@ extension Acceptance {
         @Test("#26 E24; #19 E28: carousel and a hidden layer do no stage work at rest and keep the resource budget") func carouselAcrossWorkspacesKeepsTheIdleResourceBudget() throws {
             try harness.reset()
             // Thirty setup changes run instantly: each animated one costs a
-            // capture, and the suite must fit its CI budget. One animated
+            // capture. One animated
             // change at the default duration loads the stage before the idle
             // window.
             try desktop.configure("[experiments]\nlayer = true\n[animation]\nduration = 0\n", layout: "carousel")

@@ -16,6 +16,14 @@ import Testing
         return try! encoder.encode(rows)
     }
 
+    static func classifications(_ rows: [WindowRecord]) -> Data {
+        snapshot(rows.map { row in
+            var value = row
+            value.workspace = nil; value.rail = nil; value.slot = nil; value.visible = false; value.answeredAt = nil
+            return value
+        })
+    }
+
     static func publication(_ tessel: Tessel, pid: Int32, since start: Int, within milliseconds: Int,
                             scenario: Scenario, matching: ([WindowRecord]) -> Bool) {
         let publication = tessel.windowPublications.first { $0.pid == pid && $0.at >= start && matching($0.windows ?? []) }

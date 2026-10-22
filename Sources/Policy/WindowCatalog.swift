@@ -87,12 +87,6 @@ final class WindowCatalog {
         if event == .activated { apps[app.pid]?.refresh(change: .activation) }
     }
 
-    func present(pid: Int32, id: UInt32, area: CGRect?, focus: Bool,
-                 completion: @escaping @MainActor @Sendable () -> Void) {
-        guard let app = apps[pid] else { completion(); return }
-        app.present(id: id, area: area, focus: focus, completion: completion)
-    }
-
     func presentRail(pid: Int32, id: UInt32, frame: CGRect?, position: Bool, resize: Bool, focus: Bool, screenRight: CGFloat,
                      completion: @escaping @MainActor @Sendable (RailPresentationResult) -> Void) {
         guard let app = apps[pid] else { completion(RailPresentationResult()); return }
@@ -115,6 +109,15 @@ final class WindowCatalog {
     }
 
     func returnInside(ids: Set<UInt32>, area: CGRect) { apps.keys.sorted().compactMap { apps[$0] }.forEach { $0.returnInside(ids:ids,area:area) } }
+
+    func refreshFrames(_ completion: @escaping @MainActor @Sendable () -> Void) {
+        let workers = apps.keys.sorted().compactMap { apps[$0] }
+        func next(_ index: Int) {
+            guard index < workers.count else { completion(); return }
+            workers[index].refreshForPointerRelease { next(index + 1) }
+        }
+        next(0)
+    }
 
     func cancelPresentations(invalidatingFocus: Bool = true) {
         apps.keys.sorted().compactMap { apps[$0] }.forEach { $0.cancelPresentation(invalidatingFocus: invalidatingFocus) }
@@ -219,13 +222,6 @@ private final class AppWindows: @unchecked Sendable {
     // finds the app frontmost (`requestActivation`).
     private enum ActivationRequest { case resolved, unfollowed, followed }
     private var activationRequest = ActivationRequest.resolved
-    private var constrained = Set<UInt32>()
-    private struct Validation {
-        let area: CGRect
-        let token: UUID
-        let completion: @MainActor @Sendable () -> Void
-    }
-    private var validations: [UInt32: Validation] = [:]
 
     init(pid: Int32, name: String, bundleId: String, hidden: Bool, generation: UUID,
          ax: any AccessibilityPort, windowOrder: any WindowOrderPort, scheduler: any SchedulingPort,
@@ -278,15 +274,6 @@ private final class AppWindows: @unchecked Sendable {
                              .destroyed].contains(notification)
         let change: CatalogChange = notification == .restored ? .restored
             : [.focusedWindowChanged, .mainWindowChanged].contains(notification) ? .focus : .snapshot
-        if notification == .resized {
-            let handle = element
-            queue.async { [self] in
-                guard !validations.isEmpty else { return }
-                ax.setMessagingTimeout(handle, seconds: 0.05)
-                let id = ax.windowID(handle).value ?? 0
-                validatePresentation(id: id)
-            }
-        }
         refresh(settle: needsSettling, change: change)
     }
 
@@ -433,13 +420,6 @@ private final class AppWindows: @unchecked Sendable {
             nativeBars = bars
             facts = next
             elementsByID = handles.filter { newIDs.contains($0.key) }
-            // The last fill result belongs to the continuing native group.
-            // Selecting a tab preserves it until the next ordinary show retries.
-            for (id, previous) in replacements where constrained.contains(previous) {
-                constrained.insert(id)
-            }
-            constrained.formIntersection(newIDs)
-            validations = validations.filter { newIDs.contains($0.key) }
             failedReads = 0
             publishSnapshot(replacing: replacements)
             if !newIDs.subtracting(oldIDs).isEmpty {
@@ -556,11 +536,7 @@ private final class AppWindows: @unchecked Sendable {
             railActivationCheck = nil
         }
         let observations = facts.map { fact in
-            var record = fact.record(app: name, bundleId: bundleId, hidden: hidden)
-            if record.state == .tiled, constrained.contains(fact.id) {
-                record.state = .floats
-                record.reason = "cannot fill the screen"
-            }
+            let record = fact.record(app: name, bundleId: bundleId, hidden: hidden)
             return WindowObservation(record: record, frame: fact.frame, parent: fact.parent, resizable: fact.resizable, replaces: replacements[fact.id])
         }
         publish(observations, focused == 0 ? nil : focused, frontmost, activationRequest != .resolved, change, activationToken)
@@ -601,6 +577,13 @@ private final class AppWindows: @unchecked Sendable {
         presentationLock.withLock {
             presentation = UUID()
             if invalidatingFocus { focusIntent = UUID() }
+        }
+    }
+
+    func refreshForPointerRelease(_ completion: @escaping @MainActor @Sendable () -> Void) {
+        queue.async { [self] in
+            readSnapshot()
+            scheduler.main.async { completion() }
         }
     }
 
@@ -648,41 +631,6 @@ private final class AppWindows: @unchecked Sendable {
         }
     }
 
-    func present(id: UInt32, area: CGRect?, focus: Bool, completion: @escaping @MainActor @Sendable () -> Void) {
-        let token = presentationLock.withLock { presentation }
-        queue.async { [self] in
-            // The caller's focus intent lasts only while this write is pending,
-            // including when an AX read fails or a newer render cancels it.
-            defer { scheduler.main.async { completion() } }
-            guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
-            do {
-                guard try canPresent(window, id: id) else { return }
-                if let area {
-                    let origin = area.origin, size = area.size
-                    try check(ax.set(.position, of: window, to: .point(origin)))
-                    try check(ax.set(.size, of: window, to: .size(size)))
-                    if try checkSize(window, area: area) { constrained.insert(id) } else { constrained.remove(id) }
-                    validations[id] = Validation(area: area, token: token, completion: completion)
-                    queue.after(milliseconds: 100) { [weak self] in self?.validatePresentation(id: id, token: token) }
-                }
-                guard presentationLock.withLock({ presentation == token }), try canPresent(window, id: id) else { return }
-                if focus {
-                    let followed = try requestActivation {
-                        guard presentationLock.withLock({ presentation == token }), isNativeFront(window, id: id) else { return false }
-                        try check(ax.set(.main, of: window, to: .bool(true)))
-                        // AXMain leaves a completed minimize alone; AXRaise restores it.
-                        guard presentationLock.withLock({ presentation == token }), try value(window, .minimized)?.bool != true,
-                              isNativeFront(window, id: id) else { return false }
-                        try check(ax.perform(.raise, on: window))
-                        return true
-                    }
-                    guard followed else { return }
-                }
-                publishSnapshot()
-            } catch { /* Keep the last complete classification when the app is busy. */ }
-        }
-    }
-
     /// AXRaise on a frontmost app's root may select it (ax-focus). A background
     /// raise only reorders below the active window (ax-raise-across-applications),
     /// unless it completes an activation still pending in that app.
@@ -726,32 +674,26 @@ private final class AppWindows: @unchecked Sendable {
         do {
             guard try canPresent(window,id:id) else { return }
             if let target {
-                // Both orders use one position write. Resize at the old
-                // origin when it fits; otherwise establish the new origin.
+                let enhanced = try value(application, .enhancedUserInterface)?.bool == true
+                if enhanced { try check(ax.set(.enhancedUserInterface, of: application, to: .bool(false))) }
+                defer { if enhanced { _ = ax.set(.enhancedUserInterface, of: application, to: .bool(true)) } }
                 var current = facts.first { $0.id == id }?.frame ?? target
-                if resize, let point = try value(window, .position)?.point { current.origin = point }
+                if resize { current = try frame(window) }
                 guard presentationLock.withLock({ presentation == token }) else { return }
                 let order = resizeOrder(current: current, target: target, screenRight: screenRight)
                 let positionFirst = resize && position && order == true
                 if positionFirst { try check(ax.set(.position, of: window, to: .point(target.origin))) }
-                // Resizing at the current origin: AX bounds the height by the
-                // current top, so a window growing taller rises first, at an x
-                // that still fits its width.
+                // Initial discovery can find a short, low window whose final
+                // x is clipped. Rise at its fitting origin before growing.
                 if resize && position && order == false && target.height > current.height && target.minY < current.minY {
                     try check(ax.set(.position, of: window, to: .point(CGPoint(x: current.minX, y: target.minY))))
                 }
                 guard presentationLock.withLock({ presentation == token }) else { return }
-                if resize && order != nil {
-                    let size = target.size
-                    try check(ax.set(.size, of: window, to: .size(size)))
-                    constrained.remove(id)
-                    validations[id] = nil
+                if resize, order != nil {
+                    try check(ax.set(.size, of: window, to: .size(target.size)))
                 }
                 guard presentationLock.withLock({ presentation == token }) else { return }
-                if position && !positionFirst {
-                    let origin = target.origin
-                    try check(ax.set(.position, of: window, to: .point(origin)))
-                }
+                if position && !positionFirst { try check(ax.set(.position, of: window, to: .point(target.origin))) }
                 accepted = try frame(window)
                 if let index = facts.firstIndex(where: { $0.id == id }), let accepted { facts[index].frame = accepted }
             }
@@ -759,6 +701,7 @@ private final class AppWindows: @unchecked Sendable {
             if focus {
                 guard try canPresent(window,id:id) else { return }
                 let active = try value(application, .frontmost)?.bool == true
+                guard presentationLock.withLock({ presentation == token }) else { return }
                 let followed = try requestActivation {
                     guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return false }
                     try check(ax.set(.main, of: window, to: .bool(true)))
@@ -837,28 +780,6 @@ private final class AppWindows: @unchecked Sendable {
                 _ = ax.set(.position, of: window, to: .point(point))
             }
         }
-    }
-
-    private func checkSize(_ window: AXElement, area: CGRect) throws -> Bool {
-        let accepted = try frame(window)
-        guard accepted.width > 0, accepted.height > 0 else { throw AXReadError.unresponsive }
-        let cannotFill = abs(accepted.width - area.width) > 2 || abs(accepted.height - area.height) > 2
-        if cannotFill {
-            let center = CGPoint(x: area.midX - accepted.width / 2, y: area.midY - accepted.height / 2)
-            try check(ax.set(.position, of: window, to: .point(center)))
-        }
-        return cannotFill
-    }
-
-    private func validatePresentation(id: UInt32, token: UUID? = nil) {
-        guard let pending = validations[id], token == nil || token == pending.token else { return }
-        validations[id] = nil
-        guard presentationLock.withLock({ presentation == pending.token }), let window = elementsByID[id],
-              (try? canPresent(window, id: id)) == true,
-              let cannotFill = try? checkSize(window, area: pending.area) else { return }
-        if cannotFill { constrained.insert(id) } else { constrained.remove(id) }
-        publishSnapshot()
-        scheduler.main.async { pending.completion() }
     }
 
     /// Native hide, minimize, and fullscreen can begin between a snapshot and a

@@ -69,7 +69,13 @@ package struct SimulatedApp: Sendable {
     @MainActor package func enterFullscreen(_ window: UInt32) { mac.fullscreen(window, enabled: true) }
     @MainActor package func leaveFullscreen(_ window: UInt32) { mac.fullscreen(window, enabled: false) }
     @MainActor package func drag(_ window: UInt32, to point: CGPoint) { mac.drag(window, point: point) }
-    @MainActor package func resize(_ window: UInt32, to size: CGSize) { mac.resize(window, size: size) }
+    @MainActor package func resize(_ window: UInt32, to size: CGSize) {
+        let held = mac.motion.pointerHeld
+        if !held { mac.pointerDown() }
+        mac.resize(window, size: size)
+        if !held { mac.pointerUp() }
+    }
+    @MainActor package func resizeFromApplication(_ window: UInt32, to size: CGSize) { mac.resize(window, size: size) }
     @MainActor package func groupTabs(_ windows: [UInt32], selected: UInt32) { mac.groupTabs(windows, selected: selected) }
     @MainActor package func selectTab(_ window: UInt32) { mac.selectTab(window) }
     @MainActor package func detachTab(_ window: UInt32) { mac.detachTab(window) }
@@ -301,8 +307,10 @@ package final class SimulatedMac: @unchecked Sendable {
     @MainActor func drag(_ id: UInt32, point: CGPoint) {
         assume(.windowGeometryWrites)
         action("drag window \(id) to \(point.x),\(point.y)")
+        let held = motion.pointerHeld
         pressPointer()
         applyPosition(id, point)
+        if !held { pointerUp() }
     }
     @MainActor func resize(_ id: UInt32, size: CGSize) {
         assume(.axSizeConstraints)

@@ -123,7 +123,7 @@ import Testing
         })
     }
 
-    @Test("#19 E21: a pending frame read cannot transfer a float after a newer decision or native lifecycle change", arguments: WriteOrder.allCases, ["workspace", "disable", "close", "minimize", "fullscreen", "selection"])
+    @Test("#19 E21: a pending frame read cannot transfer a float after a newer decision or native lifecycle change", arguments: WriteOrder.allCases, ["workspace", "close", "minimize", "fullscreen", "selection"])
     func obsoleteFrameReadDoesNotTransfer(_ writes: WriteOrder, _ change: String) {
         requireLayer(Scenario.run("float transfer interrupted by \(change) / \(writes)", writes: writes) { s in
             let f = LayerFixture(s), target = f.tiles[1]
@@ -134,13 +134,9 @@ import Testing
             guard case .paused = outcome else {
                 s.expect("the current frame read is held: \(outcome)", false); return
             }
-            // Disable returns windows synchronously on their AX worker, so
-            // release its hold before the config callback drains that lane.
-            if change == "disable" { f.mac.scheduler.resume() }
             s.step("interrupt the pending transfer with \(change)") {
                 switch change {
                 case "workspace": f.tessel.press("workspace 2")
-                case "disable": f.tessel.configure(.off)
                 case "close": f.app.close(target)
                 case "minimize": f.app.minimize(target)
                 case "fullscreen": f.app.enterFullscreen(target)

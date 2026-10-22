@@ -36,6 +36,8 @@ extension SimulatedMac {
     }
     struct MotionState {
         var states: [PresentationState] = []
+        var tracingPresentation = false
+        var pointerHeld = false
         var writes: [GeometryWrite] = []
         var visibility: [VisibilityChange] = []
         var focusRequests: [FocusRequest] = []
@@ -48,9 +50,8 @@ extension SimulatedMac {
     struct WeakPreference { weak var value: PreferenceToken? }
     struct WeakPointer { weak var value: PointerToken? }
     @MainActor final class PointerToken: MotionPreferenceObservation {
-        var release: (@MainActor @Sendable () -> Void)?
-        let receive: @MainActor @Sendable () -> Void
-        init(_ receive: @escaping @MainActor @Sendable () -> Void) { self.receive = receive }
+        let receive: @MainActor @Sendable (Bool) -> Void
+        init(_ receive: @escaping @MainActor @Sendable (Bool) -> Void) { self.receive = receive }
     }
     @MainActor final class PreferenceToken: MotionPreferenceObservation {
         let receive: @MainActor @Sendable (Bool) -> Void
@@ -61,14 +62,18 @@ extension SimulatedMac {
     @MainActor package var pointerActivity: any PointerActivityPort { PointerActivity(mac: self) }
     @MainActor package func pointerDown() { pressPointer() }
     @MainActor package func pointerUp() {
-        for box in motion.pointers { box.value?.release?() }
+        motion.pointerHeld = false
+        for box in motion.pointers { box.value?.receive(false) }
     }
     @MainActor func pressPointer() {
         assume(.pointerPressNotifications)
-        for box in motion.pointers { box.value?.receive() }
+        motion.pointerHeld = true
+        for box in motion.pointers { box.value?.receive(true) }
     }
     @MainActor package var presentationStates: [PresentationState] { motion.states }
+    @MainActor package func beginPresentationTrace() { motion.tracingPresentation = true; motion.states.removeAll() }
     func recordPresentation(_ operation: String) {
+        guard motion.tracingPresentation else { return }
         let order = visibleIDs()
         motion.states.append(PresentationState(operation: operation, traceIndex: scheduler.trace.count,
             frames: Dictionary(uniqueKeysWithValues: order.compactMap { id in windows[id].map { (id, $0.spec.frame) } }), order: order))
@@ -134,9 +139,9 @@ extension SimulatedMac {
     }
     @MainActor private struct PointerActivity: PointerActivityPort {
         let mac: SimulatedMac
-        func observePress(_ receive: @escaping @MainActor @Sendable () -> Void) -> any MotionPreferenceObservation {
+        func observeButtons(_ receive: @escaping @MainActor @Sendable (Bool) -> Void) -> any MotionPreferenceObservation {
             mac.assume(.pointerPressNotifications)
-            mac.scheduler.call("PointerActivityPort.observePress")
+            mac.scheduler.call("PointerActivityPort.observeButtons")
             let token = PointerToken(receive)
             mac.motion.pointers.append(WeakPointer(value: token))
             return token

@@ -13,5 +13,5 @@ package protocol MotionPreferencePort {
 /// transfers geometry control to the user before a drag can race an AX write.
 @MainActor
 package protocol PointerActivityPort {
-    func observePress(_ receive: @escaping @MainActor @Sendable () -> Void) -> any MotionPreferenceObservation
+    func observeButtons(_ receive: @escaping @MainActor @Sendable (Bool) -> Void) -> any MotionPreferenceObservation
 }

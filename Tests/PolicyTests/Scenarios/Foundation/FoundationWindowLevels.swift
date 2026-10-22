@@ -4,7 +4,7 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct FoundationWindowLevels {
-    @Test("#19 E1: only normal and floating CG levels are managed; other layers cannot affect membership, movement or focus", arguments: [Layout.off, .carousel])
+    @Test("#19 E1: only normal and floating CG levels are managed; other layers cannot affect membership, movement or focus", arguments: [Layout.carousel])
     func managedAndIgnoredWindowLevels(_ layout: Layout) {
         requireLayer(Scenario.run("native levels without the layer flag, layout=\(layout.rawValue)") { s in
             let app = s.mac.launch(windows: 1), t = s.startTessel(layout); s.settle()
@@ -38,12 +38,12 @@ import Testing
         })
     }
 
-    @Test("#19 E2: an AXUnknown layer-zero root cannot change remembered focus or layout", arguments: [Layout.off, .carousel], [false, true])
+    @Test("#19 E2: an AXUnknown layer-zero root cannot change remembered focus or layout", arguments: [Layout.carousel], [false, true])
     func unknownRootCannotChangeFocusOrLayout(_ layout: Layout, withdraw: Bool) {
         requireLayer(Scenario.run("unknown native root churn, layout=\(layout.rawValue), withdraw=\(withdraw)") { s in
             let f = CarouselFixture(s, presets: [0.5, 0.5], duration: 0)
             f.press("alt-l")
-            if layout == .off { f.tessel.configure(.off); s.settle() }
+            if layout == .carousel { f.tessel.configure(.carousel); s.settle() }
             let before = f.snapshot(), focused = f.mac.focusedWindow, rail = f.tessel.status.rail
             @MainActor func membership() -> [String] {
                 f.tessel.windows.filter { f.ids.contains($0.id) }.map { "\($0.id):\($0.workspace ?? 0):\($0.rail ?? 0):\($0.slot ?? 0)" }
@@ -125,10 +125,9 @@ import Testing
                 // This example retains the app's explicit normal-level override.
                 (WindowSpec(subrole: "AXFloatingWindow", cgLayer: 0), "AXFloatingWindow"),
                 (WindowSpec(resizable: false), "fixed size"),
-                (WindowSpec(maximumSize: CGSize(width: 500, height: 100_000)), "cannot fill the screen"),
             ]
             let ids = cases.map { app.open($0.0) }
-            let t = s.startTessel(.stack); s.settle()
+            let t = s.startTessel(.carousel); s.settle()
             for (id, item) in zip(ids, cases) {
                 FoundationProof.row(id, in: t, state: .floats, reason: item.1, scenario: s)
                 s.expect("ordinary/dialog windows are on CG layer zero", s.mac.windowOrder.windowLevels([id])[id] == 0)
@@ -136,7 +135,7 @@ import Testing
         })
     }
 
-    @Test("#19 E31: a background layer-21 system alert never activates its app or becomes a new float", arguments: ["off", "carousel", "layer"])
+    @Test("#19 E31: a background layer-21 system alert never activates its app or becomes a new float", arguments: ["layer"])
     func systemAlertDoesNotStealFocus(_ layout: String) {
         requireLayer(Scenario.run("withdrawn non-zero system alert, layout=\(layout)") { s in
             let app = s.mac.launch(windows: 1), alerts = s.mac.launch()
