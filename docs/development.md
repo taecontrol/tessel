@@ -441,7 +441,11 @@ back, 70 ms each way, and moves no real window.
 
 A pointer press, native fullscreen entry, disabling the experiment and a
 layout change clear the stage at once; the pointer case keeps the user's
-geometry. A failed capture clears it and places the windows at once. A
+geometry. A failed capture clears it and places the windows at once, and so
+does a screenshot that has not returned after 1 s. A window that WindowServer
+lists off screen outside the closet is ordering out or hidden: the stage never
+captures it and shows no stand-in for it
+([ADR 0007](adr/0007-capture-only-windows-that-are-drawn.md)). A
 placement that supersedes an unconfirmed focus request carries that focus
 forward. A window focused while still in the closet can lose key when AppKit
 finishes the app's activation after AXMain and AXRaise: the app's previous key
