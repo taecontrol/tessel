@@ -199,6 +199,8 @@ private final class AppWindows: @unchecked Sendable {
     private var settleGeneration: UInt64 = 0
     private var failedReads = 0
     private var pointerReleaseCompletions: [@MainActor @Sendable () -> Void] = []
+    private var enhancedUIRestorePending = false
+    private var enhancedUIRestoreRetry: (any ScheduledWork)?
     private var elementsByID: [UInt32: AXElement] = [:]
     private var change = CatalogChange.snapshot
     private var activationToken: UUID?
@@ -302,6 +304,8 @@ private final class AppWindows: @unchecked Sendable {
 
     func stop() {
         queue.async { [self] in
+            restoreEnhancedUI()
+            enhancedUIRestoreRetry?.cancel()
             stopped = true
             railActivationCheck?.work.cancel()
             railActivationCheck = nil
@@ -332,6 +336,7 @@ private final class AppWindows: @unchecked Sendable {
 
     private func readSnapshot() {
         guard !stopped else { return }
+        if enhancedUIRestorePending, enhancedUIRestoreRetry == nil { restoreEnhancedUI() }
         updateSubscriptions([application], using: &appSubscriptions)
         do {
             guard let windows = try value(application, .windows)?.elements else { return }
@@ -686,9 +691,10 @@ private final class AppWindows: @unchecked Sendable {
         do {
             guard try canPresent(window,id:id) else { return }
             if let target {
-                let enhanced = try value(application, .enhancedUserInterface)?.bool == true
+                let enhanced = try enhancedUIRestorePending || value(application, .enhancedUserInterface)?.bool == true
+                if enhanced { enhancedUIRestorePending = true }
+                defer { if enhanced { restoreEnhancedUI() } }
                 if enhanced { try check(ax.set(.enhancedUserInterface, of: application, to: .bool(false))) }
-                defer { if enhanced { _ = ax.set(.enhancedUserInterface, of: application, to: .bool(true)) } }
                 var current = facts.first { $0.id == id }?.frame ?? target
                 if resize { current = try frame(window) }
                 guard presentationLock.withLock({ presentation == token }) else { return }
@@ -768,6 +774,24 @@ private final class AppWindows: @unchecked Sendable {
                                   failures:failures+1,completion:completion)
             }
         } catch { /* Another app's queue and the CLI remain independent. */ }
+    }
+
+    private func restoreEnhancedUI(failures: Int = 0) {
+        guard enhancedUIRestorePending, !stopped else { return }
+        enhancedUIRestoreRetry?.cancel()
+        enhancedUIRestoreRetry = nil
+        let result = ax.set(.enhancedUserInterface, of: application, to: .bool(true))
+        // AppKit can apply this flag while returning notImplemented. Readback
+        // also distinguishes that reply from a restore that never happened.
+        if result == .success || (try? value(application, .enhancedUserInterface)?.bool) == true {
+            enhancedUIRestorePending = false
+        } else if failures < 4 {
+            enhancedUIRestoreRetry = queue.after(milliseconds: 100 << failures) { [weak self] in
+                self?.restoreEnhancedUI(failures: failures + 1)
+            }
+        }
+        // Exhaustion leaves the obligation intact. The next native snapshot
+        // or placement retries it without keeping a hung app on a timer.
     }
 
     /// A right-clipped window cannot accept its width at either origin. Keep
