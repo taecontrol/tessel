@@ -396,14 +396,7 @@ final class Workspaces {
             // A coalesced destruction snapshot can also remove the neighbor
             // captured while the focused window was detached.
 
-            if case .single(let id) = layer.entry, !floating(id) { layer.entry = .rails }
-            if floatingOrder(in: status.active).isEmpty { layer = FloatingLayer() }
-            if let previousFocus, let state = entries[previousFocus]?.observation.record.state,
-               state == .minimized || state == .hidden, !layer.focused {
-                focused = entries.keys.filter { entries[$0]?.workspace == status.active && railTile($0) }
-                    .max { ((entries[$0]?.recent ?? 0), $0) < ((entries[$1]?.recent ?? 0), $1) }
-            } else { focused = preferred(in: status.active) }
-
+            recoverUnavailableFocus(previousFocus)
             needsRender = true
         }
         // Entering a native fullscreen Space is the user's operation. Keep the
@@ -801,6 +794,16 @@ final class Workspaces {
         carousel.select(id)
     }
 
+    private func recoverUnavailableFocus(_ previous: UInt32?) {
+        if case .single(let id) = layer.entry, !floating(id) { layer.entry = .rails }
+        if floatingOrder(in: status.active).isEmpty { layer = FloatingLayer() }
+        if let previous, let state = entries[previous]?.observation.record.state,
+           state == .minimized || state == .hidden, !layer.focused {
+            focused = entries.keys.filter { entries[$0]?.workspace == status.active && railTile($0) }
+                .max { ((entries[$0]?.recent ?? 0), $0) < ((entries[$1]?.recent ?? 0), $1) }
+        } else { focused = preferred(in: status.active) }
+    }
+
     private func preferred(in workspace: Int) -> UInt32? {
         if layers[workspace]?.focused == true { return preferredFloat(in: workspace) ?? carousel.remembered(workspace) }
         return carousel.remembered(workspace).flatMap { available($0) ? $0 : nil }
@@ -1103,6 +1106,18 @@ final class Workspaces {
             catalog?.refreshFrames { [weak self] in
                 guard let self, !self.pointerHeld, self.pointerGeneration == generation else { return }
                 self.pointerReconciling = false
+                let previous = self.focused
+                let unavailable = previous.map { !self.available($0) } == true
+                if unavailable { self.recoverUnavailableFocus(previous) }
+                else if let native = self.applications.frontmostPID.flatMap({ self.appFocus[$0] }), self.available(native),
+                        let workspace = self.entries[native]?.workspace {
+                    self.status.active = workspace
+                    if native != previous { self.layer.entry = self.floating(native) ? .all : .rails }
+                    // Select before anchoring the released geometry; selecting
+                    // afterwards would reveal past the mouse's chosen edge.
+                    self.remember(native)
+                }
+                let changedSelection = previous != self.focused
                 var changedTile = false
                 for id in self.pointerFrames.keys.sorted() {
                     guard self.carousel.location(id) != nil, let previous = self.pointerFrames[id],
@@ -1114,7 +1129,9 @@ final class Workspaces {
                     self.carouselSizes[id] = current.size
                 }
                 self.pointerFrames.removeAll()
-                if changedTile { self.render(focusing: self.focused, relayout: false, takeFocus: false, instant: true) }
+                if changedTile || changedSelection || unavailable {
+                    self.render(focusing: self.focused, relayout: false, takeFocus: unavailable, instant: true)
+                }
                 let commands = self.pointerCommands
                 self.pointerCommands.removeAll()
                 for command in commands { self.perform(command) }
