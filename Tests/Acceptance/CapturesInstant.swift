@@ -4,7 +4,7 @@ import Foundation
 import Testing
 
 extension Acceptance {
-    @Suite(AppSession(), .enabled(if: ProcessInfo.processInfo.environment["TESSEL_CAPTURE_INSTANT"] == "1", "opt-in instant pixel evidence"))
+    @Suite(AppSession(launchesApp: false), .enabled(if: ProcessInfo.processInfo.environment["TESSEL_CAPTURE_INSTANT"] == "1", "opt-in instant pixel evidence"))
     @MainActor struct InstantCaptures {
         let desktop = Desktop()
         var harness: Harness { desktop.harness }
@@ -12,6 +12,7 @@ extension Acceptance {
 
         struct Row: Encodable {
             let operation: String
+            let variant: String
             let repetition: Int
             let pixels: InstantPixelRecording.Analysis
             let nativeChanged: Bool
@@ -29,22 +30,33 @@ extension Acceptance {
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             for operation in ["workspace", "rail", "width", "stop", "open", "close"] {
                 for repetition in 1...12 {
-                    print("Instant capture: \(operation) \(repetition)/12"); fflush(nil)
-                    try desktop.clear()
+                    let variant = operation == "width" ? (repetition.isMultiple(of: 2) ? "right" : "left")
+                        : operation == "stop" ? (repetition.isMultiple(of: 2) ? "mixed" : "halves") : "standard"
+                    print("Instant capture: \(operation) \(variant) \(repetition)/12"); fflush(nil)
+                    // Reset while stopped: closing the old view under a live
+                    // manager would queue a Finder activation into the next Given.
+                    harness.stopApp()
+                    try fixture.command("reset")
                     let area = try desktop.observe().area
                     let half = ((area[2] - 30) / 2) / (area[2] - 20)
-                    let ids = try desktop.railSetup([half, half, half], duration: 0)
+                    let middle = variant == "mixed" ? half - 120 / (area[2] - 20) : half
+                    let ids = try desktop.railSetup([half, middle, half], duration: 0)
                     for index in ids.indices { try fixture.command("paint", ["key": "w\(index)", "color": index]) }
                     switch operation {
                     case "workspace":
-                        try desktop.activate(key: "w2"); try desktop.key(2, send: true)
+                        try desktop.post(kVK_ANSI_L); try desktop.expectFocus(ids[1])
+                        try desktop.post(kVK_ANSI_L); try desktop.expectFocus(ids[2])
+                        try desktop.key(2, send: true)
                         try requireFinalState("capture destination membership") { try harness.row(ids[2])?.workspace == 2 && harness.status().workspaces?.active == 2 }
                         try desktop.expectFocus(ids[2]); try desktop.key(1); try desktop.expectFocus(ids[1])
                     case "rail":
-                        try desktop.activate(key: "w2"); try desktop.post(kVK_ANSI_J, shift: true)
+                        try desktop.post(kVK_ANSI_L); try desktop.expectFocus(ids[1])
+                        try desktop.post(kVK_ANSI_L); try desktop.expectFocus(ids[2])
+                        try desktop.post(kVK_ANSI_J, shift: true)
                         try requireFinalState("capture destination rail") { try harness.row(ids[2])?.rail == 2 }
                         try desktop.expectFocus(ids[2]); try desktop.post(kVK_ANSI_K); try desktop.expectFocus(ids[1])
                     case "stop": try desktop.post(kVK_ANSI_L); try desktop.expectFocus(ids[1])
+                    case "width" where variant == "right": try desktop.post(kVK_ANSI_L); try desktop.expectFocus(ids[1])
                     default: break
                     }
                     let before = try desktop.observe()
@@ -87,7 +99,7 @@ extension Acceptance {
                     case "workspace", "rail", "stop": finalFocus = ids[2]
                     case "close": finalFocus = ids[1]
                     case "open": finalFocus = try #require(try fixture.command("ping").windows["arrival"])
-                    default: finalFocus = ids[0]
+                    default: finalFocus = ids[variant == "right" ? 1 : 0]
                     }
                     try desktop.expectFocus(finalFocus)
                     sleep(seconds: 0.35)
@@ -118,7 +130,7 @@ extension Acceptance {
                             !opened.intersects(CGRect(x: other.frame[0], y: other.frame[1], width: other.frame[2], height: other.frame[3]))
                         }, "the opened tile must not overlap another final tile")
                     }
-                    results.append(Row(operation: operation, repetition: repetition, pixels: analysis, nativeChanged: nativeChanged))
+                    results.append(Row(operation: operation, variant: variant, repetition: repetition, pixels: analysis, nativeChanged: nativeChanged))
                     try encoder.encode(results).write(to: directory.appending(path: "analysis.json"), options: .atomic)
                 }
             }
@@ -132,6 +144,10 @@ extension Acceptance {
                 let bad = rows.reduce(0) { $0 + $1.pixels.intermediateFrames }, gaps = rows.reduce(0) { $0 + $1.pixels.gapFrames }
                 print("| \(operation) | \(rows.count) | \(bad) | \(gaps) |")
                 #expect(bad == 0 && gaps == 0, "\(operation) must show only start/final content with uninterrupted shared coverage")
+            }
+            for variant in ["left", "right"] {
+                let rows = results.filter { $0.operation == "width" && $0.variant == variant }
+                print("| alt-r \(variant) | \(rows.count) | \(rows.reduce(0) { $0 + $1.pixels.intermediateFrames }) | \(rows.reduce(0) { $0 + $1.pixels.gapFrames }) |")
             }
         }
     }

@@ -101,17 +101,25 @@ struct Desktop {
         let front = observation.activeFixturePID != 0 ? observation.activeFixturePID : observation.frontmostFixturePID
         if front != session.pid, let source = ([fixture] + harness.otherFixtures).first(where: { $0.pid == front }) {
             try source.command("yieldActivation", ["pid": session.pid])
+        } else if session.pid != harness.observer.pid, try harness.observer.command("ping").active == true {
+            // The independent observer shares the fixture bundle ID. It can
+            // own activation after launch even though it has no test windows.
+            try harness.observer.command("yieldActivation", ["pid": session.pid])
         }
         try session.command("activate", ["key": key])
         let windows = try session.command("ping").windows
         var arguments: [String: Any] = ["pid": session.pid]
         if let id = windows[key] { arguments["id"] = id }
         try harness.observer.command("activateFixture", arguments)
-        try requireFinalState("the target fixture frontmost") {
-            let observation = try observe()
-            return observation.activeFixturePID == session.pid && observation.frontmostFixturePID == session.pid
-                && (windows[key].map { focused($0, in: observation) } ?? true)
-        }
+        var last = "no native sample"
+        do {
+            try requireFinalState("the target fixture frontmost") {
+                let observation = try observe()
+                last = "target \(session.pid)/\(windows[key].map(String.init) ?? "none"), active/front \(observation.activeFixturePID)/\(observation.frontmostFixturePID), fixtures \(observation.windows.map { "\($0.id): visible=\($0.visible), main=\($0.main), focused=\($0.focused), frame=\($0.frame)" })"
+                return observation.activeFixturePID == session.pid && observation.frontmostFixturePID == session.pid
+                    && (windows[key].map { focused($0, in: observation) } ?? true)
+            }
+        } catch { throw HarnessError("\(error); \(last)") }
     }
 
     func expectPassedKey(_ code: Int, shift: Bool = false) throws {
