@@ -151,6 +151,33 @@ import Testing
         })
     }
 
+    @Test("#33 E12: release follows the tile selected by the drag before the first key")
+    func dragSelectionOwnsTheNextKey() {
+        requireCarousel(Scenario.run("drag selects a previously unfocused tile") { s in
+            let f = CarouselFixture(s, presets: [1.0 / 3, 1.0 / 3], duration: 0), a = f.ids[0], b = f.ids[1]
+            let original = f.frame(a)
+            f.mac.pointerDown(); f.app.select(b)
+            f.app.resize(b, to: CGSize(width: 600, height: f.area.height - 30)); s.settle()
+            f.mac.pointerUp(); s.settle()
+            f.near(f.frame(b).width, 600, "the newly selected tile keeps the mouse width")
+            f.press("alt-r"); f.focus(b)
+            f.near(f.frame(b).width, f.width(0.5), "the first key cycles the native selection")
+            f.near(f.frame(a).width, original.width, "the previously selected tile keeps its width")
+        })
+    }
+
+    @Test("#2 E15: a close during a held pointer retains the current workspace at release")
+    func pointerReleaseReconcilesAClosedSelection() {
+        requireCarousel(Scenario.run("close a tile before mouse-up") { s in
+            let f = CarouselFixture(s, presets: [1.0 / 3, 1.0 / 3, 1.0 / 3], duration: 0), a = f.ids[0], b = f.ids[1], c = f.ids[2]
+            f.select(c); f.press("send 2"); f.press("workspace 1"); f.select(a)
+            f.mac.pointerDown(); f.app.close(a, selecting: c); s.settle()
+            f.mac.pointerUp(); s.settle()
+            f.focus(b)
+            s.expect("native promotion cannot follow the hidden workspace", f.tessel.status.active == 1)
+        })
+    }
+
     @Test("#33 E16: duration zero never consults Screen Recording or creates a stage")
     func instantPathNeverAsksForCapture() {
         requireCarousel(Scenario.run("instant has no capture permission dependency") { s in
