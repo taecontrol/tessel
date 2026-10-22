@@ -211,6 +211,60 @@ import Testing
         })
     }
 
+    @Test("#33 E12; #33 E15: a permanently hung background app cannot trap the first key after mouse-up",
+          arguments: [false, true], WriteOrder.allCases)
+    func hungBackgroundAppCannotTrapPointerRelease(_ drag: Bool, _ writes: WriteOrder) {
+        requireCarousel(Scenario.run("\(drag ? "drag" : "click") release beside a permanently hung app", writes: writes) { s in
+            let f = CarouselFixture(s, presets: [1.0 / 3, 1.0 / 3, 1.0 / 3], duration: 0)
+            let background = f.mac.launch(windows: 1)
+            s.settle(); f.tessel.press("send 2"); s.settle(); f.press("workspace 1")
+            let b = f.ids[1], c = f.ids[2]
+            f.select(b); background.hang()
+            let start = f.frame(b)
+            f.mac.clearMotionHistory(); f.mac.pointerDown()
+            if drag { f.app.resize(b, to: CGSize(width: 600, height: start.height - 40)) }
+            f.mac.pointerUp()
+            // The first key is posted before any release read completes.
+            f.tessel.press("focus right"); s.settle()
+            f.focus(c)
+            f.near(f.frame(b).width, drag ? 600 : start.width, "release retains the responsive tile's width")
+            f.near(f.frame(b).height, f.area.height, "release restores rail height")
+            f.press("cycle width")
+            f.near(f.frame(c).width, f.width(0.5), "subsequent commands also work without another mouse event")
+            s.expect("a hung background app never receives geometry", f.mac.geometryWrites.allSatisfy { f.ids.contains($0.window) })
+        })
+    }
+
+    @Test("#33 E12: an unresolved app retains its mouse baseline while another app accepts commands",
+          arguments: [false, true], WriteOrder.allCases)
+    func unresolvedReleaseRetainsItsOwnBaseline(_ terminate: Bool, _ writes: WriteOrder) {
+        requireCarousel(Scenario.run("unresolved drag followed by \(terminate ? "termination" : "recovery")", writes: writes) { s in
+            let f = CarouselFixture(s, presets: [1.0 / 3], duration: 0), dragged = f.ids[0]
+            let responsive = f.mac.launch()
+            let other = responsive.open(WindowSpec(frame: CGRect(x: 40, y: 60, width: f.width(1.0 / 3), height: f.area.height), positionAcceptance: .screenEdges))
+            s.settle(); f.app.select(dragged); s.settle()
+            f.mac.pointerDown()
+            f.app.resize(dragged, to: CGSize(width: 600, height: f.area.height - 40))
+            responsive.select(other); f.app.hang(); f.mac.pointerUp()
+            f.tessel.press("cycle width"); s.settle()
+            f.near(f.frame(other).width, f.width(0.5), "the responsive app consumes the first queued command")
+            // A second gesture must not discard the first app's unread baseline.
+            f.mac.pointerDown(); f.mac.pointerUp(); s.settle()
+            f.mac.clearMotionHistory()
+            if terminate { f.app.quit() } else { f.app.resume() }
+            s.settle()
+            if terminate {
+                s.expect("terminated windows leave the catalog", !f.tessel.windows.contains { $0.id == dragged })
+            } else {
+                f.near(f.frame(dragged).width, 600, "a later successful read adopts the original mouse width")
+                f.near(f.frame(dragged).height, f.area.height, "only the recovered tile's height is restored")
+                s.expect("recovery reconciles the tile once", f.mac.geometryWrites.filter { $0.window == dragged && $0.attribute == .size }.count == 1)
+            }
+            f.tessel.press("cycle width"); s.settle()
+            f.near(f.frame(other).width, f.width(2.0 / 3), "recovery or termination leaves the responsive selection usable")
+        })
+    }
+
     @Test("#33 E11; #33 E12: closing a nonfocused tile during a hold defers one layout until release")
     func pointerReleaseRendersDeferredClosure() {
         requireCarousel(Scenario.run("close a nonfocused tile while pointer held") { s in
