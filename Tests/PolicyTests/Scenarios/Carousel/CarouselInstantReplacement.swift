@@ -5,6 +5,25 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct CarouselInstantReplacement {
+    @Test("#33 E18: a hung earlier neighbor cannot delay an independent responsive placement", arguments: WriteOrder.allCases)
+    func hungNeighborDoesNotDelayIndependentPlacement(_ writes: WriteOrder) {
+        requireCarousel(Scenario.run("independent placement beside a hung neighbor", writes: writes) { s in
+            let f = CarouselFixture(s, presets: [0.5], duration: 0)
+            let responsive = f.mac.launch()
+            let id = responsive.open(WindowSpec(frame: CGRect(x: 40, y: 60, width: f.width(0.5), height: f.area.height), positionAcceptance: .screenEdges))
+            s.settle()
+            f.app.hang(); f.mac.clearMotionHistory()
+            f.tessel.changeConfig("[animation]\nduration = 0\n[gaps]\nouter = 20\n")
+            s.after(milliseconds: 200, "responsive placement must land before the hung neighbor's retries") {
+                f.near(f.frame(id).minY, f.area.minY + 10, "responsive tile has the new top gap promptly")
+                f.near(f.frame(id).height, f.area.height - 20, "responsive tile has its final height promptly")
+                s.expect("the hung tile has not accepted geometry", f.mac.geometryWrites.allSatisfy { $0.window != f.ids[0] })
+            }
+            s.settle()
+            s.expect("responsive placement is not replayed by unrelated retries", f.mac.geometryWrites.filter { $0.window == id && $0.attribute == .size }.count == 1)
+        })
+    }
+
     @Test("#33 E18: prepare once while hidden and preserve pointwise old-or-final ownership",
           arguments: ["workspace", "rail", "width", "width-right", "width-shrink", "stop", "stop-mixed", "stop-left", "open", "close", "send", "layer-show", "layer-hide"], WriteOrder.allCases)
     func instantOperationsHaveAnOrderedHandoff(_ operation: String, _ writes: WriteOrder) {
