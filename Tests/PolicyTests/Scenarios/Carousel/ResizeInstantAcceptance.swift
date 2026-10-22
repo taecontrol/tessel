@@ -192,6 +192,21 @@ import Testing
         })
     }
 
+    @Test("#33 E11; #33 E12: closing a nonfocused tile during a hold defers one layout until release")
+    func pointerReleaseRendersDeferredClosure() {
+        requireCarousel(Scenario.run("close a nonfocused tile while pointer held") { s in
+            let f = CarouselFixture(s, presets: [1.0 / 3, 1.0 / 3, 1.0 / 3], duration: 0)
+            let a = f.ids[0], b = f.ids[1], c = f.ids[2]
+            f.mac.clearMotionHistory(); f.mac.pointerDown()
+            f.app.close(b, selecting: a); s.settle()
+            s.expect("closure never writes geometry during the hold", f.mac.geometryWrites.isEmpty)
+            f.mac.pointerUp(); s.settle()
+            f.near(f.frame(c).minX, f.frame(a).maxX + 10, "the remaining neighbor fills the closed tile's slot")
+            f.focus(a)
+            s.expect("the deferred neighbor is placed exactly once", f.mac.geometryWrites.filter { $0.window == c && $0.attribute == .position }.count == 1)
+        })
+    }
+
     @Test("#2 E15: a close during a held pointer retains the current workspace at release")
     func pointerReleaseReconcilesAClosedSelection() {
         requireCarousel(Scenario.run("close a tile before mouse-up") { s in
