@@ -828,6 +828,17 @@ The retry measurement excludes later focus-confirmation reads while still
 requiring exactly the four original retry delays. Initial-enumeration race
 setups now hold the startup AX list rather than entering a removed mode.
 
+Retained native scenes also follow the kept rail policy. Failed-hide injection
+uses initially in-bounds windows whose widths force overflow. The latency
+elevator's singleton keeps its nominal half width. Resource setup waits for
+workspace sends to finish before opening the next fixture. The foundation idle
+scene discovers twenty existing windows at startup; a live burst of twenty
+arrivals can still be animating after the one-second setup settle. It now also
+proves zero stage activity during the measured idle window. The hidden-layer
+scene finishes the new float's single-layer arrival before hiding it with
+alt-z. Sample counts, the one-second settle, twenty-second idle windows and all
+latency/resource limits are unchanged.
+
 ## Acceptance example layers (#24)
 
 This table is the maintained example-to-layer map for issues #1, #2, #19, #26 and #33.

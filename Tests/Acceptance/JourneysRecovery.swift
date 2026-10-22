@@ -69,7 +69,14 @@ extension Acceptance.Journeys {
             for failure in ["--test-missing-skylight", "--test-failed-hide"] {
                 try desktop.clear()
                 harness.stopApp()
-                let ids = try [fixture.open(key: "a"), fixture.open(key: "b")]
+                // Both must not fit: short rails now retain their widths, so
+                // two ordinary fixtures would never exercise failed hiding.
+                let ids = try [fixture.open(key: "a", ["widthFraction": 1.0]), fixture.open(key: "b", ["widthFraction": 1.0])]
+                let area = try desktop.observe().area
+                for key in ["a", "b"] {
+                    try fixture.command("move", ["key": key, "frame": [area[0] + 10, area[1] + 100, area[2] - 20, 300]])
+                }
+                try desktop.expectInside(ids)
                 try desktop.activate(key: "b")
                 let frame = try #require(try desktop.window(ids[1])).frame
                 try desktop.writeConfig(desktop.carousel)

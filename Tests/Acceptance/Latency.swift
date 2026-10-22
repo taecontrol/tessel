@@ -132,7 +132,7 @@ extension Acceptance {
                     return ids.allSatisfy { id in
                         guard let slot = shown.firstIndex(of: id) else { return !observation.visibleIDs.contains(id) }
                         let frame = [area[0] + 10 + Double(slot) * (width + 10), area[1] + 10,
-                                     pair == nil ? area[2] - 20 : width, area[3] - 20]
+                                     width, area[3] - 20]
                         guard observation.visibleIDs.contains(id) else { return false }
                         if let frames { return frames[id].map { desktop.near($0, frame) } == true }
                         return observation.windows.contains { $0.id == id && $0.visible && desktop.near($0.frame, frame) }
