@@ -126,6 +126,9 @@ window with both memberships is visible and is no longer in the closet.
 confirmed. Completion can follow a main/raise write (the default), arrive as a
 native event, or wait for another activation request. Retry scenarios select
 the last choice explicitly; native completion does not require that retry.
+The choice belongs to the app, not to the request: deferring an app again with
+another choice also changes the one an earlier request is still waiting for.
+Scenarios that check what completes a pending request keep one choice per app.
 
 `beginMinimize` and `finishMinimize` separate the pending Dock transition from
 its completion. AXMain or AXRaise can cancel the pending operation. After

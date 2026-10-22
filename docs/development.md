@@ -644,6 +644,9 @@ covered windows; it cannot prove stacking. The supplementary E7/E9 spec-gap
 scenarios check the simulator's front-to-back `cg-on-screen-order` list and
 keyboard focus instead. A seeded sweep replays command sequences under
 deferred activation and stage retargets and checks that rule after each settle.
+It and a second sweep, of superseded activations, native selections and
+geometry-only relayouts, also check that no passive float raise moves
+keyboard focus into the float's app.
 
 During rail motion the stage captures each visible pinned float once, excludes
 it from the background, and draws stand-ins in their at-rest stacking order:
