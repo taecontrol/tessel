@@ -1606,7 +1606,7 @@ final class Workspaces {
                     geometryReady = finishedPlacements == placements.count
                     if p.id == self.focused {
                         if result.frame == nil { self.expectedFocus = nil }
-                        focusAndCommit()
+                        else { focusAndCommit() }
                     }
                     commitVisibility()
                     placeReady()

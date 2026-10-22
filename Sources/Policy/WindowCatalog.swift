@@ -763,10 +763,10 @@ private final class AppWindows: @unchecked Sendable {
                 railActivationCheck = (token,check)
             }
             observedFocus = publishSnapshot()
-        } catch AXReadError.unresponsive where target != nil && accepted == nil && failures < 4 {
+        } catch AXReadError.unresponsive where (target != nil || focus) && accepted == nil && failures < 4 {
             // A busy or briefly hung app can time out every write of the
-            // render that moved it, leaving a stale frame over its
-            // neighbors once it answers. Back off like failed reads, while
+            // render that moved it, or the separate focus request that
+            // releases its visibility handoff. Back off like failed reads, while
             // no newer render supersedes this one; a hung app then costs nothing.
             retrying = true
             queue.after(milliseconds: 50 << (failures+1)) { [weak self] in
