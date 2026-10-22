@@ -27,6 +27,7 @@ final class Workspaces {
     private var pointerObservation: (any MotionPreferenceObservation)?
     private var pointerHeld = false
     private var pointerReconciling = false
+    private var pointerNeedsRender = false
     private var pointerFrames: [UInt32: CGRect] = [:]
     private var pointerGeneration: UInt64 = 0
     private var pointerCommands: [WorkspaceCommand] = []
@@ -389,7 +390,12 @@ final class Workspaces {
                 if floating(id) { newFloats.append(id) }
             }
         }
-        guard status.enabled, !pointerHeld, !pointerReconciling else { publish(); return }
+        guard status.enabled else { publish(); return }
+        if pointerHeld || pointerReconciling {
+            pointerNeedsRender = pointerNeedsRender || needsRender || resizedRail || changedTiling || !hiddenReplacements.isEmpty
+            publish()
+            return
+        }
         if lostCurrent || previousFocus.map({ !available($0) }) == true {
             cancelFocusDecision()
             expectedFocus = nil
@@ -676,7 +682,8 @@ final class Workspaces {
 
     private func render(focusing selection: UInt32?, relayout: Bool, activateDesktop: Bool = true, takeFocus: Bool = true,
                         layoutWindows: Set<UInt32> = [], instant: Bool = false) {
-        guard status.enabled, !quitting, !pointerHeld else { return }
+        guard status.enabled, !quitting else { return }
+        if pointerHeld || pointerReconciling { pointerNeedsRender = true; return }
         if let selection, carousel.location(selection) != nil { layer.entry = .rails }
         renderCarousel(focusing: selection, activateDesktop: activateDesktop, takeFocus: takeFocus, instant: instant)
     }
@@ -1129,7 +1136,9 @@ final class Workspaces {
                     self.carouselSizes[id] = current.size
                 }
                 self.pointerFrames.removeAll()
-                if changedTile || changedSelection || unavailable {
+                let deferredRender = self.pointerNeedsRender
+                self.pointerNeedsRender = false
+                if changedTile || changedSelection || unavailable || deferredRender {
                     self.render(focusing: self.focused, relayout: false, takeFocus: unavailable, instant: true)
                 }
                 let commands = self.pointerCommands
