@@ -25,6 +25,7 @@ let package = Package(
         .testTarget(name: "PolicyTests", dependencies: ["Policy", "Ports", "Simulator", "Assumptions"], path: "Tests/PolicyTests"),
         .executableTarget(name: "Check", path: "Tools/Check"),
         .testTarget(name: "CheckTests", dependencies: ["Check"], path: "Tests/CheckTests"),
+        .testTarget(name: "BuildTests", dependencies: ["Build"], path: "Tests/BuildTests"),
     ]
     + (Context.environment["TESSEL_ACCEPTANCE"] == "1" ? [
         .testTarget(name: "Acceptance", dependencies: ["Assumptions"], path: "Tests/Acceptance", exclude: ["resource-budget.json"]),

@@ -84,7 +84,12 @@ scripts/verify --resources
 ```
 
 With no arguments, `scripts/verify` runs every real-system suite except the
-disposable-runner permission steps. `--journeys` includes those steps on CI;
+disposable-runner permission steps. Before the first suite, it runs
+`scripts/build --if-needed`: a content manifest checks app, CLI, fixture and
+build-tool sources, compiler, signing settings and installed bundle bytes.
+Any mismatch rebuilds the signed bundles; unchanged inputs avoid compilation.
+Plain `scripts/build` still forces a rebuild for the permission journey.
+`--journeys` includes those steps on CI;
 `--permission` selects just those steps. The signing-and-permission journey has
 separate signing and permission tests so the default can skip only the latter. Captures
 run only with their opt-in flag: `TESSEL_CAPTURE_WORKSPACES=1` for AppKit views,

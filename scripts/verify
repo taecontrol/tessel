@@ -96,6 +96,9 @@ EOF
         sleep 0.5
     done
 fi
+# Attest to the sources actually exercised, even after a clean checkout moves
+# to another commit. The build tool hashes inputs and installed signed bundles.
+"$root/scripts/build" --if-needed
 configuration=(-c debug)
 # Pixel comparisons scan full recordings. Optimize that opt-in harness so its
 # analysis does not turn the bounded capture into minutes of debug-loop work.
