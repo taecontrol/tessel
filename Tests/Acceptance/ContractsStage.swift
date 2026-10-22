@@ -10,7 +10,7 @@ extension Acceptance.Contracts {
         try #require((facts.preflightMilliseconds ?? .infinity) < 500, "a preflight must not wait on a prompt: \(facts.preflightMilliseconds ?? -1) ms")
     }
 
-    @Test("stage-whole-window-capture: a whole window is captured on screen, as a sliver and in the closet, without moving or activating it", contract(.stageWholeWindowCapture))
+    @Test("stage-whole-window-capture: a whole window is captured on screen, as a sliver and in the closet, without moving or activating it; off screen, only a closet window is drawn", contract(.stageWholeWindowCapture))
     func stageCapturesWholeWindows() throws {
         try #require(try native("screenRecording").screenRecording == true, "grant Screen Recording to the signed fixture observer")
         let id = try fixture.open(); let original = try window(id)
@@ -38,13 +38,26 @@ extension Acceptance.Contracts {
         try capture("as a sliver")
         try native("closetStart"); defer { _ = try? native("closetStop") }
         try native("closetHide", ["ids": [id]])
-        try requireFinalState("the window leaves the active Space") { try native("spaces", ["ids": [id]]).memberships?.first?.ordinary.isEmpty == true }
+        // Listed off screen, a closet window has no ordinary Space, and it is
+        // drawn.
+        try requireFinalState("the window leaves the active Space") {
+            try native("spaces", ["ids": [id]]).memberships?.first?.ordinary.isEmpty == true && !native().visible.contains(id)
+        }
         try capture("in the closet")
         // Like the other closet contracts, return the window and let it rejoin
         // the active Space before the closet is destroyed, so the next
         // contract's native transitions start from a settled desktop.
         try native("closetShow", ["ids": [id]])
         try requireFinalState("the window rejoins the active Space") { try native("spaces", ["ids": [id]]).memberships?.first?.ordinary.isEmpty == false }
+        // A hidden app's window, like one ordering out as it closes, is listed
+        // off screen but keeps its ordinary Space, and is not drawn: the stage
+        // does not capture it, because a screenshot of it never returns and
+        // replayd keeps that capture's recording attribution.
+        try fixture.command("hide")
+        defer { _ = try? fixture.command("show") }
+        try requireFinalState("a hidden window is listed off screen and keeps its ordinary Space") {
+            try !native().visible.contains(id) && native("spaces", ["ids": [id]]).memberships?.first?.ordinary.isEmpty == false
+        }
     }
 
     @Test("stage-overlay: a click-through floating overlay is listed and reads back drawn within the stage's wait, above windows and below the menu bar, without taking focus", contract(.stageOverlay))

@@ -19,8 +19,9 @@ package protocol MotionStagePort: AnyObject {
     /// this order without requesting another capture.
     func order(_ windows: [UInt32])
     /// Shows every captured stand-in at its rect in one frame, once all
-    /// requested captures have arrived. False when a capture failed or the
-    /// stage was cleared meanwhile.
+    /// requested captures have arrived. A window that is not drawn needs no
+    /// stand-in. False when a capture failed or the stage was cleared
+    /// meanwhile.
     func show(_ rects: [UInt32: CGRect], completion: @escaping @MainActor @Sendable (Bool) -> Void)
     /// Moves stand-ins to their rects over `duration`, starting from where
     /// and how fast they are moving on screen. A window without a stand-in

@@ -150,8 +150,14 @@ final class SystemMotionStage: MotionStagePort {
     private var pendingCaptures = 0
     var capturesPending: Bool { pendingCaptures > 0 }
     var onCapturesSettled: (@MainActor @Sendable () -> Void)?
+    /// Whether a window rests in tessel's closet, the only place a window
+    /// WindowServer lists off screen is still drawn.
+    var inCloset: @MainActor (UInt32) -> Bool = { _ in false }
     private var refreshes: [UInt32: Int] = [:]
     private var retried = Set<UInt32>()
+    /// Windows not drawn when their capture was due: closing, or in a hidden
+    /// app. Nothing of them shows, so the stage needs no stand-in for them.
+    private var undrawn = Set<UInt32>()
     private var revealing = 0
     private var content: SCShareableContent?
     private var session = 0
@@ -236,7 +242,7 @@ final class SystemMotionStage: MotionStagePort {
             // Without what lies under them, moving stand-ins would uncover the
             // real windows being placed.
             guard backdropTask == nil || back != nil,
-                  !rects.keys.contains(where: { pending[$0] != nil && images[$0] == nil }) else { completion(false); return }
+                  !rects.keys.contains(where: { pending[$0] != nil && images[$0] == nil && !self.undrawn.contains($0) }) else { completion(false); return }
             self.prepareOverlay()
             CATransaction.begin(); CATransaction.setDisableActions(true)
             self.backdrop.frame = self.stageRect
@@ -420,6 +426,7 @@ final class SystemMotionStage: MotionStagePort {
         ready.removeAll()
         refreshes.removeAll()
         retried.removeAll()
+        undrawn.removeAll()
         stacking.removeAll()
         background?.cancel(); background = nil
         lastMove = nil
@@ -474,7 +481,16 @@ final class SystemMotionStage: MotionStagePort {
         guard token == session else { return nil }
         pendingCaptures += 1
         defer { captureSettled() }
-        guard let window = await shareable(id), token == session, let size = liveSize(id) else { return nil }
+        guard let window = await shareable(id), token == session, let live = windowServer([id])[id] else { return nil }
+        // A window ordering out, as a closing one does, is not drawn: a
+        // screenshot of it never completes, and replayd then keeps the
+        // capture's recording attribution until it restarts. Every later
+        // capture on the Mac waits longer for the indicator to publish.
+        guard live.onScreen || inCloset(id) else {
+            undrawn.insert(id); retried.insert(id)
+            return nil
+        }
+        let size = live.bounds.size
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let configuration = SCStreamConfiguration()
         let scale = CGFloat(filter.pointPixelScale)
@@ -483,8 +499,12 @@ final class SystemMotionStage: MotionStagePort {
         configuration.ignoreShadowsSingleWindow = true
         // Measured as BGRA, with the window's own transparent corners.
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
-        guard let sample = try? await SCScreenshotManager.captureSampleBuffer(contentFilter: filter, configuration: configuration),
-              let image = await Self.convert(sample) else { return nil }
+        guard let sample = await screenshot(filter, configuration) else {
+            // Waiting again could only leave another capture behind.
+            retried.insert(id)
+            return nil
+        }
+        guard let image = await Self.convert(sample) else { return nil }
         // A window that changed size during the capture was drawn scaled.
         guard liveSize(id) == size else { return nil }
         #if TESSEL_DEVELOPMENT
@@ -516,18 +536,51 @@ final class SystemMotionStage: MotionStagePort {
         configuration.sourceRect = rect
         configuration.width = Int(rect.width * scale); configuration.height = Int(rect.height * scale)
         configuration.showsCursor = false
-        guard let sample = try? await SCScreenshotManager.captureSampleBuffer(contentFilter: SCContentFilter(display: display, excludingWindows: excluded),
-                                                                             configuration: configuration) else { return nil }
+        guard let sample = await screenshot(SCContentFilter(display: display, excludingWindows: excluded), configuration) else { return nil }
         return await Self.convert(sample)
+    }
+
+    /// The longest the stage waits for one screenshot, queued behind the
+    /// move's other captures. replayd takes them one at a time.
+    private static let captureLimit = 1.0
+
+    /// A screenshot, or nothing once it fails or `captureLimit` passes. One
+    /// that never completes must not hold the stage: the windows are then
+    /// placed at once, and a window that stopped drawing during its capture
+    /// is not captured again.
+    private func screenshot(_ filter: SCContentFilter, _ configuration: SCStreamConfiguration) async -> Sample? {
+        let reply = Reply()
+        return await withCheckedContinuation { continuation in
+            reply.continuation = continuation
+            // A cancelled timer source leaves no wakeup behind at rest.
+            reply.limit.schedule(deadline: .now() + Self.captureLimit)
+            reply.limit.setEventHandler { reply.resume(nil) }
+            reply.limit.resume()
+            SCScreenshotManager.captureSampleBuffer(contentFilter: filter, configuration: configuration) { sample, _ in
+                let sample = sample.map(Sample.init)
+                DispatchQueue.main.async { reply.resume(sample) }
+            }
+        }
+    }
+
+    /// A sample buffer is immutable once captured.
+    private struct Sample: @unchecked Sendable { let buffer: CMSampleBuffer }
+
+    /// Resumes its continuation once, on the main queue.
+    private final class Reply: @unchecked Sendable {
+        var continuation: CheckedContinuation<Sample?, Never>?
+        let limit = DispatchSource.makeTimerSource(queue: .main)
+        func resume(_ sample: Sample?) {
+            limit.cancel()
+            continuation?.resume(returning: sample)
+            continuation = nil
+        }
     }
 
     /// Converting a capture takes milliseconds; the main thread keeps
     /// committing the motion meanwhile.
-    private nonisolated static func convert(_ sample: CMSampleBuffer) async -> Capture? {
-        // A sample buffer is immutable once captured.
-        struct Sample: @unchecked Sendable { let buffer: CMSampleBuffer }
-        let sample = Sample(buffer: sample)
-        return await Task.detached(priority: .userInitiated) { Capture(sample.buffer) }.value
+    private nonisolated static func convert(_ sample: Sample) async -> Capture? {
+        await Task.detached(priority: .userInitiated) { Capture(sample.buffer) }.value
     }
 
     // MARK: Layers

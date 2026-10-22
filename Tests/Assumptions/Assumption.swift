@@ -63,7 +63,7 @@ package enum Assumption: String, CaseIterable, Sendable {
         case .closetAXIdentity: "A retained AX element survives a closet round trip and accepts position writes while closeted."
         case .closetSizeLoss: "An AXSize write while closeted may return a shorter height after the window is shown."
         case .screenRecordingPreflight: "CGPreflightScreenCaptureAccess reports the Screen Recording grant without prompting; CGRequestScreenCaptureAccess asks once."
-        case .stageWholeWindowCapture: "With Screen Recording, ScreenCaptureKit captures a whole window at its live size, including a window in the closet or partly off screen, serially, without moving or activating it."
+        case .stageWholeWindowCapture: "With Screen Recording, ScreenCaptureKit captures a whole window at its live size, including a window in the closet or partly off screen, serially, without moving or activating it. Off screen, only a window in the closet, with no ordinary Space, is drawn; a hidden or ordering-out window keeps its ordinary Space."
         case .stageOverlay: "A borderless, click-through window at floating level is listed above tiled windows and below the menu bar within one display frame of its commit, without taking focus or receiving the pointer; WindowServer may draw it tens of milliseconds later, which its owner can read from its own window without Screen Recording."
         case .reduceMotionNotifications: "NSWorkspace exposes Reduce Motion and posts accessibilityDisplayOptionsDidChangeNotification when it changes."
         case .applicationLifecycle: "Application metadata describes activation policy and liveness; regular apps notify launch and termination, while prohibited apps may omit either notification."

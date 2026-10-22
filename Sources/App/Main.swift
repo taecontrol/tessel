@@ -67,12 +67,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
         do { server = try SocketServer { store.reply(to: $0) } }
         catch { NSApp.terminate(nil); return }
+        var skyLight: SkyLightCloset?
         let workspaces = Workspaces(store: store, trusted: trusted, configuration: config.status.effective,
                                     applications: applications, ax: ax, screens: SystemScreen(), windowOrder: SystemWindowOrder(),
                                     scheduler: scheduler, hotkeys: SystemHotkeys(), fixtureOnly: LaunchOptions.fixtureOnly,
                                     motionPreferences: SystemMotionPreferences(), stage: stage, pointerActivity: SystemPointerActivity()) {
-            try SkyLightCloset(simulateMissing: LaunchOptions.missingSkyLight, simulateFailedHide: LaunchOptions.failedHide)
+            let closet = try SkyLightCloset(simulateMissing: LaunchOptions.missingSkyLight, simulateFailedHide: LaunchOptions.failedHide)
+            skyLight = closet
+            return closet
         }
+        // The closet's Space holds the only windows WindowServer lists off
+        // screen that are still drawn.
+        if let skyLight { stage.inCloset = { skyLight.memberships($0, scope: .ordinary).isEmpty } }
         self.workspaces = workspaces
         workspaces.onChange = { [weak self] in
             guard let self else { return }
