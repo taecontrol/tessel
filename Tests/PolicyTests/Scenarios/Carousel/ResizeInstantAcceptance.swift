@@ -196,6 +196,47 @@ import Testing
         })
     }
 
+    @Test("#33 E12: width commands queued at a failed release cycle from the adopted mouse width",
+          arguments: [1, 2], WriteOrder.allCases)
+    func failedReleaseReadPreservesQueuedWidthCommands(_ count: Int, _ writes: WriteOrder) {
+        requireCarousel(Scenario.run("failed release followed immediately by \(count) width commands", writes: writes) { s in
+            let f = CarouselFixture(s, presets: [0.5], duration: 0), id = f.ids[0]
+            f.mac.pointerDown()
+            f.app.resize(id, to: CGSize(width: 600, height: f.area.height - 40))
+            f.app.busy(forMilliseconds: 100)
+            f.mac.pointerUp()
+            for _ in 0..<count { f.tessel.press("cycle width") }
+            s.settle()
+            f.near(f.frame(id).width, f.width(count == 1 ? 0.5 : 2.0 / 3), "every queued key cycles from the adopted width in order")
+            f.near(f.frame(id).height, f.area.height, "recovery restores the rail height")
+            f.focus(id)
+        })
+    }
+
+    @Test("#33 E12: focus proceeds while the dragged app and its queued width command await recovery",
+          arguments: [false, true], WriteOrder.allCases)
+    func unresolvedWidthCommandDoesNotDelayFocus(_ queueWidth: Bool, _ writes: WriteOrder) {
+        requireCarousel(Scenario.run("focus past an unresolved drag\(queueWidth ? " and width command" : "")", writes: writes) { s in
+            let f = CarouselFixture(s, presets: [1.0 / 3, 1.0 / 3], duration: 0, appCount: 2)
+            let dragged = f.ids[0], next = f.ids[1]
+            f.mac.pointerDown()
+            f.app.resize(dragged, to: CGSize(width: 600, height: f.area.height - 40))
+            f.app.hang(); f.mac.pointerUp()
+            if queueWidth { f.tessel.press("cycle width") }
+            f.tessel.press("focus right"); s.settle()
+            f.focus(next)
+            f.near(f.frame(dragged).width, 600, "the unresolved tile retains native geometry")
+            f.press("cycle width")
+            f.near(f.frame(next).width, f.width(0.5), "the responsive selection accepts its own width command")
+            f.app.resume()
+            f.app.resizeFromApplication(dragged, to: f.frame(dragged).size); s.settle()
+            f.near(f.frame(dragged).width, queueWidth ? f.width(0.5) : 600, "recovery adopts geometry before applying the original tile's queued key")
+            f.near(f.frame(dragged).height, f.area.height, "recovery restores the dragged tile's height")
+            f.near(f.frame(next).width, f.width(0.5), "recovery preserves the newer selection's intent")
+            f.focus(next)
+        })
+    }
+
     @Test("#33 E12: release follows the tile selected by the drag before the first key")
     func dragSelectionOwnsTheNextKey() {
         requireCarousel(Scenario.run("drag selects a previously unfocused tile") { s in
