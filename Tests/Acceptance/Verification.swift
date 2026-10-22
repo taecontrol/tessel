@@ -51,5 +51,13 @@ extension Acceptance.Verification {
                                             initialArrival: [0, 0, 300, 200], finalArrival: [300, 0, 300, 200])
             #expect(result.intermediateFrames == (intermediateX == 0 ? 0 : 1), "an opening may occupy only its native initial or final frame")
         }
+        // E20 keeps opening's original one-step rule. Its new pointwise
+        // coverage rule names workspace, rail, width, stop and close only.
+        let opening = InstantPixelRecording(width: width, height: height,
+            frames: [frame(1, 2, at: 0), frame(4, 2, at: 1), frame(0, 4, at: 2), frame(3, 4, at: 3)],
+            failure: nil, requestedHz: 120)
+        let opened = try opening.analyze(postedAt: 0.5, pointsWide: 600, arrival: 4,
+                                         initialArrival: [0, 0, 300, 200], finalArrival: [300, 0, 300, 200])
+        #expect(opened.intermediateFrames == 0 && opened.gapFrames == 0)
     }
 }
