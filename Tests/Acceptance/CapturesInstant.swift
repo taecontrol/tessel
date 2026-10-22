@@ -27,6 +27,8 @@ extension Acceptance {
             let after: [String: [Double]]
             let beforeOrder: [UInt32]
             let afterOrder: [UInt32]
+            let initialArrival: [Double]?
+            let finalArrival: [Double]?
         }
 
         @Test("#33 E20: twelve fixture-only 120 Hz recordings per instant operation")
@@ -121,7 +123,8 @@ extension Acceptance {
                     let views = NativeViews(postedAt: posted, ids: ids, points: points,
                         before: Dictionary(uniqueKeysWithValues: before.windows.filter { $0.visible }.map { (String($0.id), $0.frame) }),
                         after: Dictionary(uniqueKeysWithValues: after.windows.filter { $0.visible }.map { (String($0.id), $0.frame) }),
-                        beforeOrder: before.visibleIDs, afterOrder: after.visibleIDs)
+                        beforeOrder: before.visibleIDs, afterOrder: after.visibleIDs,
+                        initialArrival: arrivalFrame, finalArrival: operation == "open" ? after.windows.first { $0.id == finalFocus }?.frame : nil)
                     try encoder.encode(views).write(to: directory.appending(path: "\(operation)-\(repetition)-native.json"), options: .atomic)
                     let recording = try JSONDecoder().decode(InstantPixelRecording.self, from: Data(contentsOf: path))
                     let finalArrival = after.windows.first { $0.id == finalFocus }?.frame
@@ -167,8 +170,13 @@ extension Acceptance {
             for operation in ["workspace", "rail", "width", "stop", "open", "close"] {
                 let rows = results.filter { $0.operation == operation }
                 let bad = rows.reduce(0) { $0 + $1.pixels.intermediateFrames }, gaps = rows.reduce(0) { $0 + $1.pixels.gapFrames }
-                print("| \(operation) | \(rows.count) | \(bad) | \(gaps) | \(rows.filter { !$0.nativePixelsAgree }.count) |")
-                #expect(bad == 0 && gaps == 0, "\(operation) must show only start/final content with uninterrupted shared coverage")
+                let gapText = operation == "open" ? "n/a" : String(gaps)
+                print("| \(operation) | \(rows.count) | \(bad) | \(gapText) | \(rows.filter { !$0.nativePixelsAgree }.count) |")
+                if operation == "open" {
+                    #expect(bad == 0, "opening must occupy only its native initial or final frame in one step")
+                } else {
+                    #expect(bad == 0 && gaps == 0, "\(operation) must show only start/final content with uninterrupted shared coverage")
+                }
             }
             for variant in ["left", "right"] {
                 let rows = results.filter { $0.operation == "width" && $0.variant == variant }

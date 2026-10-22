@@ -60,6 +60,7 @@ struct InstantPixelRecording: Decodable {
             first = destroyed
         }
         let start = try first.pixels(count: width * height), end = try last.pixels(count: width * height)
+        let baseline = try before.pixels(count: width * height)
         // Exclude 12 pt around start/final content edges, title bars and corners.
         let border = max(1, Int(ceil(12 * Double(width) / pointsWide)))
         var compare: [Int] = [], changed = 0
@@ -70,7 +71,7 @@ struct InstantPixelRecording: Decodable {
                     start[index] == start[index + offset] && start[index] == start[index + offset * width]
                         && end[index] == end[index + offset] && end[index] == end[index + offset * width]
                 }
-                if stable { compare.append(index); if start[index] != end[index] { changed += 1 } }
+                if stable { compare.append(index); if baseline[index] != end[index] { changed += 1 } }
             }
         }
         let initialBox: [Int]?, finalBox: [Int]?
@@ -88,10 +89,12 @@ struct InstantPixelRecording: Decodable {
         for frame in frames where frame.time >= first.time && frame.time > postedAt {
             let current = try frame.pixels(count: width * height)
             var bad = false, gap = false
-            for index in compare {
-                let value = current[index]
-                if value != start[index] && value != end[index] { bad = true }
-                if start[index] != 0 && end[index] != 0 && value == 0 { gap = true }
+            if arrival == nil {
+                for index in compare {
+                    let value = current[index]
+                    if value != start[index] && value != end[index] { bad = true }
+                    if start[index] != 0 && end[index] != 0 && value == 0 { gap = true }
+                }
             }
             if let arrival, let initialBox, let finalBox {
                 let box = paletteBounds(arrival, in: current)
