@@ -741,6 +741,7 @@ final class Workspaces {
         }
         if let workspace = entry.workspace, layers[workspace]?.entry == .single(previous) { layers[workspace]?.entry = .single(id) }
         if let frame = layerPlacements.removeValue(forKey: previous) { layerPlacements[id] = frame }
+        if let frame = pointerFrames.removeValue(forKey: previous) { pointerFrames[id] = frame }
         carousel.replace(previous,with:id)
         if let frame = carouselPresentation?.frames.removeValue(forKey: previous) { carouselPresentation?.frames[id] = frame }
         if carouselPresentation?.pending.remove(previous) != nil { carouselPresentation?.pending.insert(id) }

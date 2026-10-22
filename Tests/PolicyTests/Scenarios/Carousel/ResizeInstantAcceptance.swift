@@ -273,9 +273,9 @@ import Testing
         })
     }
 
-    @Test("#33 E12: pending mouse geometry follows a native tab replacement")
-    func pointerBaselineFollowsNativeTabReplacement() {
-        requireCarousel(Scenario.run("native tab changes before the release snapshot") { s in
+    @Test("#33 E12: pending mouse geometry follows a native tab replacement", arguments: WriteOrder.allCases)
+    func pointerBaselineFollowsNativeTabReplacement(_ writes: WriteOrder) {
+        requireCarousel(Scenario.run("native tab changes before the release snapshot", writes: writes) { s in
             let f = CarouselFixture(s, presets: [0.5, 0.5], duration: 0), a = f.ids[0], b = f.ids[1]
             f.app.groupTabs([a, b], selected: a); s.settle()
             f.mac.pointerDown()
