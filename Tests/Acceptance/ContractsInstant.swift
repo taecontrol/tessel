@@ -19,9 +19,11 @@ extension Acceptance.Contracts {
         try requireFinalState("enhanced UI loses the size followed by position") {
             try native("retained", ["id": id]).window?.frame.suffix(2) == [600, 400]
         }
-        try native("enhancedUI", ["enabled": false])
-        try #require(try native("writeSizeThenPosition", ["id": id, "frame": [origin[0], origin[1], 900, 400]]).results == [0, 0])
-        try native("enhancedUI", ["enabled": true])
+        // The spike observed AppKit callbacks up to 198 ms late. Let the
+        // raw attempt settle before measuring the independent protected write.
+        sleep(seconds: 0.5)
+        try #require(try native("retained", ["id": id]).window?.frame.suffix(2) == [600, 400])
+        try #require(try native("writeSizeThenPosition", ["id": id, "frame": [origin[0], origin[1], 900, 400], "disableEnhancedUI": true]).results == [0, 0])
         try requireFinalState("disabling enhanced UI around the writes preserves the requested size and restores the flag") {
             try native("retained", ["id": id]).window?.frame.suffix(2) == [900, 400] && native("enhancedUI").enhancedUI == true
         }

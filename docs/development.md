@@ -1027,7 +1027,8 @@ the guard; it never treats the body as shell source.
 fixture-only operations each for workspace, rail, resize, stop crossing, open
 and close. The signed observer excludes non-fixture applications from the
 ScreenCaptureKit display stream, requests 120 Hz and persists only palette owner
-masks. The opt-in run compiles its pixel analyzer with release optimization;
+masks. Capture windows have uniform content through their transparent titlebars,
+with titlebar buttons hidden, so their interiors carry constant palette content. The opt-in run compiles its pixel analyzer with release optimization;
 ordinary verification keeps its existing build configuration. It checks pixel movement against independent native geometry and checks
 visible palette centers before accepting a recording. Outputs remain ignored
 under `.work/captures/instant/`, including the per-frame masks, analysis and

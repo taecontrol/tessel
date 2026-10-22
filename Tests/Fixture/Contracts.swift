@@ -218,11 +218,16 @@ final class FixtureContracts: NSObject {
             guard let target = command["frame"] as? [Double], target.count == 4 else { throw FixtureContractError("paired geometry needs a native frame") }
             var point = CGPoint(x: target[0], y: target[1]), size = CGSize(width: target[2], height: target[3])
             let position = AXValueCreate(.cgPoint, &point)!, dimensions = AXValueCreate(.cgSize, &size)!
+            let enhanced = "AXEnhancedUserInterface" as CFString
+            let restore = command["disableEnhancedUI"] as? Bool == true && (read(application, enhanced as String).value as? Bool) == true
+            if restore { _ = AXUIElementSetAttributeValue(application, enhanced, kCFBooleanFalse) }
+            defer { if restore { _ = AXUIElementSetAttributeValue(application, enhanced, kCFBooleanTrue) } }
             // Keep both writes in one client burst, as in the app. Another
             // command/reply between them gives AppKit time to finish resizing.
             let sized = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, dimensions)
             let moved = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, position)
-            return ["results": [sized.rawValue, moved.rawValue]]
+            // Match the app's readback before restoring the enhanced flag.
+            return ["results": [sized.rawValue, moved.rawValue], "window": describe(window)]
         case "write":
             let window = try retained(command, pid: pid)
             let attribute = command["attribute"] as? String ?? ""

@@ -31,7 +31,9 @@ extension Acceptance {
                 for repetition in 1...12 {
                     print("Instant capture: \(operation) \(repetition)/12"); fflush(nil)
                     try desktop.clear()
-                    let ids = try desktop.railSetup([0.5, 0.5, 0.5], duration: 0)
+                    let area = try desktop.observe().area
+                    let half = ((area[2] - 30) / 2) / (area[2] - 20)
+                    let ids = try desktop.railSetup([half, half, half], duration: 0)
                     for index in ids.indices { try fixture.command("paint", ["key": "w\(index)", "color": index]) }
                     switch operation {
                     case "workspace":
@@ -107,12 +109,12 @@ extension Acceptance {
                                       let x = window.frame[0] + window.frame[2] / 2, y = window.frame[1] + window.frame[3] / 2
                                       return x < other.frame[0] || x >= other.frame[0] + other.frame[2] || y < other.frame[1] || y >= other.frame[1] + other.frame[3]
                                   }) else { continue }
-                            try #require(try recording.owner(UInt8(index + 1), at: window.frame, points: points, last: last), "fixture palette must agree with native geometry")
+                            try #require(try recording.owner(UInt8(index + 1), at: window.frame, points: points, last: last, postedAt: posted), "fixture palette must agree with native geometry")
                         }
                     }
                     if operation == "open", let frame = finalArrival {
                         let opened = CGRect(x: frame[0], y: frame[1], width: frame[2], height: frame[3])
-                        try #require(after.windows.filter { $0.id != finalFocus && $0.visible }.allSatisfy { other in
+                        #expect(after.windows.filter { $0.id != finalFocus && $0.visible }.allSatisfy { other in
                             !opened.intersects(CGRect(x: other.frame[0], y: other.frame[1], width: other.frame[2], height: other.frame[3]))
                         }, "the opened tile must not overlap another final tile")
                     }

@@ -24,7 +24,9 @@ final class FixtureInstantRecording: NSObject, SCStreamOutput, SCStreamDelegate,
         if let stream {
             try await stream.updateContentFilter(filter)
             guard lock.withLock({ failure == nil }) else { throw FixtureContractError("the recording stream stopped") }
-            lock.withLock { frames.removeAll() }
+            // ScreenCaptureKit emits idle statuses for an unchanged view.
+            // Keep its latest actual image as the baseline of the next clip.
+            lock.withLock { frames = frames.last.map { [$0] } ?? [] }
             return ["recordingWidth": width, "recordingHeight": height, "recordingPoints": [display.width, display.height]]
         }
         let configuration = SCStreamConfiguration()

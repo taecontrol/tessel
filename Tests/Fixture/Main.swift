@@ -218,10 +218,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
             }
         case "paint":
             guard let window = windows[key], let color = command["color"] as? Int, FixtureInstantRecording.colors.indices.contains(color) else { return ["error": "paint needs a fixture window and palette index"] }
-            let rgb = FixtureInstantRecording.colors[color]
-            window.contentView = NSView(frame: window.contentView?.bounds ?? .zero)
-            window.contentView?.wantsLayer = true
-            window.contentView?.layer?.backgroundColor = NSColor(srgbRed: CGFloat(rgb.0) / 255, green: CGFloat(rgb.1) / 255, blue: CGFloat(rgb.2) / 255, alpha: 1).cgColor
+            paint(window, color: color)
             window.displayIfNeeded()
         case "windowLevels":
             let ordinary = makeWindow(key: "ordinary", kind: "standard")
@@ -532,13 +529,26 @@ final class Fixture: NSObject, NSApplicationDelegate {
         windows[key] = window
         if kind == "minimize" { minimizeRecorders[key] = MinimizeRecorder(window) }
         if let color, FixtureInstantRecording.colors.indices.contains(color) {
-            let rgb = FixtureInstantRecording.colors[color]
-            window.contentView = NSView(frame: window.contentView?.bounds ?? .zero)
-            window.contentView?.wantsLayer = true
-            window.contentView?.layer?.backgroundColor = NSColor(srgbRed: CGFloat(rgb.0) / 255, green: CGFloat(rgb.1) / 255, blue: CGFloat(rgb.2) / 255, alpha: 1).cgColor
+            paint(window, color: color)
         }
         if show { window.makeKeyAndOrderFront(nil) }
         return window
+    }
+
+    /// Uniform content makes owner IDs an exact pixel-content oracle inside
+    /// the excluded 12-point border, including the otherwise varying titlebar.
+    private func paint(_ window: NSWindow, color: Int) {
+        let rgb = FixtureInstantRecording.colors[color]
+        let fill = NSColor(srgbRed: CGFloat(rgb.0) / 255, green: CGFloat(rgb.1) / 255, blue: CGFloat(rgb.2) / 255, alpha: 1)
+        window.styleMask.insert(.fullSizeContentView)
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.titlebarSeparatorStyle = .none
+        for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { window.standardWindowButton(button)?.isHidden = true }
+        window.backgroundColor = fill
+        window.contentView = NSView(frame: window.contentView?.bounds ?? .zero)
+        window.contentView?.wantsLayer = true
+        window.contentView?.layer?.backgroundColor = fill.cgColor
     }
 
     /// An independent AX/CG client; all returned window data belongs to fixtures.

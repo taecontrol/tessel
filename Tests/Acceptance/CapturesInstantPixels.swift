@@ -116,8 +116,8 @@ struct InstantPixelRecording: Decodable {
         return x1 >= 0 ? [x0, y0, x1, y1] : nil
     }
 
-    func owner(_ palette: UInt8, at frame: [Double], points: [Double], last: Bool) throws -> Bool {
-        guard frame.count == 4, points.count == 2, let sample = last ? frames.last : frames.first else { return false }
+    func owner(_ palette: UInt8, at frame: [Double], points: [Double], last: Bool, postedAt: Double) throws -> Bool {
+        guard frame.count == 4, points.count == 2, let sample = last ? frames.last : frames.last(where: { $0.time <= postedAt }) else { return false }
         let x = Int((frame[0] + frame[2] / 2) * Double(width) / points[0])
         let y = Int((frame[1] + frame[3] / 2) * Double(height) / points[1])
         guard (0..<width).contains(x), (0..<height).contains(y) else { return false }
