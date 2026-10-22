@@ -5,6 +5,25 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct CarouselInstantReplacement {
+    @Test("#33 E18: a transient focus-only timeout finishes the visibility handoff without replaying geometry")
+    func focusTimeoutRetriesTheVisibilityHandoff() {
+        requireCarousel(Scenario.run("focus timeout after hidden geometry lands") { s in
+            let f = CarouselFixture(s, duration: 0), a = f.ids[0], c = f.ids[2]
+            f.select(c); f.press("alt-shift-j"); f.press("alt-k"); f.select(a)
+            f.mac.clearMotionHistory()
+            f.tessel.press("focus down")
+            let held = f.mac.pause(after: .call("AccessibilityPort.set AXFrontmost=true \(f.app.alias) pid=\(f.app.pid)"))
+            if case .paused = held {} else { s.expect("the focus-only activation is about to run: \(held)", false) }
+            s.expect("the destination is already visible before focus", f.mac.isVisible(c))
+            f.app.busy(forMilliseconds: 1); s.settle()
+            f.focus(c)
+            s.expect("the outgoing rail retires after focus recovers", f.ids.filter { $0 != c }.allSatisfy { !f.mac.isVisible($0) })
+            for attribute in [AXAttribute.size, .position] {
+                s.expect("focus recovery does not replay geometry", f.mac.geometryWrites.filter { $0.window == c && $0.attribute == attribute }.count <= 1)
+            }
+        })
+    }
+
     @Test("#33 E18: a hung earlier neighbor cannot delay an independent responsive placement", arguments: WriteOrder.allCases)
     func hungNeighborDoesNotDelayIndependentPlacement(_ writes: WriteOrder) {
         requireCarousel(Scenario.run("independent placement beside a hung neighbor", writes: writes) { s in
