@@ -1458,14 +1458,20 @@ final class Workspaces {
             if target != nil { remaining.append(Placement(id: id, pid: candidate.pid, target: target, resize: resize, position: position, float: floatTarget != nil)) }
         }
         // Returning destinations cover the start view before any visible tile
-        // vacates it. A focused resize grows over its neighbor before that
-        // neighbor moves, preserving coverage throughout the sweep.
+        // vacates it. Sweep towards the motion: a leftward scroll places the
+        // rightmost tile first, so it covers the neighbor's vacated area.
+        let movingLeft = remaining.contains {
+            !newlyShown.contains($0.id) && ($0.target?.minX ?? 0) < (entries[$0.id]?.observation.frame.minX ?? 0) - 1
+        }
         let placements = remaining.sorted {
             let a = newlyShown.contains($0.id), b = newlyShown.contains($1.id)
             if a != b { return a }
-            if $0.id == focused && $1.id != focused { return true }
-            if $1.id == focused { return false }
-            return (frames[$0.id]?.minX ?? 0, $0.id) < (frames[$1.id]?.minX ?? 0, $1.id)
+            if a {
+                if $0.id == focused && $1.id != focused { return true }
+                if $1.id == focused { return false }
+            }
+            let left = ($0.target?.minX ?? 0, $0.id), right = ($1.target?.minX ?? 0, $1.id)
+            return movingLeft ? left > right : left < right
         }
         let hiddenCount = placements.prefix { newlyShown.contains($0.id) }.count
         let shownRoots = newlyShown.filter { entries[$0]?.observation.parent == nil }.sorted()
