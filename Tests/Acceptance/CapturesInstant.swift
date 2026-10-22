@@ -116,12 +116,17 @@ extension Acceptance {
                     try #require(nativeChanged && analysis.changedPixels > 0, "pixel movement must agree with the independent native probe")
                     for (index, id) in ids.enumerated() {
                         for (observation, last) in [(before, false), (after, true)] {
-                            guard let window = observation.windows.first(where: { $0.id == id && $0.visible }),
+                            guard let window = observation.windows.first(where: { $0.id == id && $0.visible }) else { continue }
+                            // A partial edge tile's native center can lie off
+                            // screen. Validate its visible content instead.
+                            let visible = CGRect(x: window.frame[0], y: window.frame[1], width: window.frame[2], height: window.frame[3])
+                                .intersection(CGRect(x: 0, y: 0, width: points[0], height: points[1]))
+                            guard !visible.isEmpty,
                                   observation.visibleIDs.first == id || observation.windows.filter({ $0.visible && $0.id != id }).allSatisfy({ other in
-                                      let x = window.frame[0] + window.frame[2] / 2, y = window.frame[1] + window.frame[3] / 2
+                                      let x = visible.midX, y = visible.midY
                                       return x < other.frame[0] || x >= other.frame[0] + other.frame[2] || y < other.frame[1] || y >= other.frame[1] + other.frame[3]
                                   }) else { continue }
-                            try #require(try recording.owner(UInt8(index + 1), at: window.frame, points: points, last: last, postedAt: posted), "fixture palette must agree with native geometry")
+                            try #require(try recording.owner(UInt8(index + 1), at: [visible.minX, visible.minY, visible.width, visible.height], points: points, last: last, postedAt: posted), "fixture palette must agree with visible native geometry")
                         }
                     }
                     if operation == "open", let frame = finalArrival {
