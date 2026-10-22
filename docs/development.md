@@ -799,7 +799,7 @@ failed sample index. No window listings or titles reach the artifact.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2, #19 and #26.
+This table is the maintained example-to-layer map for issues #1, #2, #19, #26 and #33.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -943,6 +943,7 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #26 E23 | P |
 | #26 E24 | R |
 | #26 E25 | P |
+| #33 E18 | P |
 
 E21 has an opt-in executable capture in `CapturesCarousel.swift`; it needs a
 pixel recording of the stage before the owner can review it again. All mapped
