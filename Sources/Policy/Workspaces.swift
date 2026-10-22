@@ -368,7 +368,7 @@ final class Workspaces {
 
             if railTile(id) {
                 if carousel.location(id) == nil { addCarouselTile(id, initial: firstSnapshot && initialApplications.contains(pid) && old == nil, restoring: old != nil); needsRender = true }
-                else if let old, !pointerHeld, !pointerReconciling, !carouselSizing.contains(id), !closeted.contains(id),
+                else if let old, !pointerHeld, !pointerReconciling, pointerFrames[id] == nil, !carouselSizing.contains(id), !closeted.contains(id),
                         abs(old.observation.frame.width - observation.frame.width) > 1 || abs(old.observation.frame.height - observation.frame.height) > 1 {
                     // AX/AppKit can publish a late redraw after a successful
                     // write. Only a pointer release adopts user geometry;
@@ -391,7 +391,7 @@ final class Workspaces {
             }
         }
         guard status.enabled else { publish(); return }
-        if pointerHeld || pointerReconciling {
+        if pointerHeld || pointerReconciling || previous.keys.contains(where: { pointerFrames[$0] != nil }) {
             pointerNeedsRender = pointerNeedsRender || needsRender || resizedRail || changedTiling || !hiddenReplacements.isEmpty
             publish()
             return
@@ -777,6 +777,7 @@ final class Workspaces {
         carousel.forget(id)
         detach(id)
         entries.removeValue(forKey: id)
+        pointerFrames[id] = nil
         closeted.remove(id)
         layerPlacements[id] = nil
     }
@@ -1099,7 +1100,9 @@ final class Workspaces {
             pointerHeld = true
             pointerReconciling = false
             pointerGeneration += 1
-            pointerFrames = entries.mapValues { $0.observation.frame }
+            // An app still awaiting a successful read retains its earlier drag
+            // baseline even if the user clicks or drags in another app meanwhile.
+            pointerFrames.merge(entries.mapValues { $0.observation.frame }) { previous, _ in previous }
             layerRestack = .owed
             interruptCarousel()
             cancelFocusDecision()
@@ -1109,45 +1112,53 @@ final class Workspaces {
             pointerReconciling = true
             let generation = pointerGeneration
             // The last move's debounced publication can follow mouse-up. Read
-            // on each existing AX lane, then reconcile all neighbors once.
-            catalog?.refreshFrames { [weak self] in
+            // independently on every AX lane; a failed app cannot hold the keys.
+            catalog?.refreshFrames(reconciled: { [weak self] pid in
+                guard let self, !self.pointerHeld, self.pointerGeneration == generation else { return }
+                self.reconcilePointerFrames(pid: pid)
+                if !self.pointerReconciling { self.finishPointerRelease() }
+            }) { [weak self] in
                 guard let self, !self.pointerHeld, self.pointerGeneration == generation else { return }
                 self.pointerReconciling = false
-                let previous = self.focused
-                let unavailable = previous.map { !self.available($0) } == true
-                if unavailable { self.recoverUnavailableFocus(previous) }
-                else if let native = self.applications.frontmostPID.flatMap({ self.appFocus[$0] }), self.available(native),
-                        let workspace = self.entries[native]?.workspace {
-                    self.status.active = workspace
-                    if native != previous { self.layer.entry = self.floating(native) ? .all : .rails }
-                    // Select before anchoring the released geometry; selecting
-                    // afterwards would reveal past the mouse's chosen edge.
-                    self.remember(native)
-                }
-                let changedSelection = previous != self.focused
-                var changedTile = false
-                for id in self.pointerFrames.keys.sorted() {
-                    guard self.carousel.location(id) != nil, let previous = self.pointerFrames[id],
-                          let current = self.entries[id]?.observation.frame,
-                          abs(current.width - previous.width) > 1 || abs(current.height - previous.height) > 1 else { continue }
-                    changedTile = true
-                    self.carouselSizing.remove(id)
-                    self.carousel.adoptWidth(id, current.width, left: current.minX - self.area.minX)
-                    self.carouselSizes[id] = current.size
-                }
-                self.pointerFrames.removeAll()
-                let deferredRender = self.pointerNeedsRender
-                self.pointerNeedsRender = false
-                if changedTile || changedSelection || unavailable || deferredRender {
-                    self.render(focusing: self.focused, relayout: false, takeFocus: unavailable, instant: true)
-                }
-                let commands = self.pointerCommands
-                self.pointerCommands.removeAll()
-                for command in commands { self.perform(command) }
-                self.restackLayer()
-                self.publish()
+                self.finishPointerRelease()
             }
         }
+    }
+
+    private func reconcilePointerFrames(pid: Int32) {
+        let previous = focused
+        if previous.map({ available($0) }) != false,
+           let native = applications.frontmostPID.flatMap({ appFocus[$0] }), entries[native]?.pid == pid,
+           available(native), let workspace = entries[native]?.workspace {
+            status.active = workspace
+            if native != previous { layer.entry = floating(native) ? .all : .rails }
+            // Select before anchoring to preserve the mouse's chosen edge.
+            remember(native)
+            pointerNeedsRender = pointerNeedsRender || previous != focused
+        }
+        for id in pointerFrames.keys.sorted() where entries[id]?.pid == pid {
+            let previous = pointerFrames.removeValue(forKey: id)!
+            guard carousel.location(id) != nil, let current = entries[id]?.observation.frame,
+                  abs(current.width - previous.width) > 1 || abs(current.height - previous.height) > 1 else { continue }
+            pointerNeedsRender = true
+            carouselSizing.remove(id)
+            carousel.adoptWidth(id, current.width, left: current.minX - area.minX)
+            carouselSizes[id] = current.size
+        }
+    }
+
+    private func finishPointerRelease() {
+        let previous = focused
+        let unavailable = previous.map { !available($0) } == true
+        if unavailable { recoverUnavailableFocus(previous) }
+        let deferredRender = pointerNeedsRender
+        pointerNeedsRender = false
+        if unavailable || deferredRender { render(focusing: focused, relayout: false, takeFocus: unavailable, instant: true) }
+        let commands = pointerCommands
+        pointerCommands.removeAll()
+        for command in commands { perform(command) }
+        restackLayer()
+        publish()
     }
 
     private func finishMotionImmediately() {
@@ -1458,7 +1469,7 @@ final class Workspaces {
             let float: Bool
         }
         var remaining: [Placement] = []
-        for id in show.sorted() where entries[id]?.observation.parent == nil {
+        for id in show.sorted() where entries[id]?.observation.parent == nil && pointerFrames[id] == nil {
             guard let candidate = entries[id] else { continue }
             let floatTarget = layerPlacements[id]
             let resize = carouselSizing.contains(id) || floatTarget != nil
@@ -1505,7 +1516,7 @@ final class Workspaces {
             entries[id].map { (id, frames[id] ?? layerPlacements[id] ?? $0.observation.frame) }
         })
         var ready = Set(show.filter { id in
-            !closeted.contains(id) && targets[id] == entries[id]?.observation.frame
+            pointerFrames[id] == nil && !closeted.contains(id) && targets[id] == entries[id]?.observation.frame
         })
         func commitVisibility() {
             guard self.transition == token, self.status.enabled, !self.pointerHeld, focusReady else { return }
@@ -1613,7 +1624,7 @@ final class Workspaces {
                 }
             }
         }
-        let unchanged = shownRoots.filter { id in !placements.contains { $0.id == id } }
+        let unchanged = shownRoots.filter { id in pointerFrames[id] == nil && !placements.contains { $0.id == id } }
         closet.show(unchanged)
         self.closeted.subtract(unchanged)
         ready.formUnion(unchanged)

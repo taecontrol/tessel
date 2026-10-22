@@ -110,13 +110,16 @@ final class WindowCatalog {
 
     func returnInside(ids: Set<UInt32>, area: CGRect) { apps.keys.sorted().compactMap { apps[$0] }.forEach { $0.returnInside(ids:ids,area:area) } }
 
-    func refreshFrames(_ completion: @escaping @MainActor @Sendable () -> Void) {
-        let workers = apps.keys.sorted().compactMap { apps[$0] }
-        func next(_ index: Int) {
-            guard index < workers.count else { completion(); return }
-            workers[index].refreshForPointerRelease { next(index + 1) }
+    func refreshFrames(reconciled: @escaping @MainActor @Sendable (Int32) -> Void,
+                       completion: @escaping @MainActor @Sendable () -> Void) {
+        var remaining = apps.count
+        guard remaining > 0 else { completion(); return }
+        for pid in apps.keys.sorted() {
+            apps[pid]?.refreshForPointerRelease(reconciled: { reconciled(pid) }) {
+                remaining -= 1
+                if remaining == 0 { completion() }
+            }
         }
-        next(0)
     }
 
     func cancelPresentations(invalidatingFocus: Bool = true) {
@@ -198,7 +201,7 @@ private final class AppWindows: @unchecked Sendable {
     private var pending: (any ScheduledWork)?
     private var settleGeneration: UInt64 = 0
     private var failedReads = 0
-    private var pointerReleaseCompletions: [@MainActor @Sendable () -> Void] = []
+    private var pointerReleaseCompletion: (@MainActor @Sendable () -> Void)?
     private var enhancedUIRestorePending = false
     private var enhancedUIRestoreRetry: (any ScheduledWork)?
     private var elementsByID: [UInt32: AXElement] = [:]
@@ -588,20 +591,26 @@ private final class AppWindows: @unchecked Sendable {
         }
     }
 
-    func refreshForPointerRelease(_ completion: @escaping @MainActor @Sendable () -> Void) {
+    func refreshForPointerRelease(reconciled: @escaping @MainActor @Sendable () -> Void,
+                                  completion: @escaping @MainActor @Sendable () -> Void) {
         queue.async { [self] in
             guard !stopped else { scheduler.main.async { completion() }; return }
-            pointerReleaseCompletions.append(completion)
+            // A later gesture supersedes the earlier callback, but keeps the
+            // unresolved baseline. Repeated clicks cannot grow a hung app's queue.
+            pointerReleaseCompletion = reconciled
             readSnapshot()
+            // Only this first attempt gates the shared layout and queued keys.
+            // A failed app keeps its own baseline until a later successful read.
+            scheduler.main.async { completion() }
         }
     }
 
     private func finishPointerRelease() {
         // Publication is queued first, so release reconciliation sees the fresh
         // geometry. Failed reads retain the baseline until retry or notification.
-        let completions = pointerReleaseCompletions
-        pointerReleaseCompletions.removeAll()
-        for completion in completions { scheduler.main.async { completion() } }
+        guard let completion = pointerReleaseCompletion else { return }
+        pointerReleaseCompletion = nil
+        scheduler.main.async { completion() }
     }
 
     func ownsFocusIntent(_ token: UUID?) -> Bool {
