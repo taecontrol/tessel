@@ -3,6 +3,9 @@
 Date: 2026-10-17
 Status: Accepted
 
+Amended by [ADR-0008](0008-gate-real-system-changes-on-local-evidence.md):
+real-system budgets are verified locally; CI retains deterministic and permission gates.
+
 Amended 2026-10-20: the owner raised the resources budget to 200 seconds
 after the carousel stage put the suite at 91 seconds on CI.
 

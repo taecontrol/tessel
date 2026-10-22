@@ -5,6 +5,9 @@ set -euo pipefail
 export TESSEL_ACCEPTANCE=1
 root=$(cd "$(dirname "$0")/.." && pwd)
 usage='Usage: scripts/verify [--contracts] [--journeys] [--latency] [--resources] [--permission] [TEST...]'
+full_run=0
+[[ $# -eq 0 ]] && full_run=1
+verified_head=$(git -C "$root" rev-parse HEAD)
 filters=()
 for argument in "$@"; do
     case $argument in
@@ -93,4 +96,9 @@ EOF
         sleep 0.5
     done
 fi
-exec swift test --package-path "$root" --no-parallel "${filters[@]}"
+swift test --package-path "$root" --no-parallel "${filters[@]}"
+if (( full_run )); then
+    # Reaching this point requires every selected suite to have passed. Dirty
+    # checkouts still verify, but they cannot attest to a committed revision.
+    swift run --package-path "$root" --scratch-path "$root/.build/tools" --quiet tessel-check print-verification-evidence --verified-head "$verified_head" || true
+fi

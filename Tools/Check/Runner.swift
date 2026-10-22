@@ -37,6 +37,21 @@ struct CheckRunner {
                 catch { throw CheckFailure("run \(index): \(error)\n" + tail(result.output)) }
             }
             print("trace digest: \(digest!) (\(count) runs)")
+        case .printVerificationEvidence(let verifiedHead):
+            let head = try git(["rev-parse", "HEAD"]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard head == verifiedHead else { throw CheckFailure("HEAD changed during verification; no evidence emitted") }
+            guard try git(["status", "--porcelain", "--untracked-files=all"]).isEmpty else {
+                throw CheckFailure("worktree has uncommitted changes; no evidence emitted")
+            }
+            print(VerificationEvidence.block(head: head))
+        case .verificationEvidence(let base, let head, let bodyFile):
+            let paths = try git(["diff", "--no-renames", "--name-only", "-z", base + "..." + head, "--"]).split(separator: "\0").map(String.init)
+            guard VerificationEvidence.required(paths: paths) else { print("verification-evidence: no real-system change"); return }
+            let body = try String(contentsOf: URL(fileURLWithPath: bodyFile, relativeTo: root), encoding: .utf8)
+            guard VerificationEvidence.accepts(body: body, head: head) else {
+                throw CheckFailure("real-system changes require a successful local scripts/verify evidence block for head " + head)
+            }
+            print("verification-evidence: all four local suites passed for " + head)
         case .simulatorEvidence(let base, let bodyFile):
             let diff = try execute(["git", "diff", "--no-renames", "--name-only", "-z", base + "...HEAD", "--"])
             guard diff.status == 0 else { throw CheckFailure("cannot diff \(base)...HEAD\n" + tail(diff.output)) }
@@ -45,6 +60,12 @@ struct CheckRunner {
             guard decision != .missing else { throw CheckFailure(decision.explanation) }
             print(decision.explanation)
         }
+    }
+
+    private func git(_ arguments: [String]) throws -> String {
+        let result = try execute(["git"] + arguments)
+        guard result.status == 0 else { throw CheckFailure("git failed\n" + tail(result.output)) }
+        return result.output
     }
 
     // Merge stdout and stderr and drain while the child runs; neither stream

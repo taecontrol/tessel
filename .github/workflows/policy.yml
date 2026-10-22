@@ -12,7 +12,7 @@ jobs:
     name: Deterministic policy
     runs-on: xcode-27
     # A green run takes about four minutes on xcode-27.
-    timeout-minutes: 10
+    timeout-minutes: 9
     steps:
       - uses: actions/checkout@v4
       - name: Deterministic tests
