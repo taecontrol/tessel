@@ -669,6 +669,11 @@ width and two thirds its height. It becomes the newest float arrival, and the
 rail closes its gap and remembers the left neighbor. Moving a resizable float
 back inserts it to the right of the remembered tile, creating a rail if needed.
 Its current width selects the nearest rail preset; a tie chooses the wider one.
+A one-shot read on the app's AX worker publishes its current frame before the
+float joins the rail. Earlier resize snapshots therefore arrive while it still
+floats, and cannot replace the chosen preset with an exact mouse width during
+the focus-before-hide handoff. A failed read leaves it floating; a newer layout
+or selection decision cancels the pending transfer.
 A fixed-size float bounces and stays floating. Manual choices last for that
 window's lifetime, including catalog refreshes, and reset on restart. Sending a
 float with Option+Shift+N follows it into the destination workspace's layer.

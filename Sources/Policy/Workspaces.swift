@@ -86,6 +86,7 @@ final class Workspaces {
     private var layerEnabled: Bool { configuration.layerEnabled }
     private var layers: [Int: FloatingLayer] = [:]
     private var layerPlacements: [UInt32: CGRect] = [:]
+    private var pendingFloatTransfer: (window: UInt32, decision: UInt64)?
     private var desktopFocusObservation: (any ApplicationObservation)?
     private struct LayerHandoff {
         let token: UInt64
@@ -253,6 +254,7 @@ final class Workspaces {
     func prepareToQuit(_ ready: @escaping @MainActor @Sendable () -> Void) {
         guard !quitting else { return }
         quitting = true
+        pendingFloatTransfer = nil
         layerRestack = .done(front: nil)
         clearStage()
         transition += 1
@@ -276,6 +278,7 @@ final class Workspaces {
     }
 
     func disable(reason: String) {
+        pendingFloatTransfer = nil
         layerRestack = .done(front: nil)
         clearStage()
         transition += 1
@@ -1072,6 +1075,13 @@ final class Workspaces {
     private func toggleFloat() {
         guard let id = focused, let entry = entries[id], entry.workspace == status.active,
               available(id), entry.observation.parent == nil else { return }
+        // A second toggle reverses the pending return before any membership
+        // changed; a third starts a new read with a distinct decision.
+        if pendingFloatTransfer?.window == id, pendingFloatTransfer?.decision == decisions {
+            pendingFloatTransfer = nil
+            decisions += 1
+            return
+        }
         if carousel.location(id) != nil {
             carousel.remove(id)
             carouselSizing.remove(id)
@@ -1091,19 +1101,36 @@ final class Workspaces {
                 }
                 return
             }
-            layerPlacements[id] = nil
-            entries[id]?.manual = .tiled
-            entries[id]?.observation.record.state = .tiled
-            entries[id]?.observation.record.reason = "moved to a rail"
-            let width = entry.observation.frame.width
-            let preset = Carousel.presets.min {
-                let a = abs(carousel.presetWidth($0) - width), b = abs(carousel.presetWidth($1) - width)
-                return abs(a - b) < 1e-6 ? $0 > $1 : a < b
+            decisions += 1
+            let decision = decisions
+            pendingFloatTransfer = (id, decision)
+            catalog?.refreshFrame(pid: entry.pid, id: id) { [weak self] frame in
+                guard let self, self.pendingFloatTransfer?.decision == decision else { return }
+                self.pendingFloatTransfer = nil
+                guard let frame, self.status.enabled, self.layerEnabled, !self.quitting,
+                      self.decisions == decision, self.focused == id, self.available(id), self.floating(id),
+                      self.applications.frontmostPID == entry.pid, self.appFocus[entry.pid] == id,
+                      self.entries[id]?.workspace == self.status.active, self.entries[id]?.observation.parent == nil else { return }
+                self.moveFloatToRail(id, frame: frame)
             }
-            carousel.insert(Carousel.Tile(id: id, size: CGSize(width: width, height: area.height), preset: preset), workspace: status.active)
-            carouselSizes[id] = entry.observation.frame.size
-            layer.entry = .rails
+            return
         } else { return }
+        render(focusing: id, relayout: false, instant: true)
+    }
+
+    private func moveFloatToRail(_ id: UInt32, frame: CGRect) {
+        layerPlacements[id] = nil
+        entries[id]?.manual = .tiled
+        entries[id]?.observation.record.state = .tiled
+        entries[id]?.observation.record.reason = "moved to a rail"
+        let width = frame.width
+        let preset = Carousel.presets.min {
+            let a = abs(carousel.presetWidth($0) - width), b = abs(carousel.presetWidth($1) - width)
+            return abs(a - b) < 1e-6 ? $0 > $1 : a < b
+        }
+        carousel.insert(Carousel.Tile(id: id, size: CGSize(width: width, height: area.height), preset: preset), workspace: status.active)
+        carouselSizes[id] = frame.size
+        layer.entry = .rails
         render(focusing: id, relayout: false, instant: true)
     }
 

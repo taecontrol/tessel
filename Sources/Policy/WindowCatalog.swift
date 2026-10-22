@@ -96,6 +96,11 @@ final class WindowCatalog {
         app.windowIsGone(id: id, completion: completion)
     }
 
+    func refreshFrame(pid: Int32, id: UInt32, completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
+        guard let app = apps[pid] else { completion(nil); return }
+        app.refreshFrame(id: id, completion: completion)
+    }
+
     func raiseBackground(pid: Int32, id: UInt32, completion: @escaping @MainActor @Sendable () -> Void) {
         guard let app = apps[pid] else { completion(); return }
         app.raiseBackground(id: id, completion: completion)
@@ -582,6 +587,28 @@ private final class AppWindows: @unchecked Sendable {
                 guard ownsFocusIntent(intent) else { return }
                 completion(result)
             }
+        }
+    }
+
+    /// Publish fresh geometry before the caller changes membership. Earlier
+    /// snapshots on this lane reach main first, while the window still floats.
+    func refreshFrame(id: UInt32, completion: @escaping @MainActor @Sendable (CGRect?) -> Void) {
+        queue.async { [self] in
+            var observed: CGRect?
+            defer {
+                let result = observed
+                scheduler.main.async { completion(result) }
+            }
+            guard !stopped, let window = elementsByID[id] else { return }
+            do {
+                guard try canPresent(window, id: id) else { return }
+                let current = try frame(window)
+                guard current.width > 0, current.height > 0, try canPresent(window, id: id),
+                      let index = facts.firstIndex(where: { $0.id == id }) else { return }
+                facts[index].frame = current
+                publishSnapshot()
+                observed = current
+            } catch { /* An unanswered read cannot choose a preset from stale geometry. */ }
         }
     }
 
