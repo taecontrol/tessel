@@ -48,6 +48,16 @@ import Testing
         }
     }
 
+    /// Holds `app`'s accepted AXFrontmost call before its effect and reply,
+    /// then presses `newer`, so the post-call token check rejects the focus
+    /// writes that would have followed it.
+    func supersedeActivation(of app: SimulatedApp, requesting command: String, with newer: String) {
+        tessel.press(command)
+        let held = mac.pause(after: .call("AccessibilityPort.set AXFrontmost=true \(app.alias) pid=\(app.pid)"))
+        if case .paused = held {} else { s.expect("\(app.alias)'s activation call is held: \(held)", false) }
+        tessel.press(newer)
+    }
+
     func raises(since start: Int) -> [UInt32] {
         mac.scheduler.trace.dropFirst(start).compactMap { line in
             guard line.contains("AccessibilityPort.perform AXRaise window "), !line.contains(" reply ") else { return nil }
@@ -116,6 +126,124 @@ import Testing
             s.expect("each background raise preserves B's float focus", f.mac.focusEffects.filter {
                 $0.raisedWindow.map { [f.floats[0], f.floats[2]].contains($0) } ?? false
             }.allSatisfy { $0.window == f.floats[1] })
+        })
+    }
+
+    @Test("#19 E26: a background float raise never completes a superseded activation", arguments: WriteOrder.allCases)
+    func supersededActivationKeepsFocus(_ writes: WriteOrder) {
+        requireLayer(Scenario.run("superseded activation under a pinned layer / \(writes)", writes: writes) { s in
+            let f = LayerStackingFixture(s)
+            f.press("pin layer")
+            f.press("focus right") // A's second tile
+            f.apps[1].deferNextActivation(completion: .focusWrite)
+            let start = f.mac.scheduler.trace.count
+            f.mac.clearMotionHistory()
+            f.supersedeActivation(of: f.apps[1], requesting: "focus right", with: "focus left")
+            s.settle()
+            let trace = Array(f.mac.scheduler.trace.dropFirst(start))
+            s.expect("the superseded presentation never selects B's tile", !trace.contains {
+                $0.contains("AXMain=true window \(f.tiles[2]) ") || $0.contains("AXRaise window \(f.tiles[2]) ")
+            })
+            s.expect("A retains native keyboard focus", f.mac.frontmostApp == f.apps[0].pid && f.mac.focusedWindow == f.tiles[1])
+            s.expect("every background-float raise preserves A's keyboard focus", f.mac.focusEffects.filter {
+                $0.raisedWindow.map { f.floats.contains($0) } ?? false
+            }.allSatisfy { $0.window == f.tiles[1] })
+            let raised = f.raises(since: start).filter { f.floats.contains($0) }
+            s.expect("the pass raises C's float and holds back B's: \(raised)", raised == [f.floats[2]])
+        })
+    }
+
+    @Test("#19 E26: an activation superseded before its focus writes stays unresolved across a native detour", arguments: WriteOrder.allCases)
+    func supersededActivationSurvivesNativeDetour(_ writes: WriteOrder) {
+        requireLayer(Scenario.run("superseded activation across a native detour / \(writes)", writes: writes) { s in
+            let f = LayerStackingFixture(s)
+            f.press("pin layer")
+            f.press("focus right")
+            f.apps[1].deferNextActivation(completion: .focusWrite)
+            f.supersedeActivation(of: f.apps[1], requesting: "focus right", with: "focus left")
+            s.settle()
+            // Nothing contracted says another activation consumes the pending
+            // one, so B being frontmost for a while does not resolve it.
+            s.step("the user selects B's tile") { f.apps[1].select(f.tiles[2]) }
+            s.settle()
+            f.mac.clearMotionHistory()
+            s.step("the user selects A's tile again") { f.apps[0].select(f.tiles[1]) }
+            s.settle()
+            s.expect("A retains native keyboard focus", f.mac.frontmostApp == f.apps[0].pid && f.mac.focusedWindow == f.tiles[1])
+            s.expect("every background-float raise preserves A's keyboard focus", f.mac.focusEffects.filter {
+                $0.raisedWindow.map { f.floats.contains($0) } ?? false
+            }.allSatisfy { $0.window == f.tiles[1] })
+        })
+    }
+
+    @Test("#19 E9: an abandoned activation request that finds its app already frontmost holds nothing back", arguments: WriteOrder.allCases)
+    func abandonedRequestToFrontmostApp(_ writes: WriteOrder) {
+        requireLayer(Scenario.run("abandoned request to the frontmost app / \(writes)", writes: writes) { s in
+            let f = LayerStackingFixture(s)
+            f.press("pin layer")
+            let start = f.mac.scheduler.trace.count
+            // A's second tile, then B's before A's focus writes are issued.
+            f.supersedeActivation(of: f.apps[0], requesting: "focus right", with: "focus right")
+            s.settle()
+            f.stacking(focus: f.tiles[2], owner: f.apps[1].pid)
+            let raised = f.raises(since: start).filter { f.floats.contains($0) }
+            s.expect("the pass raises C's float, then A's: \(raised)", raised == [f.floats[2], f.floats[0]])
+        })
+    }
+
+    @Test("#19 E9: floats held back by a superseded activation restack once tessel activates their app again", arguments: WriteOrder.allCases)
+    func deferredFloatsRestackAfterActivation(_ writes: WriteOrder) {
+        requireLayer(Scenario.run("restack after a superseded activation resolves / \(writes)", writes: writes) { s in
+            let f = LayerStackingFixture(s)
+            f.press("pin layer")
+            f.press("focus right")
+            f.apps[1].deferNextActivation(completion: .focusWrite)
+            f.supersedeActivation(of: f.apps[1], requesting: "focus right", with: "focus left")
+            s.settle()
+            // tessel's next activation request and focus writes for B
+            // complete any earlier pending one (deferred-ax-activation).
+            f.press("focus right")
+            f.stacking(focus: f.tiles[2], owner: f.apps[1].pid)
+            let start = f.mac.scheduler.trace.count
+            f.mac.clearMotionHistory()
+            f.press("focus left")
+            f.stacking(focus: f.tiles[1], owner: f.apps[0].pid)
+            let raised = f.raises(since: start).filter { f.floats.contains($0) }
+            s.expect("returning to A raises C's float, then B's: \(raised)", raised == [f.floats[2], f.floats[1]])
+            s.expect("those raises preserve A's keyboard focus", f.mac.focusEffects.filter {
+                $0.raisedWindow.map { f.floats.contains($0) } ?? false
+            }.allSatisfy { $0.window == f.tiles[1] })
+        })
+    }
+
+    @Test("#19 E9: a float held back for a pending activation restacks once its app is read frontmost", arguments: WriteOrder.allCases)
+    func heldFloatRestacksAfterActivationRead(_ writes: WriteOrder) {
+        requireLayer(Scenario.run("held float after a confirmed activation read / \(writes)", writes: writes) { s in
+            let f = LayerStackingFixture(s)
+            f.press("pin layer")
+            f.press("focus right")
+            // B's focus writes follow its request, which stays pending; the
+            // newer selection then cancels the presenter's retry.
+            f.apps[1].deferNextActivation(completion: .nextRequest)
+            let selection = f.mac.scheduler.trace.count
+            f.tessel.press("focus right")
+            let raise = f.mac.pause(after: .call("AccessibilityPort.perform AXRaise window \(f.tiles[2]) \(f.apps[1].alias)"))
+            if case .paused = raise {} else { s.expect("B's tile raise is held: \(raise)", false) }
+            f.tessel.press("focus left")
+            s.settle()
+            let held = f.raises(since: selection).filter { f.floats.contains($0) }
+            s.expect("the pass raises C's float and holds back B's: \(held)", held == [f.floats[2]])
+            let start = f.mac.scheduler.trace.count
+            s.step("the user selects B's tile") { f.apps[1].select(f.tiles[2]) }
+            // B's publication carries the frontmost read that resolves it,
+            // but only reaches tessel after A is frontmost again.
+            let read = f.mac.pause(after: .read(f.apps[1]))
+            if case .paused = read {} else { s.expect("B's frontmost read is held: \(read)", false) }
+            s.step("the user selects A's tile again") { f.apps[0].select(f.tiles[1]) }
+            s.settle()
+            let raised = f.raises(since: start).filter { f.floats.contains($0) }
+            s.expect("B's resolution owes a pass that raises C's float, then B's: \(raised)", raised == [f.floats[2], f.floats[1]])
+            f.stacking(focus: f.tiles[1], owner: f.apps[0].pid)
         })
     }
 
