@@ -59,5 +59,10 @@ extension Acceptance.Verification {
         let opened = try opening.analyze(postedAt: 0.5, pointsWide: 600, arrival: 4,
                                          initialArrival: [0, 0, 300, 200], finalArrival: [300, 0, 300, 200])
         #expect(opened.intermediateFrames == 0 && opened.gapFrames == 0)
+        let immediate = InstantPixelRecording(width: width, height: height,
+            frames: [frame(1, 2, at: 0), frame(3, 4, at: 1), frame(3, 4, at: 2)], failure: nil, requestedHz: 120)
+        let landed = try immediate.analyze(postedAt: 0.5, pointsWide: 600, arrival: 4,
+                                          initialArrival: [0, 0, 300, 200], finalArrival: [300, 0, 300, 200])
+        #expect(landed.intermediateFrames == 0 && landed.changedPixels > 0, "a birth first recorded at its final frame is live pixel evidence")
     }
 }
