@@ -208,7 +208,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 parent.beginSheet(sheet)
             } else {
                 let background = command["background"] as? Bool ?? false
-                let window = makeWindow(key: key, kind: kind, title: command["title"] as? String, show: !background)
+                let window = makeWindow(key: key, kind: kind, title: command["title"] as? String, show: !background, color: command["color"] as? Int)
                 if let fraction = command["widthFraction"] as? Double, let screen = NSScreen.screens.first {
                     var frame = window.frame
                     frame.size.width = ((screen.visibleFrame.width - 20) * fraction).rounded(.down)
@@ -216,6 +216,10 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 }
                 if background { window.orderBack(nil) }
             }
+        case "paint":
+            guard let window = windows[key], let color = command["color"] as? Int, FixtureInstantRecording.colors.indices.contains(color) else { return ["error": "paint needs a fixture window and palette index"] }
+            paint(window, color: color)
+            window.displayIfNeeded()
         case "windowLevels":
             let ordinary = makeWindow(key: "ordinary", kind: "standard")
             let dialog = makeWindow(key: "dialog", kind: "dialog")
@@ -448,7 +452,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
     }
 
     @discardableResult
-    func makeWindow(key: String, kind: String, title: String? = nil, show: Bool = true, closable: Bool = true) -> NSWindow {
+    func makeWindow(key: String, kind: String, title: String? = nil, show: Bool = true, closable: Bool = true, color: Int? = nil) -> NSWindow {
         var style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable]
         if !closable { style.remove(.closable) }
         if kind != "fixed" { style.insert(.resizable) }
@@ -524,8 +528,27 @@ final class Fixture: NSObject, NSApplicationDelegate {
         }
         windows[key] = window
         if kind == "minimize" { minimizeRecorders[key] = MinimizeRecorder(window) }
+        if let color, FixtureInstantRecording.colors.indices.contains(color) {
+            paint(window, color: color)
+        }
         if show { window.makeKeyAndOrderFront(nil) }
         return window
+    }
+
+    /// Uniform content makes owner IDs an exact pixel-content oracle inside
+    /// the excluded 12-point border, including the otherwise varying titlebar.
+    private func paint(_ window: NSWindow, color: Int) {
+        let rgb = FixtureInstantRecording.colors[color]
+        let fill = NSColor(srgbRed: CGFloat(rgb.0) / 255, green: CGFloat(rgb.1) / 255, blue: CGFloat(rgb.2) / 255, alpha: 1)
+        window.styleMask.insert(.fullSizeContentView)
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.titlebarSeparatorStyle = .none
+        for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { window.standardWindowButton(button)?.isHidden = true }
+        window.backgroundColor = fill
+        window.contentView = NSView(frame: window.contentView?.bounds ?? .zero)
+        window.contentView?.wantsLayer = true
+        window.contentView?.layer?.backgroundColor = fill.cgColor
     }
 
     /// An independent AX/CG client; all returned window data belongs to fixtures.

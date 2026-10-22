@@ -30,7 +30,7 @@ requireScenario(result)
 `Tessel(on: mac)` composes the real objects directly when a test needs to own
 its lifetime. `Scenario.startTessel` retains that composition automatically.
 The facade exposes published `windows`, workspace `status`, configuration
-status, `configure(.off / .stack / .carousel)`, `changeConfig` (the real 30 ms
+status, `configure(.carousel)`, `changeConfig` (the real 30 ms
 reload debounce), `press("focus right")`, and `quit`. Presses go through the
 in-test hotkey registration. File watching and Carbon stay in real journeys.
 
@@ -55,7 +55,11 @@ Every strategy preserves each lane's FIFO order. AX replies cost virtual time,
 so other lanes and timers can run while a call is outstanding. Named read
 pauses stop after paired focused-window and frontmost reads in one worker job.
 `deliver(app)` resumes that lane and stops after its publication main hop;
-native notifications cannot satisfy that checkpoint. `settle` releases all
+native notifications cannot satisfy that checkpoint. `app.delayAXReplies(milliseconds:)`
+adds delivery time to successful replies for one app, after capturing their
+values and effects; other apps can overtake it. Timeout costs remain bounded by
+the AX messaging timeout. This varies the existing `ax-read-delivery` schedule,
+without changing the native behavior the contract pins. `settle` releases all
 explicit holds and drains the machine. For finer worker interruption points,
 `PausePoint.call` names a trace operation. Trying to pause a synchronous main
 frame stops as unmodeled; it never reports a pause after executing its effect.
@@ -82,7 +86,7 @@ example's assigned layer in `docs/development.md`.
 
 The simulator exposes app/user actions: opening, closing, selecting, native
 tabs, sheets via `WindowSpec.parent`, hide/unhide, minimize/restore,
-fullscreen, drag/resize, app hang/resume or temporary busy state, launch and
+fullscreen, drag/resize (including held pointer down/up), app hang/resume or temporary busy state, launch and
 termination. Window-list choice sequences represent native omissions, zero
 IDs, failed/non-array reads and retained closed handles. They do not publish
 catalog rows or decide workspace membership. The production catalog must

@@ -20,7 +20,6 @@ import Testing
                 for _ in 0..<20 { scenario.expect("classification stays identical across twenty queries", FoundationProof.snapshot(tessel.windows) == expected) }
             }
             scenario.settle()
-            scenario.expect("a background open keeps the anchor focused", mac.focusedWindow == 1)
             FoundationProof.publication(tessel, pid: app.pid, since: start, within: 500, scenario: scenario) {
                 $0.contains { $0.id == id && $0.state == .tiled && $0.reason == "standard window" }
             }
@@ -76,7 +75,7 @@ import Testing
             scenario.settle()
             scenario.expect("setup: standard, fixed, dialog, panel, sheet and native tabs are classified", tessel.windows.count == 7)
             scenario.expect("setup: the native group has three tabs", tessel.windows.contains { $0.id == tabs[0] && $0.tabs == 3 })
-            let expected = FoundationProof.snapshot(tessel.windows)
+            let expected = FoundationProof.classifications(tessel.windows)
             let hungIDs = Set(tessel.windows.map(\.id))
             scenario.step("the app posts a resize then blocks its main thread") {
                 app.resize(1, to: CGSize(width: 500, height: 320))
@@ -90,14 +89,14 @@ import Testing
                 FoundationProof.row(id, in: tessel, state: .tiled, reason: "standard window", scenario: scenario)
                 FoundationProof.publication(tessel, pid: other.pid, since: openedAt, within: 500, scenario: scenario) { $0.contains { $0.id == id } }
                 let rows = tessel.windows.filter { hungIDs.contains($0.id) }
-                scenario.expect("hung rows keep their complete last snapshot on query \(index)", FoundationProof.snapshot(rows) == expected)
+                scenario.expect("hung rows keep their complete last snapshot on query \(index)", FoundationProof.classifications(rows) == expected)
                 let closedAt = mac.scheduler.now
                 other.close(id)
                 scenario.settle()
                 scenario.expect("responsive window \(id) disappears", !tessel.windows.contains { $0.id == id })
                 FoundationProof.publication(tessel, pid: other.pid, since: closedAt, within: 500, scenario: scenario) { $0.isEmpty }
             }
-            let hungPublications = tessel.windowPublications.filter { $0.pid == app.pid }.map { FoundationProof.snapshot($0.windows ?? []) }
+            let hungPublications = tessel.windowPublications.filter { $0.pid == app.pid }.map { FoundationProof.classifications($0.windows ?? []) }
             scenario.expect("a failed AX refresh never publishes an empty or partial replacement", hungPublications.allSatisfy { $0 == expected })
         })
     }

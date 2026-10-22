@@ -9,6 +9,7 @@ import Testing
 @MainActor struct CarouselFixture {
     let s: Scenario
     let app: SimulatedApp
+    let apps: [SimulatedApp]
     let tessel: Tessel
     let ids: [UInt32]
     let area: CGRect
@@ -16,19 +17,21 @@ import Testing
     static let config = "[experiments]\ncarousel = true\n"
 
     init(_ s: Scenario, presets: [Double] = [0.5, 0.5, 0.5], duration: Int = 250, reduced: Bool = false, minimumFractions: [Int:Double] = [:],
-         maximumFractions: [Int: Double] = [:]) {
+         maximumFractions: [Int: Double] = [:], appCount: Int = 1) {
         self.s = s
         s.mac.setScreen(ScreenGeometry(frame: CGRect(x: 0, y: 0, width: 1728, height: 1117),
                                        visibleFrame: CGRect(x: 0, y: 0, width: 1728, height: 1084)))
         area = CGRect(x: 10, y: 43, width: 1708, height: 1064)
         s.mac.setReduceMotion(reduced)
-        let app = s.mac.launch()
+        let apps = (0..<appCount).map { _ in s.mac.launch() }
+        self.apps = apps
+        let app = apps[0]
         self.app = app
         ids = presets.enumerated().map { index, p in
             var spec = WindowSpec(frame: CGRect(x: 40, y: 60, width: p * 1718 - 10, height: 1064), minimumSize: CGSize(width: max(1,(minimumFractions[index] ?? 0) * 1708), height: 1),
                                   maximumSize: CGSize(width: (maximumFractions[index] ?? 100) * 1708, height: 100_000), positionAcceptance: .screenEdges)
             spec.closetHeightLoss = 312
-            return app.open(spec)
+            return apps[index % appCount].open(spec)
         }
         if let id = ids.first { app.select(id) }
         tessel = s.startTessel()
@@ -43,7 +46,13 @@ import Testing
         let text = Self.config + "[animation]\nduration = \(duration)\n"
         tessel.changeConfig(text)
     }
-    func press(_ key: String) { s.step(key) { tessel.pressKey(key) }; s.settle() }
+    func press(_ key: String) {
+        s.step(key) {
+            if WorkspaceCommand(key) != nil { tessel.press(key) }
+            else { tessel.pressKey(key) }
+        }
+        s.settle()
+    }
     func select(_ id: UInt32) { app.select(id); s.settle() }
     func open(minimum: Double = 1, maximum: Double = 100_000) -> UInt32 {
         var spec = WindowSpec(frame: CGRect(x: 40, y: 60, width: 451, height: 400),
@@ -97,8 +106,9 @@ import Testing
         guard !rows.isEmpty else { return } // Closing the final tile intentionally leaves an empty workspace.
         let frames = rows.filter { mac.isVisible($0.id) }.map { frame($0.id) }
         s.expect("\(context): a populated rail is never empty on screen", frames.contains { $0.intersects(area) })
-        for uncovered in uncoveredWidths(in: area, coveredBy: frames) {
-            s.expect("\(context): no uncovered span exceeds the gap (\(uncovered))", uncovered <= 11)
+        let sorted = frames.sorted { $0.minX < $1.minX }
+        for (left, right) in zip(sorted, sorted.dropFirst()) {
+            s.expect("\(context): interior spacing stays at the configured gap (\(rows.map(\.id)), \(frames))", abs(right.minX - left.maxX - 10) <= 1)
         }
         s.expect("\(context): focus belongs to a complete visible tile", rows.contains { $0.id == mac.focusedWindow && mac.isVisible($0.id) && contains(frame($0.id)) })
     }

@@ -62,6 +62,10 @@ package struct SimulatedApp: Sendable {
     @MainActor package func unhide() { mac.visibility(pid, hidden: false, omitWindows: false) }
     @MainActor package func hang() { mac.setHung(pid, true) }
     @MainActor package func busy(forMilliseconds duration: Int) { mac.setBusy(pid, duration: duration) }
+    @MainActor package func delayAXReplies(milliseconds: Int) {
+        mac.action("\(alias) delay AX replies by \(milliseconds)ms")
+        mac.apps[pid]?.replyDelay = max(0, milliseconds)
+    }
     @MainActor package func resume() { mac.setHung(pid, false) }
     @MainActor package func quit() { mac.terminate(pid, crash: false) }
     @MainActor package func crash() { mac.terminate(pid, crash: true) }
@@ -69,7 +73,13 @@ package struct SimulatedApp: Sendable {
     @MainActor package func enterFullscreen(_ window: UInt32) { mac.fullscreen(window, enabled: true) }
     @MainActor package func leaveFullscreen(_ window: UInt32) { mac.fullscreen(window, enabled: false) }
     @MainActor package func drag(_ window: UInt32, to point: CGPoint) { mac.drag(window, point: point) }
-    @MainActor package func resize(_ window: UInt32, to size: CGSize) { mac.resize(window, size: size) }
+    @MainActor package func resize(_ window: UInt32, to size: CGSize) {
+        let held = mac.motion.pointerHeld
+        if !held { mac.pointerDown() }
+        mac.resize(window, size: size)
+        if !held { mac.pointerUp() }
+    }
+    @MainActor package func resizeFromApplication(_ window: UInt32, to size: CGSize) { mac.resize(window, size: size) }
     @MainActor package func groupTabs(_ windows: [UInt32], selected: UInt32) { mac.groupTabs(windows, selected: selected) }
     @MainActor package func selectTab(_ window: UInt32) { mac.selectTab(window) }
     @MainActor package func detachTab(_ window: UInt32) { mac.detachTab(window) }
@@ -111,6 +121,7 @@ package final class SimulatedMac: @unchecked Sendable {
         var processExists = true
         var prohibitedNotifications = ProhibitedNotifications.omitted
         var busyUntil = 0
+        var replyDelay = 0
         var omitHiddenWindows = false
         var key: UInt32?, main: UInt32?
         var windowLists: [WindowListReply] = []
@@ -122,6 +133,8 @@ package final class SimulatedMac: @unchecked Sendable {
         var activationCompletion = DeferredActivationCompletion.focusWrite
         var activationOrderDelay = 0
         var keyRestorationDelay = 0
+        var enhancedUserInterface = false
+        var pendingEnhancedSizes: [UInt32: CGSize] = [:]
     }
     struct Window {
         let id: UInt32, pid: Int32
@@ -299,8 +312,10 @@ package final class SimulatedMac: @unchecked Sendable {
     @MainActor func drag(_ id: UInt32, point: CGPoint) {
         assume(.windowGeometryWrites)
         action("drag window \(id) to \(point.x),\(point.y)")
+        let held = motion.pointerHeld
         pressPointer()
         applyPosition(id, point)
+        if !held { pointerUp() }
     }
     @MainActor func resize(_ id: UInt32, size: CGSize) {
         assume(.axSizeConstraints)

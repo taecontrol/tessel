@@ -1,75 +1,30 @@
-name: Verify
+name: Permissions
 on:
   pull_request:
     branches: [main]
 permissions:
   contents: read
 concurrency:
-  group: verify-${{ github.ref }}
+  group: permissions-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  acceptance:
-    name: Acceptance
+  permissions:
+    name: Permissions
     runs-on: xcode-27
-    # Journeys (including two optimized rebuilds), contracts, 200 latency
-    # samples and three 20 s idle windows share setup. With the carousel's
-    # suites a green run takes about nine and a half minutes, so twelve leaves
-    # runner margin.
-    timeout-minutes: 12
+    # Measured: 99 s build + 50 s signing journey + 3 s permission steps.
+    # Seven minutes leave setup and runner margin below the ten-minute limit.
+    timeout-minutes: 7
     steps:
       - uses: actions/checkout@v4
       - name: Configure ephemeral certificate signing
         timeout-minutes: 2
         run: scripts/ci-signing
       - name: Build signed bundles
-        id: build
         run: scripts/build
-      # The visible frame's bottom edge, where the Dock sits, moved by up to
-      # two points mid-test on the 1024-point display; each fixture process
-      # adds a Dock icon. Tests compare window frames with that edge.
-      - name: Hide the Dock so fixture apps cannot move the visible frame
-        run: |
-          defaults write com.apple.dock autohide -bool true
-          killall Dock
-          sleep 3
       - name: Grant Accessibility for the signed harness
         run: scripts/ci-accessibility
-      - name: Real macOS assumption contracts
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        run: scripts/verify --contracts
-      - name: End-to-end journeys
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        run: scripts/verify --journeys
-      - name: Workspace and rail latency
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        run: scripts/verify --latency
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: latency
-          path: .work/latency.json
-          if-no-files-found: ignore
-      # Run even when a journey or latency check fails, so each run reports resources.
-      - name: Resource acceptance suite (200 second budget)
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        timeout-minutes: 4
-        run: |
-          SECONDS=0
-          scripts/verify --resources
-          echo "Resources suite elapsed: ${SECONDS} s (limit <= 200 s)"
-          if (( SECONDS > 200 )); then
-            echo "Resources suite exceeded the 200 second limit" >&2
-            exit 1
-          fi
-      - name: Capture rails status item for review
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        run: TESSEL_CAPTURE_WORKSPACES=1 scripts/verify captureRailsStatusItem
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: rails-status-item
-          path: .work/captures/E26-*.png
-          if-no-files-found: ignore
+      - name: Signed rebuild preserves Accessibility; denial and restart recover
+        run: scripts/verify signingAndPermission --permission
       - name: Remove ephemeral keychain
         if: always()
         run: security delete-keychain "$RUNNER_TEMP/tessel-ci.keychain-db"

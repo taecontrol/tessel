@@ -41,10 +41,11 @@ final class FixtureMotionProbe: NSObject {
         if let pointerMonitor { NSEvent.removeMonitor(pointerMonitor) }
         pointerPresses = 0
         pointerEvents.removeAll()
-        pointerMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .leftMouseDragged]) { [weak self] event in
+        pointerMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .leftMouseDragged, .leftMouseUp, .rightMouseUp, .otherMouseUp]) { [weak self] event in
             MainActor.assumeIsolated {
-                self?.pointerEvents.append(event.type == .leftMouseDragged ? "drag" : "press")
-                if event.type != .leftMouseDragged { self?.pointerPresses += 1 }
+                let down = [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type)
+                self?.pointerEvents.append(down ? "press" : event.type == .leftMouseDragged ? "drag" : "release")
+                if down { self?.pointerPresses += 1 }
             }
         }
     }

@@ -216,7 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        workspaces?.disable(reason: "experiment off")
+        workspaces?.disable(reason: "quit")
         server?.stop()
     }
 }

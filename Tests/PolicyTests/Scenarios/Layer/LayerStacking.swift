@@ -288,9 +288,10 @@ import Testing
         requireLayer(Scenario.run("cold pinned retarget during activation / \(writes)", writes: writes) { s in
             let f = LayerStackingFixture(s, duration: 400)
             f.press("pin layer"); f.press("focus right")
-            // The instant selection, the stage's early focus and its bounded
-            // retry are all accepted before native activation finishes.
-            for _ in 0..<3 { f.apps[1].deferNextActivation(completion: .nextRequest) }
+            // Preparing and showing the destination separates its geometry
+            // from focus. Hold both requests and the stage's early focus and
+            // bounded retry until native activation finishes.
+            for _ in 0..<5 { f.apps[1].deferNextActivation(completion: .nextRequest) }
             // Six windows plus the backdrop's three capture units and one
             // display frame show the stage after 232 virtual ms (ADR-0006).
             f.mac.setStageCaptureCost(milliseconds: 24)

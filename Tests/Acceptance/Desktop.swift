@@ -6,8 +6,7 @@ import Foundation
 struct Desktop {
     var harness: Harness { Harness.shared }
     var fixture: FixtureSession { harness.fixture }
-    let stack = "[experiments]\nworkspaces = true\n"
-    let carousel = "[experiments]\ncarousel = true\n"
+    let carousel = ""
 
     func writeConfig(_ text: String) throws {
         try Data(text.utf8).write(to: harness.configFile)
@@ -102,17 +101,25 @@ struct Desktop {
         let front = observation.activeFixturePID != 0 ? observation.activeFixturePID : observation.frontmostFixturePID
         if front != session.pid, let source = ([fixture] + harness.otherFixtures).first(where: { $0.pid == front }) {
             try source.command("yieldActivation", ["pid": session.pid])
+        } else if session.pid != harness.observer.pid, try harness.observer.command("ping").active == true {
+            // The independent observer shares the fixture bundle ID. It can
+            // own activation after launch even though it has no test windows.
+            try harness.observer.command("yieldActivation", ["pid": session.pid])
         }
         try session.command("activate", ["key": key])
         let windows = try session.command("ping").windows
         var arguments: [String: Any] = ["pid": session.pid]
         if let id = windows[key] { arguments["id"] = id }
         try harness.observer.command("activateFixture", arguments)
-        try requireFinalState("the target fixture frontmost") {
-            let observation = try observe()
-            return observation.activeFixturePID == session.pid && observation.frontmostFixturePID == session.pid
-                && (windows[key].map { focused($0, in: observation) } ?? true)
-        }
+        var last = "no native sample"
+        do {
+            try requireFinalState("the target fixture frontmost") {
+                let observation = try observe()
+                last = "target \(session.pid)/\(windows[key].map(String.init) ?? "none"), active/front \(observation.activeFixturePID)/\(observation.frontmostFixturePID), fixtures \(observation.windows.map { "\($0.id): visible=\($0.visible), main=\($0.main), focused=\($0.focused), frame=\($0.frame)" })"
+                return observation.activeFixturePID == session.pid && observation.frontmostFixturePID == session.pid
+                    && (windows[key].map { focused($0, in: observation) } ?? true)
+            }
+        } catch { throw HarnessError("\(error); \(last)") }
     }
 
     func expectPassedKey(_ code: Int, shift: Bool = false) throws {
@@ -157,12 +164,14 @@ struct Desktop {
     }
 
     func split() throws -> (UInt32, UInt32) {
-        let a = try fixture.open(key: "a"), b = try fixture.open(key: "b")
+        harness.stopApp()
+        let a = try fixture.open(key: "a", ["widthFraction": 1.0]), b = try fixture.open(key: "b", ["widthFraction": 1.0])
         try activate(key: "b")
+        try writeConfig("[animation]\nduration = 0\n")
+        try harness.startApp(fixtureReady: false)
         try requireFinalState("both workspace setup fixtures listed") {
             Set(try harness.rows().map(\.id)) == Set([a, b])
         }
-        try configure(stack, layout: "stack")
         try expectShown(b)
         try key(2, send: true)
         try expectShown(b)
@@ -174,14 +183,18 @@ struct Desktop {
         return (a, b)
     }
 
-    func railSetup(_ widths: [Double] = Array(repeating: 0.45, count: 5), firstIn firstSession: FixtureSession? = nil, duration: Int = 80) throws -> [UInt32] {
+    func railSetup(_ widths: [Double] = Array(repeating: 0.45, count: 5), firstIn firstSession: FixtureSession? = nil, duration: Int = 80, reduceMotion: Bool = false, palette: Bool = false, configuration: String = "") throws -> [UInt32] {
+        harness.stopApp()
         let ids = try widths.enumerated().map { index, width in
             let session = index == 0 ? firstSession ?? fixture : fixture
-            return try session.open(key: "w\(index)", ["widthFraction": width])
+            var arguments: [String: Any] = ["widthFraction": width]
+            if palette { arguments["color"] = index }
+            return try session.open(key: "w\(index)", arguments)
         }
         try activate(firstSession, key: "w0")
+        try writeConfig(configuration + "[animation]\nduration = \(duration)\n")
+        try harness.startApp(fixtureReady: false, reduceMotion: reduceMotion)
         try requireFinalState("every rail setup window listed") { Set(try harness.rows().map(\.id)) == Set(ids) }
-        try configure(carousel + "[animation]\nduration = \(duration)\n", layout: "carousel")
         // The focused first window keeps its width at the rail's left end.
         var last = "no observation"
         do {

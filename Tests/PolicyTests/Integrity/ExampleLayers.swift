@@ -12,7 +12,7 @@ enum IntegritySources {
 }
 
 enum ExampleLayers {
-    enum Layer: String { case policy = "P", journey = "J", latency = "L", resources = "R", capture = "X" }
+    enum Layer: String { case contract = "C", tooling = "T", policy = "P", journey = "J", latency = "L", resources = "R", capture = "X" }
     struct Tag {
         let id: String
         let layer: Layer?
@@ -24,7 +24,7 @@ enum ExampleLayers {
         var pendingCaptures: Set<String> = []
     }
     static let heading = "## Acceptance example layers (#24)"
-    private static let idPattern = #"#(?:1|2|19|26) (?:E[1-9][0-9]*|U-[a-z0-9]+(?:-[a-z0-9]+)*)(?![A-Za-z0-9_-])"#
+    private static let idPattern = #"#(?:1|2|19|26|33) (?:E[1-9][0-9]*|U-[a-z0-9]+(?:-[a-z0-9]+)*)(?![A-Za-z0-9_-])"#
 
     static func parse(_ document: String) -> Map {
         var result = Map()
@@ -89,6 +89,8 @@ enum ExampleLayers {
     }
 
     private static func layer(path: String, function: String, step: Bool) -> Layer? {
+        if path.hasPrefix("Tests/Acceptance/Contracts") { return .contract }
+        if path.hasPrefix("Tests/CheckTests/") { return .tooling }
         if path.hasPrefix("Tests/PolicyTests/Scenarios/") && !step { return .policy }
         if path.hasPrefix("Tests/Acceptance/Journeys") && path.hasSuffix(".swift") { return .journey }
         if path == "Tests/Acceptance/Latency.swift" && !step { return .latency }

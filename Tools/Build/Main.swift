@@ -4,7 +4,7 @@ import Foundation
 @main
 struct TesselBuild {
     static let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-    static let usage = "Usage: tessel-build [--signing-config FILE] [--output-dir DIR] [--variant dev|daily]"
+    static let usage = "Usage: tessel-build [--if-needed] [--signing-config FILE] [--output-dir DIR] [--variant dev|daily]"
 
     static func main() {
         do {
@@ -22,11 +22,13 @@ struct TesselBuild {
         var signingConfig = root.appending(path: "Signing.local.xcconfig")
         var outputDir = root.appending(path: ".build/apps")
         var variant = "dev"
+        var ifNeeded = false
 
         init<Arguments: Sequence<String>>(_ arguments: Arguments) throws {
             var iterator = arguments.makeIterator()
             while let argument = iterator.next() {
                 if argument == "-h" || argument == "--help" { print(usage); exit(0) }
+                if argument == "--if-needed" { ifNeeded = true; continue }
                 guard ["--signing-config", "--output-dir", "--variant"].contains(argument), let value = iterator.next() else {
                     throw Failure(usage, status: 2)
                 }
@@ -52,6 +54,19 @@ struct TesselBuild {
 
     static func build(options: Options) throws {
         let identity = try signingIdentity(options.signingConfig)
+        let compiler = try run(["xcrun", "swiftc", "--version"])
+        guard compiler.status == 0 else { throw Failure("Could not identify the Swift compiler.") }
+        let inputs = try BuildManifest.inputs(root: root, signingConfig: options.signingConfig, variant: options.variant, compiler: compiler.output)
+        let manifestURL = options.outputDir.appending(path: "build-manifest.json")
+        let bundleNames = [options.variant == "dev" ? "Tessel Dev.app" : "Tessel.app", "Tessel Fixture.app"]
+        if options.ifNeeded,
+           let previous = try? JSONDecoder().decode(BuildManifest.self, from: Data(contentsOf: manifestURL)),
+           previous.inputs == inputs,
+           let artifacts = try? BuildManifest.files(in: bundleNames, relativeTo: options.outputDir), previous.artifacts == artifacts {
+            print("Signed bundles match current build inputs and artifacts.")
+            return
+        }
+        try? FileManager.default.removeItem(at: manifestURL)
         let staging = root.appending(path: ".build/staging")
         let manager = FileManager.default
         try manager.createDirectory(at: staging, withIntermediateDirectories: true)
@@ -124,6 +139,11 @@ struct TesselBuild {
             if manager.fileExists(atPath: destination.path) { try manager.removeItem(at: destination) }
             try manager.moveItem(at: path, to: destination)
         }
+        guard try BuildManifest.inputs(root: root, signingConfig: options.signingConfig, variant: options.variant, compiler: compiler.output) == inputs else {
+            throw Failure("Build inputs changed during compilation; rerun scripts/build.")
+        }
+        let manifest = try BuildManifest(inputs: inputs, artifacts: BuildManifest.files(in: bundleNames, relativeTo: options.outputDir))
+        try JSONEncoder().encode(manifest).write(to: manifestURL, options: .atomic)
         print("Signed bundles: \(options.outputDir.path)")
     }
 

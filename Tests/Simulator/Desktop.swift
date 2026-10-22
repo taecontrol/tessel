@@ -93,6 +93,7 @@ extension SimulatedMac {
             mac.scheduler.call("ClosetPort.hide windows=\(windows)")
             mac.recordVisibility(windows, showing: false)
             move(windows, to: space)
+            mac.recordPresentation("hide")
         }
         func show(_ windows: [UInt32]) {
             mac.assume(.closetMoves)
@@ -102,11 +103,14 @@ extension SimulatedMac {
             for id in windows where mac.motion.shortSizes.remove(id) != nil {
                 mac.assume(.closetSizeLoss)
                 if let height = mac.windows[id]?.spec.frame.height, let loss = mac.windows[id]?.spec.closetHeightLoss {
-                    mac.windows[id]?.spec.frame.size.height = max(1, height - loss)
+                    if let top = mac.windows[id]?.spec.frame.minY, top > mac.geometry.frame.maxY - mac.geometry.visibleFrame.maxY + 10 {
+                        mac.windows[id]?.spec.frame.size.height = max(1, height - loss)
+                    }
                 }
             }
             mac.recordVisibility(windows, showing: true)
             move(windows, to: mac.active)
+            mac.recordPresentation("show")
         }
         func stop(returning windows: [UInt32]) {
             mac.assume(.closetMoves)

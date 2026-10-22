@@ -3,6 +3,9 @@
 Date: 2026-10-18
 Status: Accepted
 
+Amended by [ADR-0008](0008-gate-real-system-changes-on-local-evidence.md):
+real-system budgets are verified locally; CI retains deterministic and permission gates.
+
 Amends [ADR-0001](0001-swift-for-build-and-verification-tooling.md).
 
 ## Context

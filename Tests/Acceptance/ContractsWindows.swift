@@ -212,8 +212,10 @@ extension Acceptance.Contracts {
         try desktop.activate(key: "tabs0")
         let initial = try window(ids[0])
         let changed = [initial.frame[0] + 25, initial.frame[1] + 25, initial.frame[2] + 30, initial.frame[3] + 30]
-        try #require(try write(ids[0], "AXPosition", Array(changed.prefix(2))) == 0)
-        try #require(try write(ids[0], "AXSize", Array(changed.suffix(2))) == 0)
+        let positionStatus = try write(ids[0], "AXPosition", Array(changed.prefix(2)))
+        try #require(positionStatus == 0)
+        let sizeStatus = try write(ids[0], "AXSize", Array(changed.suffix(2)))
+        try #require(sizeStatus == 0)
         try requireFinalState("native group geometry changed before selecting other roots") {
             try native().roots.first { $0.id == ids[0] }.map { desktop.near($0.frame, changed) } == true
         }

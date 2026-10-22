@@ -41,11 +41,9 @@ struct ConfigError: Error, Codable, Sendable {
 
 struct Configuration: Codable, Sendable, Equatable {
     var experiments: [String: Bool] = [:]
-    var keys = KeyChord.defaults
+    var keys = KeyChord.layerDefaults
     var gaps = Gaps()
     var animation = Animation()
-    var layerEnabled: Bool { experiments["layer"] == true }
-    var carouselEnabled: Bool { experiments["carousel"] == true || layerEnabled }
 }
 
 struct Animation: Codable, Sendable, Equatable {
@@ -58,16 +56,16 @@ struct Gaps: Codable, Sendable, Equatable {
 
 struct WorkspaceStatus: Codable, Sendable, Equatable {
     var enabled = false
-    var reason = "experiment off"
+    var reason = "starting"
     var active = 1
-    var layout = "stack"
+    var layout = "carousel"
     var animationDuration: Int = 250
     /// Why carousel changes animate or not: "on", or "off: " and the reason.
     var motion = "on"
     var rail: Int? = nil
     var railCount = 0
     var gaps = Gaps()
-    var keys = KeyChord.defaults
+    var keys = KeyChord.layerDefaults
     var layer: LayerStatus? = nil
 }
 

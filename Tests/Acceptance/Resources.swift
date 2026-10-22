@@ -1,3 +1,4 @@
+import Carbon
 import Foundation
 import Testing
 
@@ -20,6 +21,7 @@ extension Acceptance {
 
         private func verifyIdleResources(_ example: String, stageWorkBefore: UInt64? = nil) throws {
             let budget = try JSONDecoder().decode(Budget.self, from: Data(contentsOf: root.appending(path: "Tests/Acceptance/resource-budget.json")))
+            let stageAtStart = try harness.stageWork()
             let before = try resources(harness.appPID)
             print(String(format: "%@: start footprint %.2f MB (limit < %.2f MB)", example,
                          Double(before.footprintBytes) / 1e6, Double(budget.footprintBytes) / 1e6))
@@ -33,6 +35,7 @@ extension Acceptance {
                          example, budget.windowSeconds, wakeups, budget.interruptWakeups,
                          Double(cpu) / 1e6, Double(budget.cpuNanoseconds) / 1e6,
                          Double(before.footprintBytes) / 1e6, Double(after.footprintBytes) / 1e6, Double(budget.footprintBytes) / 1e6))
+            print("\(example): stage work during measured idle window \(try harness.stageWork() - stageAtStart)")
             fflush(nil)
             try #require(wakeups <= budget.interruptWakeups, "Interrupt wakeups exceeded the wakeup limit")
             try #require(cpu <= budget.cpuNanoseconds, "CPU time exceeded the CPU limit")
@@ -43,30 +46,41 @@ extension Acceptance {
         }
 
         @Test("#1 E22: idle resource budget") func e22TwentyIdleWindowsStayWithinWakeupCPUAndFootprintLimits() throws {
+            // Discover an existing desktop in one snapshot. Opening twenty
+            // windows under a live manager leaves arrival animations in flight.
+            harness.stopApp()
             for index in 0..<20 { _ = try fixture.open(key: "idle\(index)") }
+            try desktop.activate(key: "idle19")
+            try harness.startApp(fixtureReady: false)
             try requireFinalState("twenty idle fixture windows listed") { try harness.rows().count == 20 }
-            sleep(seconds: 1)  // Let the bounded new-window settling work finish.
-            try verifyIdleResources("E22")
+            try desktop.expectFocus(try #require(try fixture.command("ping").windows["idle19"]))
+            sleep(seconds: 1)  // Let startup placement settle.
+            try verifyIdleResources("E22", stageWorkBefore: harness.stageWork())
         }
 
         @Test("#2 E36: resources across ten workspaces") func e36TwentyWindowsAcrossTenWorkspacesKeepTheFoundationBudget() throws {
             try harness.reset()
-            try desktop.configure(desktop.stack, layout: "stack")
+            try desktop.configure(desktop.carousel, layout: "carousel")
             for index in 0..<20 {
                 print("E36 preparing fixture window \(index + 1)/20")
                 fflush(nil)
+                let workspace = try #require(try harness.status().workspaces).active
                 let window = try fixture.open(key: "idle\(index)")
                 // The fixture app stays frontmost, so AppKit keys each later
                 // window as it opens; activating it again would re-observe them all.
                 if index == 0 { try desktop.activate(key: "idle\(index)") }
-                try desktop.expectShown(window)
+                try desktop.expectFocus(window)
+                try requireFinalState("the idle fixture assigned before its next command") { try harness.row(window)?.workspace == workspace }
                 if index.isMultiple(of: 2), index > 0 {
-                    try desktop.key(index / 2 + 1, send: true)
-                    try desktop.expectShown(window)
+                    let destination = index / 2 + 1
+                    try desktop.key(destination, send: true)
+                    try desktop.expectFocus(window)
+                    try requireFinalState("the idle fixture sent before opening the next one") {
+                        try harness.row(window)?.workspace == destination && harness.status().workspaces?.active == destination
+                    }
                 }
             }
-            try requireFinalState("twenty fixtures across ten workspaces") {
-                let rows = try harness.rows()
+            try expectMembership("twenty fixtures across ten workspaces") { rows in
                 return rows.count == 20 && Set(rows.compactMap(\.workspace)) == Set(1...10)
             }
             sleep(seconds: 1)
@@ -75,7 +89,7 @@ extension Acceptance {
         @Test("#26 E24; #19 E28: carousel and a hidden layer do no stage work at rest and keep the resource budget") func carouselAcrossWorkspacesKeepsTheIdleResourceBudget() throws {
             try harness.reset()
             // Thirty setup changes run instantly: each animated one costs a
-            // capture, and the suite must fit its CI budget. One animated
+            // capture. One animated
             // change at the default duration loads the stage before the idle
             // window.
             try desktop.configure("[experiments]\nlayer = true\n[animation]\nduration = 0\n", layout: "carousel")
@@ -105,13 +119,18 @@ extension Acceptance {
                     }
                 }
             }
-            try requireFinalState("twenty rail fixtures across five workspaces") {
-                let rows = try harness.rows()
+            try expectMembership("twenty rail fixtures across five workspaces") { rows in
                 return rows.count == 20 && Set(rows.compactMap(\.workspace)).count == 5 && rows.contains { ($0.rail ?? 0) > 1 }
             }
             let hiddenFloat = try fixture.open(kind: "normalPanel", key: "hiddenFloat", ["background": true])
             try requireFinalState("the idle layer fixture is catalogued") { try harness.row(hiddenFloat)?.state == "floats" }
-            try desktop.activate(key: "idle19")
+            // A new float enters its single-window layer under #19 E12. Finish
+            // that arrival before establishing the hidden-layer idle scene.
+            try requireFinalState("the new idle float has native focus") {
+                try desktop.observe().windows.contains { $0.id == hiddenFloat && $0.visible && $0.focused }
+            }
+            try desktop.post(kVK_ANSI_Z)
+            try desktop.expectFocus(last)
             try requireFinalState("the idle float is hidden natively and in the CLI") {
                 try harness.row(hiddenFloat)?.visible == false && !desktop.observe().visibleIDs.contains(hiddenFloat)
             }
@@ -129,6 +148,15 @@ extension Acceptance {
                 try #require(work > setupWorkStart, "The stage counter must increase during the animated change before it can prove idle zero work; \(given)")
             }
             try verifyIdleResources("Carousel E24 / Layer E28", stageWorkBefore: work)
+        }
+
+        private func expectMembership(_ expectation: String, _ predicate: ([Row]) -> Bool) throws {
+            var last: [Row] = []
+            do {
+                try requireFinalState(expectation) { last = try harness.rows(); return predicate(last) }
+            } catch {
+                throw HarnessError("\(error); fixture membership: \(last.map { "\($0.id): \($0.state), workspace=\(String(describing: $0.workspace)), rail=\(String(describing: $0.rail))" })")
+            }
         }
     }
 }

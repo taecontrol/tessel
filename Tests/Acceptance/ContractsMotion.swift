@@ -48,7 +48,7 @@ extension Acceptance.Contracts {
             // The native contract promises a press before dragging, not an
             // exclusive callback count. macOS can report two press callbacks.
             return facts.pointerPresses == firstDrag && events.prefix(firstDrag).allSatisfy { $0 == "press" }
-                && events.dropFirst(firstDrag).allSatisfy { $0 == "drag" }
+                && events.last == "release" && events.dropFirst(firstDrag).dropLast().allSatisfy { $0 == "drag" }
         }
         try #require(delivered, "every press must precede dragging; events=\(observed?.pointerEvents ?? []), presses=\(observed?.pointerPresses ?? -1)")
     }

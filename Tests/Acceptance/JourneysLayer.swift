@@ -5,11 +5,12 @@ import Testing
 extension Acceptance.Journeys {
     @Test("#19 E29: real layer keys show and hide a signed panel and move a signed tile to the layer and back")
     func layerKeysReachSignedWindows() throws {
+        harness.stopApp()
         let tile = try fixture.open(key: "tile"), neighbor = try fixture.open(key: "neighbor")
         let panel = try fixture.open(kind: "normalPanel", key: "panel", ["background": true])
         try desktop.activate(key: "tile")
+        try harness.startApp(fixtureReady: false)
         try requireFinalState("all layer journey fixtures are catalogued") { Set(try harness.rows().map(\.id)) == Set([tile, neighbor, panel]) }
-        try desktop.configure("[experiments]\nlayer = true\n", layout: "carousel")
         try requireFinalState("the panel starts hidden while its tile has native focus") {
             let observed = try desktop.observe()
             return desktop.focused(tile, in: observed) && !observed.visibleIDs.contains(panel)

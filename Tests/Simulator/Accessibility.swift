@@ -72,8 +72,10 @@ extension SimulatedMac {
             return nil
         }
         private func finish(_ handle: Handle, operation: String, status: AXStatus, value: String = "", point: PausePoint? = nil) {
+            mac.recordPresentation(operation)
             mac.assume(.axReadDelivery)
-            let cost = status == .cannotComplete ? max(1, Int((handle.timeout * 1_000).rounded())) : 1
+            let delay = mac.pid(handle.node).flatMap { mac.apps[$0]?.replyDelay } ?? 0
+            let cost = status == .cannotComplete ? max(1, Int((handle.timeout * 1_000).rounded())) : 1 + delay
             mac.scheduler.reply("AccessibilityPort.\(operation) reply \(handle.name) \(status.traceName)\(value.isEmpty ? "" : " " + value)",
                                 cost: cost, point: point)
         }
@@ -183,6 +185,9 @@ extension SimulatedMac {
         switch node {
         case .application(let pid):
             switch attribute {
+            case .enhancedUserInterface:
+                assume(.enhancedUIResize)
+                return AXResult(.success, .bool(apps[pid]!.enhancedUserInterface))
             case .windows: return windowList(pid)
             case .hidden:
                 assume(.applicationVisibility)
@@ -283,6 +288,12 @@ extension SimulatedMac {
 
     func write(_ attribute: AXAttribute, node: Node, value: AXValue) -> AXStatus {
         switch (node, attribute, value) {
+        case (.application(let pid), .enhancedUserInterface, .bool(let enabled)):
+            assume(.enhancedUIResize)
+            apps[pid]?.enhancedUserInterface = enabled
+            if !enabled { apps[pid]?.pendingEnhancedSizes.removeAll() }
+            // AppKit applies the private flag despite this reported status.
+            return .other(-25208)
         case (.application(let pid), .frontmost, .bool(true)):
             assume(.applicationActivation)
             activateFromAX(pid)
@@ -291,6 +302,11 @@ extension SimulatedMac {
             return selectFromAX(id)
         case (.window(let id), .position, .point(let point)):
             assume(.windowGeometryWrites)
+            let pid = windows[id]!.pid
+            if apps[pid]?.enhancedUserInterface == true, let old = apps[pid]?.pendingEnhancedSizes.removeValue(forKey: id) {
+                assume(.enhancedUIResize)
+                for member in groupMembers(id) { windows[member]?.spec.frame.size = old }
+            }
             var accepted = point
             if windows[id]?.spec.positionAcceptance == .rightEdgeStrip { accepted.x = min(point.x, geometry.frame.maxX - 40) }
             if windows[id]?.spec.positionAcceptance == .screenEdges {
@@ -309,6 +325,11 @@ extension SimulatedMac {
             assume(.axSizeConstraints)
             guard windows[id]?.spec.resizable == true else { return .other(-25200) }
             let write = recordGeometry(id, attribute: attribute, requested: value)
+            let pid = windows[id]!.pid
+            if apps[pid]?.enhancedUserInterface == true {
+                assume(.enhancedUIResize)
+                apps[pid]?.pendingEnhancedSizes[id] = windows[id]!.spec.frame.size
+            }
             if isCloseted(id) {
                 assume(.closetSizeLoss)
                 motion.shortSizes.insert(id)

@@ -13,6 +13,7 @@ struct FixtureContractError: Error, CustomStringConvertible {
 final class FixtureContracts: NSObject {
     private let motionProbe = FixtureMotionProbe()
     private let stage = FixtureStage()
+    private let instantRecording = FixtureInstantRecording()
     private var handles: [UInt32: AXUIElement] = [:]
     private var bars: [AXUIElement] = []
     private var captured: [String: CFTypeRef] = [:]
@@ -75,6 +76,11 @@ final class FixtureContracts: NSObject {
                     return "\(window[kCGWindowOwnerName as String] as? String ?? "?")@\(layer)"
                 }
             return ["foreground": ["front \(front?.bundleIdentifier ?? front?.localizedName ?? "none")"] + owners]
+        case "instantRecordingStart", "instantRecordingStop":
+            guard let pids = command["pids"] as? [pid_t], !pids.isEmpty, pids.allSatisfy({ FixtureProbe.isFixture($0) }) else {
+                throw FixtureContractError("instant recording accepts signed fixture processes only")
+            }
+            return try instantRecording.command(command)
         case "screenRecording": return stage.preflight()
         case "stageOverlayShow": return stage.showOverlay()
         case "stageOverlayHide": stage.hideOverlay(); return [:]
@@ -144,6 +150,40 @@ final class FixtureContracts: NSObject {
             CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: target, mouseButton: .left)?.post(tap: .cghidEventTap)
             if let oldPointer { CGWarpMouseCursorPosition(oldPointer) }
             return [:]
+        case "enhancedUI":
+            let attribute = "AXEnhancedUserInterface" as CFString
+            var writeResult: AXError?
+            if let enabled = command["enabled"] as? Bool {
+                writeResult = AXUIElementSetAttributeValue(application, attribute, enabled ? kCFBooleanTrue : kCFBooleanFalse)
+            }
+            var value: CFTypeRef?
+            let result = AXUIElementCopyAttributeValue(application, attribute, &value)
+            // AppKit may apply this private attribute while answering
+            // notImplemented. The readback, not that status, proves the Given.
+            if let enabled = command["enabled"] as? Bool, (value as? Bool) != enabled {
+                throw FixtureContractError("enhanced UI readback differs after write: \(writeResult?.rawValue ?? result.rawValue)")
+            }
+            return ["result": writeResult?.rawValue ?? result.rawValue, "enhancedUI": value as Any? ?? NSNull()]
+        case "dragResize":
+            let window = try retained(command, pid: pid)
+            let values = frame(position: read(window, kAXPositionAttribute).value, size: read(window, kAXSizeAttribute).value)
+            guard values.count == 4, NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+                  fixtureCGFrames([pid])[id(window)] != nil else { throw FixtureContractError("drag needs a visible frontmost fixture") }
+            let delta = command["delta"] as? Double ?? -100
+            let start = CGPoint(x: values[0] + values[2] - 1, y: values[1] + values[3] / 2)
+            let pointer = CGEvent(source: nil)?.location
+            Task { @MainActor in
+                CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: start, mouseButton: .left)?.post(tap: .cghidEventTap)
+                for step in 1...20 {
+                    try? await Task.sleep(for: .milliseconds(20))
+                    let point = CGPoint(x: start.x + delta * Double(step) / 20, y: start.y)
+                    CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
+                }
+                let end = CGPoint(x: start.x + delta, y: start.y)
+                CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: end, mouseButton: .left)?.post(tap: .cghidEventTap)
+                if let pointer { CGWarpMouseCursorPosition(pointer) }
+            }
+            return [:]
         case "snapshot": return snapshot(application, pid: pid)
         case "barOwner":
             guard let index = command["bar"] as? Int, bars.indices.contains(index) else { throw FixtureContractError("retain a native bar before reading its owner") }
@@ -173,6 +213,21 @@ final class FixtureContracts: NSObject {
         case "readCapture":
             return ["capturedFrame": frame(position: captured["position"], size: captured["size"]),
                     "capturedFocus": element(captured["focused"]).map(id) ?? 0]
+        case "writeSizeThenPosition":
+            let window = try retained(command, pid: pid)
+            guard let target = command["frame"] as? [Double], target.count == 4 else { throw FixtureContractError("paired geometry needs a native frame") }
+            var point = CGPoint(x: target[0], y: target[1]), size = CGSize(width: target[2], height: target[3])
+            let position = AXValueCreate(.cgPoint, &point)!, dimensions = AXValueCreate(.cgSize, &size)!
+            let enhanced = "AXEnhancedUserInterface" as CFString
+            let restore = command["disableEnhancedUI"] as? Bool == true && (read(application, enhanced as String).value as? Bool) == true
+            if restore { _ = AXUIElementSetAttributeValue(application, enhanced, kCFBooleanFalse) }
+            defer { if restore { _ = AXUIElementSetAttributeValue(application, enhanced, kCFBooleanTrue) } }
+            // Keep both writes in one client burst, as in the app. Another
+            // command/reply between them gives AppKit time to finish resizing.
+            let sized = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, dimensions)
+            let moved = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, position)
+            // Match the app's readback before restoring the enhanced flag.
+            return ["results": [sized.rawValue, moved.rawValue], "window": describe(window)]
         case "write":
             let window = try retained(command, pid: pid)
             let attribute = command["attribute"] as? String ?? ""

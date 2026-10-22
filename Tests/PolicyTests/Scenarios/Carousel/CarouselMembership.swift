@@ -118,8 +118,8 @@ import Testing
             f.app.resize(b, to: CGSize(width: mouse, height: f.area.height)); s.settle()
             f.press("alt-shift-2")
             _ = f.open()
-            let expected = (f.area.width - 10) * mouse / (mouse + f.width(0.5))
-            f.near(f.frame(b).width, expected, "sent nominal width survives temporary singleton stretch")
+            let expected = mouse
+            f.near(f.frame(b).width, expected, "sent nominal width survives a singleton workspace")
         })
         requireCarousel(Scenario.run("floating windows stay outside a wall bounce") { s in
             let f = CarouselFixture(s), a = f.ids[0]

@@ -10,14 +10,9 @@ import Testing
             let tile = app.open(), panels = mac.launch()
             let panel = panels.open(WindowSpec(subrole: "AXDialog"), background: true)
             app.select(tile)
-            let rows = PublishedRows(now: { mac.scheduler.now })
-            var config = Configuration()
-            config.experiments["layer"] = true
-            config.animation.duration = 0
-            let workspaces = Workspaces(store: rows, trusted: true, configuration: config,
-                applications: mac.applications, ax: mac.ax, screens: mac.screens,
-                windowOrder: mac.windowOrder, scheduler: mac.scheduler, hotkeys: PressedKeys(),
-                fixtureOnly: true) { mac.closetPort }
+            let tessel = s.startTessel(text: "[animation]\nduration = 0\n")
+            s.settle()
+            let workspaces = tessel.workspaces, rows = tessel.rows
             // Test the existing catalog-to-policy boundary directly. This
             // introduces no simulated level/subrole notification behavior.
             var observations = [

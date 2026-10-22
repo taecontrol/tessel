@@ -87,12 +87,6 @@ final class WindowCatalog {
         if event == .activated { apps[app.pid]?.refresh(change: .activation) }
     }
 
-    func present(pid: Int32, id: UInt32, area: CGRect?, focus: Bool,
-                 completion: @escaping @MainActor @Sendable () -> Void) {
-        guard let app = apps[pid] else { completion(); return }
-        app.present(id: id, area: area, focus: focus, completion: completion)
-    }
-
     func presentRail(pid: Int32, id: UInt32, frame: CGRect?, position: Bool, resize: Bool, focus: Bool, screenRight: CGFloat,
                      completion: @escaping @MainActor @Sendable (RailPresentationResult) -> Void) {
         guard let app = apps[pid] else { completion(RailPresentationResult()); return }
@@ -115,6 +109,18 @@ final class WindowCatalog {
     }
 
     func returnInside(ids: Set<UInt32>, area: CGRect) { apps.keys.sorted().compactMap { apps[$0] }.forEach { $0.returnInside(ids:ids,area:area) } }
+
+    func refreshFrames(reconciled: @escaping @MainActor @Sendable (Int32) -> Void,
+                       completion: @escaping @MainActor @Sendable () -> Void) {
+        var remaining = apps.count
+        guard remaining > 0 else { completion(); return }
+        for pid in apps.keys.sorted() {
+            apps[pid]?.refreshForPointerRelease(reconciled: { reconciled(pid) }) {
+                remaining -= 1
+                if remaining == 0 { completion() }
+            }
+        }
+    }
 
     func cancelPresentations(invalidatingFocus: Bool = true) {
         apps.keys.sorted().compactMap { apps[$0] }.forEach { $0.cancelPresentation(invalidatingFocus: invalidatingFocus) }
@@ -195,6 +201,9 @@ private final class AppWindows: @unchecked Sendable {
     private var pending: (any ScheduledWork)?
     private var settleGeneration: UInt64 = 0
     private var failedReads = 0
+    private var pointerReleaseCompletion: (@MainActor @Sendable () -> Void)?
+    private var enhancedUIRestorePending = false
+    private var enhancedUIRestoreRetry: (any ScheduledWork)?
     private var elementsByID: [UInt32: AXElement] = [:]
     private var change = CatalogChange.snapshot
     private var activationToken: UUID?
@@ -219,13 +228,6 @@ private final class AppWindows: @unchecked Sendable {
     // finds the app frontmost (`requestActivation`).
     private enum ActivationRequest { case resolved, unfollowed, followed }
     private var activationRequest = ActivationRequest.resolved
-    private var constrained = Set<UInt32>()
-    private struct Validation {
-        let area: CGRect
-        let token: UUID
-        let completion: @MainActor @Sendable () -> Void
-    }
-    private var validations: [UInt32: Validation] = [:]
 
     init(pid: Int32, name: String, bundleId: String, hidden: Bool, generation: UUID,
          ax: any AccessibilityPort, windowOrder: any WindowOrderPort, scheduler: any SchedulingPort,
@@ -278,15 +280,6 @@ private final class AppWindows: @unchecked Sendable {
                              .destroyed].contains(notification)
         let change: CatalogChange = notification == .restored ? .restored
             : [.focusedWindowChanged, .mainWindowChanged].contains(notification) ? .focus : .snapshot
-        if notification == .resized {
-            let handle = element
-            queue.async { [self] in
-                guard !validations.isEmpty else { return }
-                ax.setMessagingTimeout(handle, seconds: 0.05)
-                let id = ax.windowID(handle).value ?? 0
-                validatePresentation(id: id)
-            }
-        }
         refresh(settle: needsSettling, change: change)
     }
 
@@ -314,10 +307,13 @@ private final class AppWindows: @unchecked Sendable {
 
     func stop() {
         queue.async { [self] in
+            restoreEnhancedUI()
+            enhancedUIRestoreRetry?.cancel()
             stopped = true
             railActivationCheck?.work.cancel()
             railActivationCheck = nil
             pending?.cancel()
+            finishPointerRelease()
             if let observer {
                 scheduler.main.async { [self] in
                     observer.stop()
@@ -343,6 +339,7 @@ private final class AppWindows: @unchecked Sendable {
 
     private func readSnapshot() {
         guard !stopped else { return }
+        if enhancedUIRestorePending, enhancedUIRestoreRetry == nil { restoreEnhancedUI() }
         updateSubscriptions([application], using: &appSubscriptions)
         do {
             guard let windows = try value(application, .windows)?.elements else { return }
@@ -433,15 +430,9 @@ private final class AppWindows: @unchecked Sendable {
             nativeBars = bars
             facts = next
             elementsByID = handles.filter { newIDs.contains($0.key) }
-            // The last fill result belongs to the continuing native group.
-            // Selecting a tab preserves it until the next ordinary show retries.
-            for (id, previous) in replacements where constrained.contains(previous) {
-                constrained.insert(id)
-            }
-            constrained.formIntersection(newIDs)
-            validations = validations.filter { newIDs.contains($0.key) }
             failedReads = 0
             publishSnapshot(replacing: replacements)
+            finishPointerRelease()
             if !newIDs.subtracting(oldIDs).isEmpty {
                 beginSettling()
             }
@@ -556,11 +547,7 @@ private final class AppWindows: @unchecked Sendable {
             railActivationCheck = nil
         }
         let observations = facts.map { fact in
-            var record = fact.record(app: name, bundleId: bundleId, hidden: hidden)
-            if record.state == .tiled, constrained.contains(fact.id) {
-                record.state = .floats
-                record.reason = "cannot fill the screen"
-            }
+            let record = fact.record(app: name, bundleId: bundleId, hidden: hidden)
             return WindowObservation(record: record, frame: fact.frame, parent: fact.parent, resizable: fact.resizable, replaces: replacements[fact.id])
         }
         publish(observations, focused == 0 ? nil : focused, frontmost, activationRequest != .resolved, change, activationToken)
@@ -602,6 +589,28 @@ private final class AppWindows: @unchecked Sendable {
             presentation = UUID()
             if invalidatingFocus { focusIntent = UUID() }
         }
+    }
+
+    func refreshForPointerRelease(reconciled: @escaping @MainActor @Sendable () -> Void,
+                                  completion: @escaping @MainActor @Sendable () -> Void) {
+        queue.async { [self] in
+            guard !stopped else { scheduler.main.async { completion() }; return }
+            // A later gesture supersedes the earlier callback, but keeps the
+            // unresolved baseline. Repeated clicks cannot grow a hung app's queue.
+            pointerReleaseCompletion = reconciled
+            readSnapshot()
+            // Only this first attempt gates the shared layout and queued keys.
+            // A failed app keeps its own baseline until a later successful read.
+            scheduler.main.async { completion() }
+        }
+    }
+
+    private func finishPointerRelease() {
+        // Publication is queued first, so release reconciliation sees the fresh
+        // geometry. Failed reads retain the baseline until retry or notification.
+        guard let completion = pointerReleaseCompletion else { return }
+        pointerReleaseCompletion = nil
+        scheduler.main.async { completion() }
     }
 
     func ownsFocusIntent(_ token: UUID?) -> Bool {
@@ -648,41 +657,6 @@ private final class AppWindows: @unchecked Sendable {
         }
     }
 
-    func present(id: UInt32, area: CGRect?, focus: Bool, completion: @escaping @MainActor @Sendable () -> Void) {
-        let token = presentationLock.withLock { presentation }
-        queue.async { [self] in
-            // The caller's focus intent lasts only while this write is pending,
-            // including when an AX read fails or a newer render cancels it.
-            defer { scheduler.main.async { completion() } }
-            guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
-            do {
-                guard try canPresent(window, id: id) else { return }
-                if let area {
-                    let origin = area.origin, size = area.size
-                    try check(ax.set(.position, of: window, to: .point(origin)))
-                    try check(ax.set(.size, of: window, to: .size(size)))
-                    if try checkSize(window, area: area) { constrained.insert(id) } else { constrained.remove(id) }
-                    validations[id] = Validation(area: area, token: token, completion: completion)
-                    queue.after(milliseconds: 100) { [weak self] in self?.validatePresentation(id: id, token: token) }
-                }
-                guard presentationLock.withLock({ presentation == token }), try canPresent(window, id: id) else { return }
-                if focus {
-                    let followed = try requestActivation {
-                        guard presentationLock.withLock({ presentation == token }), isNativeFront(window, id: id) else { return false }
-                        try check(ax.set(.main, of: window, to: .bool(true)))
-                        // AXMain leaves a completed minimize alone; AXRaise restores it.
-                        guard presentationLock.withLock({ presentation == token }), try value(window, .minimized)?.bool != true,
-                              isNativeFront(window, id: id) else { return false }
-                        try check(ax.perform(.raise, on: window))
-                        return true
-                    }
-                    guard followed else { return }
-                }
-                publishSnapshot()
-            } catch { /* Keep the last complete classification when the app is busy. */ }
-        }
-    }
-
     /// AXRaise on a frontmost app's root may select it (ax-focus). A background
     /// raise only reorders below the active window (ax-raise-across-applications),
     /// unless it completes an activation still pending in that app.
@@ -726,32 +700,27 @@ private final class AppWindows: @unchecked Sendable {
         do {
             guard try canPresent(window,id:id) else { return }
             if let target {
-                // Both orders use one position write. Resize at the old
-                // origin when it fits; otherwise establish the new origin.
+                let enhanced = try enhancedUIRestorePending || value(application, .enhancedUserInterface)?.bool == true
+                if enhanced { enhancedUIRestorePending = true }
+                defer { if enhanced { restoreEnhancedUI() } }
+                if enhanced { try check(ax.set(.enhancedUserInterface, of: application, to: .bool(false))) }
                 var current = facts.first { $0.id == id }?.frame ?? target
-                if resize, let point = try value(window, .position)?.point { current.origin = point }
+                if resize { current = try frame(window) }
                 guard presentationLock.withLock({ presentation == token }) else { return }
                 let order = resizeOrder(current: current, target: target, screenRight: screenRight)
                 let positionFirst = resize && position && order == true
                 if positionFirst { try check(ax.set(.position, of: window, to: .point(target.origin))) }
-                // Resizing at the current origin: AX bounds the height by the
-                // current top, so a window growing taller rises first, at an x
-                // that still fits its width.
+                // Initial discovery can find a short, low window whose final
+                // x is clipped. Rise at its fitting origin before growing.
                 if resize && position && order == false && target.height > current.height && target.minY < current.minY {
                     try check(ax.set(.position, of: window, to: .point(CGPoint(x: current.minX, y: target.minY))))
                 }
                 guard presentationLock.withLock({ presentation == token }) else { return }
-                if resize && order != nil {
-                    let size = target.size
-                    try check(ax.set(.size, of: window, to: .size(size)))
-                    constrained.remove(id)
-                    validations[id] = nil
+                if resize, order != nil {
+                    try check(ax.set(.size, of: window, to: .size(target.size)))
                 }
                 guard presentationLock.withLock({ presentation == token }) else { return }
-                if position && !positionFirst {
-                    let origin = target.origin
-                    try check(ax.set(.position, of: window, to: .point(origin)))
-                }
+                if position && !positionFirst { try check(ax.set(.position, of: window, to: .point(target.origin))) }
                 accepted = try frame(window)
                 if let index = facts.firstIndex(where: { $0.id == id }), let accepted { facts[index].frame = accepted }
             }
@@ -759,6 +728,7 @@ private final class AppWindows: @unchecked Sendable {
             if focus {
                 guard try canPresent(window,id:id) else { return }
                 let active = try value(application, .frontmost)?.bool == true
+                guard presentationLock.withLock({ presentation == token }) else { return }
                 let followed = try requestActivation {
                     guard presentationLock.withLock({ presentation == token }), isNativeFront(window,id:id) else { return false }
                     try check(ax.set(.main, of: window, to: .bool(true)))
@@ -802,10 +772,10 @@ private final class AppWindows: @unchecked Sendable {
                 railActivationCheck = (token,check)
             }
             observedFocus = publishSnapshot()
-        } catch AXReadError.unresponsive where target != nil && accepted == nil && failures < 4 {
+        } catch AXReadError.unresponsive where (target != nil || focus) && accepted == nil && failures < 4 {
             // A busy or briefly hung app can time out every write of the
-            // render that moved it, leaving a stale frame over its
-            // neighbors once it answers. Back off like failed reads, while
+            // render that moved it, or the separate focus request that
+            // releases its visibility handoff. Back off like failed reads, while
             // no newer render supersedes this one; a hung app then costs nothing.
             retrying = true
             queue.after(milliseconds: 50 << (failures+1)) { [weak self] in
@@ -813,6 +783,24 @@ private final class AppWindows: @unchecked Sendable {
                                   failures:failures+1,completion:completion)
             }
         } catch { /* Another app's queue and the CLI remain independent. */ }
+    }
+
+    private func restoreEnhancedUI(failures: Int = 0) {
+        guard enhancedUIRestorePending, !stopped else { return }
+        enhancedUIRestoreRetry?.cancel()
+        enhancedUIRestoreRetry = nil
+        let result = ax.set(.enhancedUserInterface, of: application, to: .bool(true))
+        // AppKit can apply this flag while returning notImplemented. Readback
+        // also distinguishes that reply from a restore that never happened.
+        if result == .success || (try? value(application, .enhancedUserInterface)?.bool) == true {
+            enhancedUIRestorePending = false
+        } else if failures < 4 {
+            enhancedUIRestoreRetry = queue.after(milliseconds: 100 << failures) { [weak self] in
+                self?.restoreEnhancedUI(failures: failures + 1)
+            }
+        }
+        // Exhaustion leaves the obligation intact. The next native snapshot
+        // or placement retries it without keeping a hung app on a timer.
     }
 
     /// A right-clipped window cannot accept its width at either origin. Keep
@@ -837,28 +825,6 @@ private final class AppWindows: @unchecked Sendable {
                 _ = ax.set(.position, of: window, to: .point(point))
             }
         }
-    }
-
-    private func checkSize(_ window: AXElement, area: CGRect) throws -> Bool {
-        let accepted = try frame(window)
-        guard accepted.width > 0, accepted.height > 0 else { throw AXReadError.unresponsive }
-        let cannotFill = abs(accepted.width - area.width) > 2 || abs(accepted.height - area.height) > 2
-        if cannotFill {
-            let center = CGPoint(x: area.midX - accepted.width / 2, y: area.midY - accepted.height / 2)
-            try check(ax.set(.position, of: window, to: .point(center)))
-        }
-        return cannotFill
-    }
-
-    private func validatePresentation(id: UInt32, token: UUID? = nil) {
-        guard let pending = validations[id], token == nil || token == pending.token else { return }
-        validations[id] = nil
-        guard presentationLock.withLock({ presentation == pending.token }), let window = elementsByID[id],
-              (try? canPresent(window, id: id)) == true,
-              let cannotFill = try? checkSize(window, area: pending.area) else { return }
-        if cannotFill { constrained.insert(id) } else { constrained.remove(id) }
-        publishSnapshot()
-        scheduler.main.async { pending.completion() }
     }
 
     /// Native hide, minimize, and fullscreen can begin between a snapshot and a
