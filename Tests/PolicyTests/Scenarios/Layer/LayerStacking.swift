@@ -176,6 +176,42 @@ import Testing
         })
     }
 
+    @Test("#19 E26: a presentation that requests no activation leaves an older superseded one unresolved", arguments: WriteOrder.allCases)
+    func supersededActivationSurvivesGeometryRelayout(_ writes: WriteOrder) {
+        requireLayer(Scenario.run("superseded activation across a geometry-only relayout / \(writes)", writes: writes) { s in
+            let f = LayerStackingFixture(s)
+            f.press("pin layer")
+            f.press("focus right")
+            f.apps[1].deferNextActivation(completion: .focusWrite)
+            f.supersedeActivation(of: f.apps[1], requesting: "focus right", with: "focus left")
+            s.settle()
+            s.step("the user selects B's tile") { f.apps[1].select(f.tiles[2]) }
+            s.settle()
+            // While B is frontmost, a new outer gap moves B's tile without
+            // requesting focus. Its read finds B frontmost, but it issued no
+            // request, so that read says nothing about the pending one.
+            let start = f.mac.scheduler.trace.count
+            s.step("reload the config with another outer gap") {
+                f.tessel.changeConfig(LayerFixture.config + "[animation]\nduration = 0\n[gaps]\nouter = 20\n")
+            }
+            s.settle()
+            let trace = f.mac.scheduler.trace.dropFirst(start).filter { $0.contains("AccessibilityPort.") && !$0.contains(" reply ") }
+            s.expect("the relayout moves B's tile", trace.contains {
+                ($0.contains("AXPosition") || $0.contains("AXSize")) && $0.contains("window \(f.tiles[2]) ")
+            })
+            s.expect("the relayout neither activates nor selects anything in B", !trace.contains {
+                $0.contains("AXFrontmost=true \(f.apps[1].alias) ") || ($0.contains(f.apps[1].alias) && ($0.contains("AXMain=true") || $0.contains("AXRaise")))
+            })
+            f.mac.clearMotionHistory()
+            s.step("the user selects A's tile again") { f.apps[0].select(f.tiles[1]) }
+            s.settle()
+            s.expect("A retains native keyboard focus", f.mac.frontmostApp == f.apps[0].pid && f.mac.focusedWindow == f.tiles[1])
+            s.expect("every background-float raise preserves A's keyboard focus", f.mac.focusEffects.filter {
+                $0.raisedWindow.map { f.floats.contains($0) } ?? false
+            }.allSatisfy { $0.window == f.tiles[1] })
+        })
+    }
+
     @Test("#19 E9: an abandoned activation request that finds its app already frontmost holds nothing back", arguments: WriteOrder.allCases)
     func abandonedRequestToFrontmostApp(_ writes: WriteOrder) {
         requireLayer(Scenario.run("abandoned request to the frontmost app / \(writes)", writes: writes) { s in
