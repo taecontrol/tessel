@@ -5,6 +5,7 @@ import Ports
 extension SimulatedMac {
     package struct GeometryWrite: Sendable {
         package let at: Int
+        package let traceIndex: Int
         package let window: UInt32
         package let attribute: AXAttribute
         package let requested: AXValue
@@ -110,7 +111,7 @@ extension SimulatedMac {
     }
     func recordGeometry(_ id: UInt32, attribute: AXAttribute, requested: AXValue) -> Int {
         let index = motion.writes.count
-        motion.writes.append(GeometryWrite(at: scheduler.now, window: id, attribute: attribute,
+        motion.writes.append(GeometryWrite(at: scheduler.now, traceIndex: scheduler.trace.count, window: id, attribute: attribute,
                                            requested: requested, hidden: isCloseted(id), accepted: windows[id]!.spec.frame))
         return index
     }

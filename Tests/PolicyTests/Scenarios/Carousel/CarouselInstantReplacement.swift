@@ -6,10 +6,11 @@ import Testing
 
 @Suite @MainActor struct CarouselInstantReplacement {
     @Test("#33 E18: prepare once while hidden and preserve pointwise old-or-final ownership",
-          arguments: ["workspace", "rail", "width", "width-shrink", "stop", "stop-left", "open", "close", "send", "layer-show", "layer-hide"], WriteOrder.allCases)
+          arguments: ["workspace", "rail", "width", "width-right", "width-shrink", "stop", "stop-mixed", "stop-left", "open", "close", "send", "layer-show", "layer-hide"], WriteOrder.allCases)
     func instantOperationsHaveAnOrderedHandoff(_ operation: String, _ writes: WriteOrder) {
         requireCarousel(Scenario.run("instant \(operation) handoff", writes: writes) { s in
-            let f = CarouselFixture(s, presets: [0.5, 0.5, 0.5], duration: 0)
+            let presets = operation == "stop-mixed" ? [0.5, 739.0 / 1718.0, 0.5] : [0.5, 0.5, 0.5]
+            let f = CarouselFixture(s, presets: presets, duration: 0)
             f.tessel.changeConfig("[experiments]\nlayer = true\n[animation]\nduration = 0\n"); s.settle()
             let t = f.tessel, a = f.ids[0], b = f.ids[1], c = f.ids[2]
             var ids = Set(f.ids)
@@ -26,7 +27,7 @@ import Testing
             default: break
             }
             if operation == "width" { f.select(a) }
-            if operation == "stop" { f.select(b) }
+            if operation == "width-right" || operation == "stop" || operation == "stop-mixed" { f.select(b) }
             ids.formUnion(t.windows.map(\.id))
             var startCGOrder = f.mac.visibleOrder
             var before = Dictionary(uniqueKeysWithValues: ids.filter { f.mac.isVisible($0) }.map { ($0, f.frame($0)) })
@@ -35,8 +36,8 @@ import Testing
             switch operation {
             case "workspace": t.press("workspace 2")
             case "rail": t.press("focus down")
-            case "width", "width-shrink": t.press("cycle width")
-            case "stop": t.press("focus right")
+            case "width", "width-right", "width-shrink": t.press("cycle width")
+            case "stop", "stop-mixed": t.press("focus right")
             case "stop-left": t.press("focus left")
             case "open":
                 let opened = f.app.open(WindowSpec(frame: CGRect(x: 80, y: 80, width: 600, height: 400), positionAcceptance: .screenEdges))
@@ -64,6 +65,18 @@ import Testing
                 s.expect("\(operation): returning window \(id) is final when first shown", showing?.frames[id] == final[id])
                 s.expect("\(operation): all returning geometry writes are hidden", f.mac.geometryWrites.filter { $0.window == id }.allSatisfy(\.hidden))
             }
+            // AX clamps size at the current origin. A growing right tile must
+            // move before resizing (849@869 -> 1135@582.7), so ownership is
+            // checked once that window's uninterrupted geometry burst lands.
+            let bursts = Dictionary(grouping: f.mac.geometryWrites, by: \.window).values.compactMap { writes -> Range<Int>? in
+                guard let first = writes.first, let last = writes.last, first.traceIndex < last.traceIndex else { return nil }
+                let burst = first.traceIndex..<last.traceIndex
+                s.expect("\(operation): geometry bursts never interleave another window's writes",
+                         f.mac.geometryWrites.filter { burst.contains($0.traceIndex) }.allSatisfy { $0.window == first.window })
+                s.expect("\(operation): geometry bursts never interleave closet operations",
+                         !states.contains { burst.contains($0.traceIndex) && ($0.operation == "show" || $0.operation == "hide") })
+                return burst
+            }
             // Sample every cell formed by all old, final and intermediate edges.
             // Within a cell both ownership and coverage are constant.
             let allFrames = Array(before.values) + Array(final.values) + states.flatMap { $0.frames.values }
@@ -75,14 +88,16 @@ import Testing
             let startOrder = startCGOrder
             let endOrder = f.mac.visibleOrder
             for state in states {
-                for (x0, x1) in zip(xs, xs.dropFirst()) where x1 > x0 {
-                    for (y0, y1) in zip(ys, ys.dropFirst()) where y1 > y0 {
-                        let point = CGPoint(x: (x0 + x1) / 2, y: (y0 + y1) / 2)
-                        let old = owner(before, startOrder, at: point), new = owner(final, endOrder, at: point)
-                        let current = owner(state.frames, state.order, at: point)
-                        s.expect("\(operation): \(state.operation) at \(point) shows \(String(describing: current)), expected old \(String(describing: old)) or final \(String(describing: new))",
-                                 current == nil || current == old || current == new)
-                        if old != nil && new != nil { s.expect("\(operation): shared tile coverage never exposes desktop at \(point)", current != nil) }
+                if !bursts.contains(where: { $0.contains(state.traceIndex) }) {
+                    for (x0, x1) in zip(xs, xs.dropFirst()) where x1 > x0 {
+                        for (y0, y1) in zip(ys, ys.dropFirst()) where y1 > y0 {
+                            let point = CGPoint(x: (x0 + x1) / 2, y: (y0 + y1) / 2)
+                            let old = owner(before, startOrder, at: point), new = owner(final, endOrder, at: point)
+                            let current = owner(state.frames, state.order, at: point)
+                            s.expect("\(operation): \(state.operation) at \(point) shows \(String(describing: current)), expected old \(String(describing: old)) or final \(String(describing: new))",
+                                     current == nil || current == old || current == new)
+                            if old != nil && new != nil { s.expect("\(operation): shared tile coverage never exposes desktop at \(point)", current != nil) }
+                        }
                     }
                 }
                 if state.operation == "hide" {

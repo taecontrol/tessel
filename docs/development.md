@@ -803,16 +803,23 @@ visibility. #1 E17 now starts managed, and #1 E7 no longer expects a new arrival
 to leave the old tile focused. The hung-app classification oracle excludes
 policy-owned visibility and membership fields.
 
-E18 was amended twice during delivery: blanket overlap prohibition conflicted
+E18 was amended three times during delivery: blanket overlap prohibition conflicted
 with show-before-hide; consecutive show/hide then conflicted with scrolling
-and visible-before-focus. Its maintained test uses pointwise old/final ownership
-and uninterrupted shared coverage, plus hidden preparation and one-write limits.
+and visible-before-focus. Finally, AX origin clamping requires a growing right
+tile (849 pt at x=869 to 1135 pt at x=582.7) to move before resizing; size-first
+is clamped and position-first temporarily exposes a 286 pt strip. The pointwise
+old/final ownership and shared-coverage assertions now run at each completed
+per-window geometry burst. No other window's geometry write or closet call may
+interleave that burst. Hidden preparation, replacement-before-retirement,
+visible-before-focus and one-write limits still apply after every port call.
 E20 applies the matching pixel rule. Its recorder starts open/close comparison
 at the first frame containing the new window, or excluding the destroyed one,
 matching the trace's boundary after the app's native action. Open additionally
 permits only the native initial or final palette bounds, with no return to the
 initial bounds after landing. Independent native geometry and palette centers
 reject a frozen or incorrectly filtered stream.
+E20 still permits zero recorded intermediate or gap frames, including during
+AX geometry bursts; the capture reports left- and right-tile alt-r separately.
 
 The old #2 E16 failure-recovery assertion that immediately hid the outgoing
 window now retains the old view while a hung app cannot prepare its replacement
