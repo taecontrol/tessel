@@ -211,7 +211,7 @@ import Testing
         })
     }
 
-    @Test("#33 E12; #33 E15: a permanently hung background app cannot trap the first key after mouse-up",
+    @Test("#33 E12: a permanently hung background app cannot trap the first key after mouse-up",
           arguments: [false, true], WriteOrder.allCases)
     func hungBackgroundAppCannotTrapPointerRelease(_ drag: Bool, _ writes: WriteOrder) {
         requireCarousel(Scenario.run("\(drag ? "drag" : "click") release beside a permanently hung app", writes: writes) { s in

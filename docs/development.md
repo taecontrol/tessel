@@ -813,11 +813,21 @@ with show-before-hide; consecutive show/hide then conflicted with scrolling
 and visible-before-focus. Finally, AX origin clamping requires a growing right
 tile (849 pt at x=869 to 1135 pt at x=582.7) to move before resizing; size-first
 is clamped and position-first temporarily exposes a 286 pt strip. The pointwise
-old/final ownership and shared-coverage assertions now run at each completed
-per-window geometry burst. No other window's geometry write or closet call may
-interleave that burst. Hidden preparation, replacement-before-retirement,
-visible-before-focus and one-write limits still apply after every port call.
-E20 applies the matching pixel rule to workspace, rail, width, stop and close.
+old/final ownership and shared-coverage assertions run after every port call,
+except at points affected by a window in its own in-progress geometry burst
+(its start, final or current frame). Every visible window must itself be at its
+start or final frame, or inside that window's own burst. Hidden writes are
+invisible; returning a window always requires its final frame, even while other
+apps have bursts in flight. Physical concurrency across apps, required so a hung
+neighbor cannot block an independent placement (first review finding 5), replaces
+the earlier global burst exclusion. Bursts remain serial within each app; the
+one-write limits, hidden preparation, replacement-before-retirement and
+visible-before-focus assertions are retained. The matrix covers fourteen
+operations in all three schedulers, each with one app, two apps, and delays to
+either app's AX replies (168 scenarios); its gap-change cases require reply
+completion to reorder when the delayed app changes.
+E20 retains its pixel rule for workspace, rail, width, stop and close, without
+an exception for AX geometry bursts.
 Its recorder starts close comparison at the first frame excluding the destroyed
 window, matching the trace's boundary after the app's native action. Opening
 keeps its original one-step criterion: only the native initial or final palette

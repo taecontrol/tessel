@@ -55,7 +55,11 @@ Every strategy preserves each lane's FIFO order. AX replies cost virtual time,
 so other lanes and timers can run while a call is outstanding. Named read
 pauses stop after paired focused-window and frontmost reads in one worker job.
 `deliver(app)` resumes that lane and stops after its publication main hop;
-native notifications cannot satisfy that checkpoint. `settle` releases all
+native notifications cannot satisfy that checkpoint. `app.delayAXReplies(milliseconds:)`
+adds delivery time to successful replies for one app, after capturing their
+values and effects; other apps can overtake it. Timeout costs remain bounded by
+the AX messaging timeout. This varies the existing `ax-read-delivery` schedule,
+without changing the native behavior the contract pins. `settle` releases all
 explicit holds and drains the machine. For finer worker interruption points,
 `PausePoint.call` names a trace operation. Trying to pause a synchronous main
 frame stops as unmodeled; it never reports a pause after executing its effect.
