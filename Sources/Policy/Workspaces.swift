@@ -28,7 +28,13 @@ final class Workspaces {
     private var pointerHeld = false
     private var pointerReconciling = false
     private var pointerNeedsRender = false
-    private var pointerFrames: [UInt32: CGRect] = [:]
+    private struct PointerFrame {
+        let frame: CGRect
+        // Width keys depend on this window's adopted geometry. Keep them with
+        // its baseline while independent commands, including focus, proceed.
+        var widthCommands = 0
+    }
+    private var pointerFrames: [UInt32: PointerFrame] = [:]
     private var pointerGeneration: UInt64 = 0
     private var pointerCommands: [WorkspaceCommand] = []
     private let stage: (any MotionStagePort)?
@@ -614,6 +620,10 @@ final class Workspaces {
             remember(next); render(focusing:next,relayout:false)
         case .cycleWidth:
             guard let focused, carousel.location(focused) != nil else { return }
+            if pointerFrames[focused] != nil {
+                pointerFrames[focused]?.widthCommands += 1
+                return
+            }
             carousel.cycleWidth(focused)
             render(focusing: focused, relayout: false)
         case .move(let direction):
@@ -1103,7 +1113,7 @@ final class Workspaces {
             pointerGeneration += 1
             // An app still awaiting a successful read retains its earlier drag
             // baseline even if the user clicks or drags in another app meanwhile.
-            pointerFrames.merge(entries.mapValues { $0.observation.frame }) { previous, _ in previous }
+            pointerFrames.merge(entries.mapValues { PointerFrame(frame: $0.observation.frame) }) { previous, _ in previous }
             layerRestack = .owed
             interruptCarousel()
             cancelFocusDecision()
@@ -1138,13 +1148,16 @@ final class Workspaces {
             pointerNeedsRender = pointerNeedsRender || previous != focused
         }
         for id in pointerFrames.keys.sorted() where entries[id]?.pid == pid {
-            let previous = pointerFrames.removeValue(forKey: id)!
-            guard carousel.location(id) != nil, let current = entries[id]?.observation.frame,
-                  abs(current.width - previous.width) > 1 || abs(current.height - previous.height) > 1 else { continue }
-            pointerNeedsRender = true
-            carouselSizing.remove(id)
-            carousel.adoptWidth(id, current.width, left: current.minX - area.minX)
-            carouselSizes[id] = current.size
+            let pending = pointerFrames.removeValue(forKey: id)!
+            guard carousel.location(id) != nil, let current = entries[id]?.observation.frame else { continue }
+            if abs(current.width - pending.frame.width) > 1 || abs(current.height - pending.frame.height) > 1 {
+                pointerNeedsRender = true
+                carouselSizing.remove(id)
+                carousel.adoptWidth(id, current.width, left: current.minX - area.minX)
+                carouselSizes[id] = current.size
+            }
+            for _ in 0..<pending.widthCommands { carousel.cycleWidth(id) }
+            pointerNeedsRender = pointerNeedsRender || pending.widthCommands > 0
         }
     }
 
