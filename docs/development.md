@@ -893,7 +893,9 @@ receives the change's snapshot, the app's first snapshot read that starts after
 the change, and the main-lane job that delivers it runs the render. That
 render's own work never waits for time to pass, so the exposure must end, with
 the successor covering the point, before any timer scheduled from that job on
-comes due. The handoff arm may expose the point no longer than the at-rest
+comes due. The job and the timers come from the scheduler's trace, and an
+arm in which either is missing or malformed fails instead of checking less.
+The handoff arm may expose the point no longer than the at-rest
 arm; a change that exposes the point by itself is measured from the change. A
 repair delayed by a timer, or a dropped render, fails them. A change
 tessel has already observed is not external: a tile it read as moved gets a
