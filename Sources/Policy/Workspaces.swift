@@ -1615,9 +1615,12 @@ final class Workspaces {
                                                  learnBounds: target.minX >= bounds.minX && target.maxX <= bounds.maxX)
                             if abs(accepted.width - target.width) > 1 || abs(accepted.height - target.height) > 1 { changedBounds = true }
                         }
-                    } else if inPlace(p.id) {
+                    } else if result.outcome == .unanswered, inPlace(p.id) {
                         // No write of tessel's is outstanding any more, so the
-                        // last observation decides, as for an unscheduled window.
+                        // last observation decides, as for an unscheduled
+                        // window. A withdrawn window is not in place, whatever
+                        // its cached frame: its own snapshot renders the next
+                        // layout. A superseded request decides nothing.
                         ready.insert(p.id)
                     }
                     geometryReady = finishedPlacements == placements.count

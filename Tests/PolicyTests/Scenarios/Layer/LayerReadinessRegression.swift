@@ -114,9 +114,7 @@ import Testing
             s.expect("the withdrawal renders the next layout, whose tile covers the point", f.mac.isVisible(next) && f.frame(next).contains(point))
             s.expect("the float leaves the desktop once the next tile covers it", f.mac.isInCloset(float) && !f.mac.isVisible(float))
         }
-        withKnownIssue("A placement that finds its window withdrawn counts the window's cached frame as in place") {
-            requireLayer(result)
-        }
+        requireLayer(result)
     }
 
     @Test("#19 E7: an accepted tile frame within one point does not block hiding the layer", arguments: WriteOrder.allCases)

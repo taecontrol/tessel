@@ -504,9 +504,23 @@ alone is never waiting for a placement that will not come. A scheduled window
 is judged only when its own placement ends, because its cached frame can
 predate an earlier write of tessel's that has not been confirmed; such a write
 stays pending until a readback succeeds, so the next render schedules the
-window again. A placement that returns a frame makes its window ready; one
-that ends without a frame leaves the last observation to decide. A window
-still in the closet is never in place, so the old view stays until its
+window again. A placement that returns a frame makes its window ready. One
+that ends without a frame says why:
+
+- It found the window withdrawn: minimized, hidden, fullscreen, behind another
+  native tab, or gone. The window is not in place, whatever its cached frame.
+  The withdrawal's own event starts the snapshot that renders the next layout,
+  and departing windows over the window stay visible until that layout covers
+  them.
+- Its app did not answer through every retry, about 1.5 s of backoff plus five
+  rounds of 50 ms timeouts. The last observation decides. This is the one
+  place where coverage rests on geometry that may be stale: if that app moved
+  the window before it stopped answering, a departing window over the target
+  hides and exposes desktop there until a later render places the window.
+- A newer render, or its app's hide or quit, superseded it. It decides nothing;
+  whatever superseded it decides.
+
+A window still in the closet is never in place, so the old view stays until its
 replacement returns. A tile under a departing window whose last observation
 is more than a point from its target position, such as one its app moved,
 gets a position placement, so its own placement decides the handoff. Layer

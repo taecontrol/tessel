@@ -27,6 +27,13 @@ enum BackgroundRaise: Sendable, Equatable {
 }
 
 struct RailPresentationResult: Sendable {
+    /// How a request ended. Only a presented placement says where its window
+    /// is. A withdrawn window was read as minimized, hidden, fullscreen, behind
+    /// another native tab or gone, and its own event's snapshot says so to
+    /// Policy. An unanswered app timed out through every retry. A superseded
+    /// request was cancelled by a newer render, its app's hide or quit.
+    enum Outcome: Sendable { case presented, withdrawn, unanswered, superseded }
+    var outcome: Outcome
     var frame: CGRect?
     /// Nil when presentation stopped before publishing a fresh native read.
     var focus: WindowFocusObservation?
@@ -89,7 +96,7 @@ final class WindowCatalog {
 
     func presentRail(pid: Int32, id: UInt32, frame: CGRect?, position: Bool, resize: Bool, focus: Bool, screenRight: CGFloat,
                      completion: @escaping @MainActor @Sendable (RailPresentationResult) -> Void) {
-        guard let app = apps[pid] else { completion(RailPresentationResult()); return }
+        guard let app = apps[pid] else { completion(RailPresentationResult(outcome: .withdrawn)); return }
         app.presentRail(id:id,target:frame,position:position,resize:resize,focus:focus,screenRight:screenRight,completion:completion)
     }
 
@@ -690,15 +697,17 @@ private final class AppWindows: @unchecked Sendable {
                              failures: Int, completion: @escaping @MainActor @Sendable (RailPresentationResult) -> Void) {
         var accepted: CGRect?, retrying = false
         var observedFocus: WindowFocusObservation?
+        var outcome = RailPresentationResult.Outcome.superseded
         defer {
             if !retrying {
-                let result = RailPresentationResult(frame: accepted, focus: observedFocus)
+                let result = RailPresentationResult(outcome: accepted == nil ? outcome : .presented, frame: accepted, focus: observedFocus)
                 scheduler.main.async { completion(result) }
             }
         }
-        guard !stopped, presentationLock.withLock({ presentation == token }), let window = elementsByID[id] else { return }
+        guard !stopped, presentationLock.withLock({ presentation == token }) else { return }
+        guard let window = elementsByID[id] else { outcome = .withdrawn; return }
         do {
-            guard try canPresent(window,id:id) else { return }
+            guard try canPresent(window,id:id) else { outcome = .withdrawn; return }
             if let target {
                 let enhanced = try enhancedUIRestorePending || value(application, .enhancedUserInterface)?.bool == true
                 if enhanced { enhancedUIRestorePending = true }
@@ -772,6 +781,7 @@ private final class AppWindows: @unchecked Sendable {
                 railActivationCheck = (token,check)
             }
             observedFocus = publishSnapshot()
+            outcome = .presented
         } catch AXReadError.unresponsive where (target != nil || focus) && accepted == nil && failures < 4 {
             // A busy or briefly hung app can time out every write of the
             // render that moved it, or the separate focus request that
@@ -782,7 +792,13 @@ private final class AppWindows: @unchecked Sendable {
                 self?.presentRail(id:id,target:target,position:position,resize:resize,focus:focus,screenRight:screenRight,token:token,
                                   failures:failures+1,completion:completion)
             }
-        } catch { /* Another app's queue and the CLI remain independent. */ }
+        } catch AXReadError.gone {
+            outcome = .withdrawn
+        } catch {
+            // The app timed out through every retry. Another app's queue and
+            // the CLI remain independent.
+            outcome = .unanswered
+        }
     }
 
     private func restoreEnhancedUI(failures: Int = 0) {
