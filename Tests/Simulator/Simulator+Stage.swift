@@ -34,6 +34,7 @@ extension SimulatedMac {
         var captureRequests: [StageCaptureRequest] = []
         var pendingCaptures = 0
         var onCapturesSettled: (@MainActor @Sendable () -> Void)?
+        var onCaptureFailed: (@MainActor @Sendable () -> Void)?
         var session = 0
         /// Captures are serial, like ScreenCaptureKit's.
         var captureCost = 14
@@ -61,7 +62,7 @@ extension SimulatedMac {
         action("Screen Recording=\(granted)")
         stageState.screenRecording = granted
     }
-    /// Failure injection: a window ScreenCaptureKit cannot capture.
+    /// A final drawn-window capture failure, such as protected video.
     @MainActor package func failCapture(of id: UInt32) {
         assume(.stageProtectedCapture)
         stageState.failing.insert(id)
@@ -103,6 +104,10 @@ extension SimulatedMac {
             get { mac.stageState.onCapturesSettled }
             set { mac.stageState.onCapturesSettled = newValue }
         }
+        var onCaptureFailed: (@MainActor @Sendable () -> Void)? {
+            get { mac.stageState.onCaptureFailed }
+            set { mac.stageState.onCaptureFailed = newValue }
+        }
 
         private func completeCapture(after milliseconds: Int, _ completed: @escaping @MainActor @Sendable () -> Void) {
             mac.stageState.pendingCaptures += 1
@@ -131,6 +136,7 @@ extension SimulatedMac {
                 completeCapture(after: done - mac.scheduler.now) { [mac] in
                     guard mac.stageState.session == session else { return }
                     mac.recordStage(.capture(id))
+                    if mac.stageState.failing.contains(id) { mac.stageState.onCaptureFailed?() }
                 }
             }
             if excluding != nil, mac.stageState.backgroundReady == nil {
@@ -221,6 +227,7 @@ extension SimulatedMac {
         func clear() {
             mac.scheduler.call("MotionStagePort.clear")
             mac.stageState.session += 1
+            mac.stageState.onCaptureFailed = nil
             mac.stageState.motion += 1
             mac.stageState.captured.removeAll()
             mac.stageState.backgroundReady = nil

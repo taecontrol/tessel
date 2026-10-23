@@ -88,6 +88,7 @@ final class SystemMotionStage: MotionStagePort {
     private static let drawLimit = 0.15
     private var standIns: [UInt32: StandIn] = [:]
     private var stacking: [UInt32: CGFloat] = [:]
+    private enum CaptureError: Error { case unreadable }
     /// One window's capture, measured once.
     private final class Capture: @unchecked Sendable {
         let sample: CMSampleBuffer
@@ -99,12 +100,17 @@ final class SystemMotionStage: MotionStagePort {
         /// What a layer shows. An IOSurface from ScreenCaptureKit draws
         /// about 100 ms late in a layer, so it is copied into a CGImage.
         let contents: Any
-        init?(_ sample: CMSampleBuffer) {
+        init?(_ sample: CMSampleBuffer) throws {
             guard let buffer = CMSampleBufferGetImageBuffer(sample),
                   let surface = CVPixelBufferGetIOSurface(buffer)?.takeUnretainedValue() else { return nil }
+            guard IOSurfaceLock(surface, .readOnly, nil) == kIOReturnSuccess else { return nil }
+            defer { IOSurfaceUnlock(surface, .readOnly, nil) }
+            let address = IOSurfaceGetBaseAddress(surface)
+            // A protected capture can lock successfully without mapping pixels.
+            guard Int(bitPattern: address) != 0 else { throw CaptureError.unreadable }
             self.sample = sample
             self.surface = surface
-            (edge, radius) = Self.measure(surface)
+            (edge, radius) = Self.measure(surface, base: address.assumingMemoryBound(to: UInt8.self))
             pixels = CGSize(width: IOSurfaceGetWidth(surface), height: IOSurfaceGetHeight(surface))
             var image: CGImage?
             VTCreateCGImageFromCVPixelBuffer(buffer, options: nil, imageOut: &image)
@@ -115,11 +121,10 @@ final class SystemMotionStage: MotionStagePort {
         /// growing stand-in uncovers, and its corner radius, read from the
         /// transparent run at the start of its top row: a corner of radius r
         /// leaves r − √(r − ¼) pixels clear there. Pixels are BGRA.
-        private static func measure(_ surface: IOSurfaceRef) -> (CGColor?, CGFloat) {
+        private static func measure(_ surface: IOSurfaceRef, base: UnsafePointer<UInt8>) -> (CGColor?, CGFloat) {
             let width = IOSurfaceGetWidth(surface), height = IOSurfaceGetHeight(surface)
-            guard width > 8, height > 8, IOSurfaceLock(surface, .readOnly, nil) == kIOReturnSuccess else { return (nil, 0) }
-            defer { IOSurfaceUnlock(surface, .readOnly, nil) }
-            let base = IOSurfaceGetBaseAddress(surface).assumingMemoryBound(to: UInt8.self), row = IOSurfaceGetBytesPerRow(surface)
+            guard width > 8, height > 8 else { return (nil, 0) }
+            let row = IOSurfaceGetBytesPerRow(surface)
             var sum = [0.0, 0.0, 0.0], count = 0.0
             for y in stride(from: height / 4, to: height * 3 / 4, by: max(1, height / 32)) {
                 let pixel = base + y * row + (width - 6) * 4
@@ -156,6 +161,7 @@ final class SystemMotionStage: MotionStagePort {
     }
     var capturesPending: Bool { pendingCaptures > 0 }
     var onCapturesSettled: (@MainActor @Sendable () -> Void)?
+    var onCaptureFailed: (@MainActor @Sendable () -> Void)?
     /// Whether a window rests in tessel's closet, the only place a window
     /// WindowServer lists off screen is still drawn.
     var inCloset: @MainActor (UInt32) -> Bool = { _ in false }
@@ -231,6 +237,7 @@ final class SystemMotionStage: MotionStagePort {
                     // retarget still gets its stand-in.
                     self.captures[id] = nil
                     if self.retried.insert(id).inserted { self.capture([id], background: nil) }
+                    else if !self.undrawn.contains(id) { self.onCaptureFailed?() }
                 }
                 return image
             }
@@ -437,6 +444,7 @@ final class SystemMotionStage: MotionStagePort {
         onEvent?(.clear)
         #endif
         session += 1
+        onCaptureFailed = nil
         if let activity { ProcessInfo.processInfo.endActivity(activity); self.activity = nil }
         settle?.cancel(); settle = nil
         captures.values.forEach { $0.cancel() }
@@ -522,10 +530,19 @@ final class SystemMotionStage: MotionStagePort {
         #endif
         guard let sample = await screenshot(filter, configuration) else {
             // Waiting again could only leave another capture behind.
-            retried.insert(id)
+            if token == session { retried.insert(id) }
             return nil
         }
-        guard let image = await Self.convert(sample) else { return nil }
+        let image: Capture
+        do {
+            guard let converted = try await Self.convert(sample) else { return nil }
+            image = converted
+        } catch {
+            // An unreadable surface cannot improve within this move.
+            if token == session { retried.insert(id) }
+            return nil
+        }
+        guard token == session else { return nil }
         // A window that changed size during the capture was drawn scaled.
         guard liveSize(id) == size else { return nil }
         #if TESSEL_DEVELOPMENT
@@ -558,7 +575,7 @@ final class SystemMotionStage: MotionStagePort {
         configuration.width = Int(rect.width * scale); configuration.height = Int(rect.height * scale)
         configuration.showsCursor = false
         guard let sample = await screenshot(SCContentFilter(display: display, excludingWindows: excluded), configuration) else { return nil }
-        return await Self.convert(sample)
+        return try? await Self.convert(sample)
     }
 
     /// The longest the stage waits for one screenshot, queued behind the
@@ -600,8 +617,8 @@ final class SystemMotionStage: MotionStagePort {
 
     /// Converting a capture takes milliseconds; the main thread keeps
     /// committing the motion meanwhile.
-    private nonisolated static func convert(_ sample: Sample) async -> Capture? {
-        await Task.detached(priority: .userInitiated) { Capture(sample.buffer) }.value
+    private nonisolated static func convert(_ sample: Sample) async throws -> Capture? {
+        try await Task.detached(priority: .userInitiated) { try Capture(sample.buffer) }.value
     }
 
     // MARK: Layers

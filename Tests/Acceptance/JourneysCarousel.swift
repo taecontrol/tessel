@@ -6,12 +6,26 @@ import Testing
 extension Acceptance.Journeys {
     private func videoRail(_ widths: [Double] = [0.6, 0.6, 0.6], protected: Bool = true) throws -> [UInt32] {
         let ids = try desktop.railSetup(widths, duration: 0, video: 1)
-        try fixture.command("preventsCapture", ["key": "w1", "enabled": protected])
-        try requireFinalState("the video frame is ready for display") { try fixture.command("ping").videosReady?["w1"] == true }
+        let sizes = try videoWidths(widths)
+        try desktop.post(kVK_ANSI_L)
+        try expectVideoRail(ids, widths: sizes, focus: 1)
+        try videoProtection(ids[1], enabled: protected)
+        try desktop.post(kVK_ANSI_H)
+        try expectVideoRail(ids, widths: sizes, focus: 0)
         try desktop.configure("[animation]\nduration = 1000\n", layout: "carousel")
         let given = try harness.motionGiven()
         try #require(try harness.status().workspaces?.motion == "on", "the protected-video journeys require motion; \(given)")
         return ids
+    }
+
+    private func videoProtection(_ id: UInt32, enabled: Bool) throws {
+        try fixture.command("preventsCapture", ["key": "w1", "enabled": enabled])
+        // A ready frame may not have been drawn yet. Establish the fixture's
+        // capture state while it is fully visible, before parking it again.
+        try harness.observer.command("contract", ["operation": "snapshot", "pid": fixture.pid])
+        try requireFinalState("the fixture video is drawn with the requested capture protection") {
+            try harness.observer.command("contract", ["operation": "stageCapture", "pid": fixture.pid, "id": id]).contract?.stage?.readable == !enabled
+        }
     }
 
     private func videoWidths(_ fractions: [Double]) throws -> [Double] {
@@ -24,25 +38,32 @@ extension Acceptance.Journeys {
     private func expectVideoRail(_ ids: [UInt32], widths: [Double], focus: Int) throws {
         let screen = try #require(try harness.observer.command("contract", ["operation": "screen"]).contract?.cgDisplay)
         let bounds = CGRect(x: screen[0], y: screen[1], width: screen[2], height: screen[3])
-        try requireFinalState("every video-rail window at its layout rect with the requested focus") {
-            let observation = try desktop.observe(), rows = try harness.rows(), area = observation.area
-            let starts = widths.indices.map { widths.prefix($0).reduce(0, +) + Double($0) * 10 }
-            let offset = max(0, starts[focus] + widths[focus] - (area[2] - 20))
-            return desktop.focused(ids[focus], in: observation) && ids.indices.allSatisfy { i in
-                let rect = CGRect(x: area[0] + 10 + starts[i] - offset, y: area[1] + 10, width: widths[i], height: area[3] - 20)
-                let visible = rect.intersection(bounds).width >= 1
-                guard rows.contains(where: { $0.id == ids[i] && $0.state == "tiled" && $0.rail == 1 && $0.slot == i + 1 && $0.visible == visible }) else { return false }
-                return observation.windows.contains { window in
-                    window.id == ids[i] && window.visible == visible
-                        && (!visible || desktop.near(window.frame, [rect.minX, rect.minY, rect.width, rect.height]))
+        var last = "no observation"
+        do {
+            try requireFinalState("every video-rail window at its layout rect with the requested focus") {
+                let observation = try desktop.observe(), rows = try harness.rows(), area = observation.area
+                let starts = widths.indices.map { widths.prefix($0).reduce(0, +) + Double($0) * 10 }
+                let offset = max(0, starts[focus] + widths[focus] - (area[2] - 20))
+                last = "requested focus \(ids[focus]), widths \(widths), offset \(offset), area \(area); "
+                    + observation.windows.map { "\($0.id): frame=\($0.frame), visible=\($0.visible), focus=\($0.focused)" }.joined(separator: "; ")
+                    + "; rows " + rows.map { "\($0.id): \($0.state), rail=\($0.rail ?? 0), slot=\($0.slot ?? 0), visible=\($0.visible ?? false)" }.joined(separator: "; ")
+                return desktop.focused(ids[focus], in: observation) && ids.indices.allSatisfy { i in
+                    let rect = CGRect(x: area[0] + 10 + starts[i] - offset, y: area[1] + 10, width: widths[i], height: area[3] - 20)
+                    let visible = rect.intersection(bounds).width >= 1
+                    guard rows.contains(where: { $0.id == ids[i] && $0.state == "tiled" && $0.rail == 1 && $0.slot == i + 1 && $0.visible == visible }) else { return false }
+                    return observation.windows.contains { window in
+                        window.id == ids[i] && window.visible == visible
+                            && (!visible || desktop.near(window.frame, [rect.minX, rect.minY, rect.width, rect.height]))
+                    }
                 }
             }
-        }
+        } catch { throw HarnessError("\(error); \(last)") }
     }
 
     @Test("#36 E2: protected video keeps tessel alive, motion enabled and every tile placed without showing the stage")
     func protectedVideoMovesInstantly() throws {
-        let ids = try videoRail(), widths = try videoWidths([0.6, 0.6, 0.6])
+        let fractions = [1.0, 1.0, 1.0]
+        let ids = try videoRail(fractions), widths = try videoWidths(fractions)
         let pid = try harness.status().pid
         for destination in [1, 2] {
             let shows = try harness.stageMotion().stageShows
@@ -59,12 +80,24 @@ extension Acceptance.Journeys {
     func protectedVideoRetargets(firstSeenByRetarget: Bool) throws {
         let fractions = Array(repeating: firstSeenByRetarget ? 1.0 : 0.6, count: 3)
         let ids = try videoRail(fractions), widths = try videoWidths(fractions)
+        if firstSeenByRetarget {
+            try desktop.configure("[animation]\nduration = 0\n", layout: "carousel")
+            try desktop.post(kVK_ANSI_L); try desktop.expectShown(ids[1])
+            try desktop.post(kVK_ANSI_L); try desktop.expectShown(ids[2])
+            try desktop.post(kVK_ANSI_J, shift: true)
+            try requireFinalState("the last tile is in a second rail") { try harness.row(ids[2])?.rail == 2 }
+            try desktop.post(kVK_ANSI_K); try desktop.expectShown(ids[1])
+            try desktop.post(kVK_ANSI_H); try desktop.expectShown(ids[0])
+            try desktop.post(kVK_ANSI_J); try desktop.expectShown(ids[2])
+            try desktop.configure("[animation]\nduration = 1000\n", layout: "carousel")
+        }
         let pid = try harness.status().pid, before = try harness.stageMotion()
-        // Full-width tiles put w1 wholly off screen. A left-wall bounce
-        // captures only w0; the next right press first requests protected w1
-        // while that stage is shown. The narrower rail includes w1 in its
-        // first rightward move, with repeats while its captures are pending.
-        try desktop.post(firstSeenByRetarget ? kVK_ANSI_H : kVK_ANSI_L)
+        // Full-width w0 and protected w1 share rail one, remembered at w0;
+        // w2 starts on rail two. Up captures w2 and w0, leaving w1 wholly
+        // outside the viewport. Right first captures w1 during that slide;
+        // down then requests w2 again. The narrower, single-rail case includes
+        // w1 in the first capture and reverses while captures are pending.
+        try desktop.post(firstSeenByRetarget ? kVK_ANSI_K : kVK_ANSI_L)
         try requireFinalState("the first move is shown, or has requested its protected capture") {
             let motion = try harness.stageMotion()
             return firstSeenByRetarget ? motion.stageShows > before.stageShows : motion.stageScreenshots[String(ids[1])] != nil
@@ -78,8 +111,14 @@ extension Acceptance.Journeys {
             let motion = try harness.stageMotion()
             return motion.stageMove == first.stageMove && motion.stageScreenshots[String(ids[1])] != nil
         }
-        try desktop.post(kVK_ANSI_L)
-        try expectVideoRail(ids, widths: widths, focus: firstSeenByRetarget ? 2 : 1)
+        try desktop.post(firstSeenByRetarget ? kVK_ANSI_J : kVK_ANSI_L)
+        if firstSeenByRetarget {
+            try desktop.expectShown(ids[2])
+            try requireFinalState("every window of the leaving rail is hidden") {
+                let observation = try desktop.observe(), rows = try harness.rows()
+                return ids.prefix(2).allSatisfy { id in !observation.visibleIDs.contains(id) && rows.first { $0.id == id }?.visible == false }
+            }
+        } else { try expectVideoRail(ids, widths: widths, focus: 1) }
         try requireFinalState("the failed capture clears the move") { try harness.stageMotion().stageClears > first.stageClears }
         try #require(try harness.stageMotion().stageSettles == first.stageSettles, "the retarget ends instantly, before the motion settles")
         try #require(try harness.status().pid == pid, "retargeting a protected window must keep the same process alive")
@@ -94,7 +133,8 @@ extension Acceptance.Journeys {
         // Finish setup without inheriting a capture from the focus move.
         try desktop.configure("[animation]\nduration = 0\n", layout: "carousel")
         try desktop.configure("[animation]\nduration = 1000\n", layout: "carousel")
-        try fixture.command("preventsCapture", ["key": "w1", "enabled": true, "afterResize": protectOnResize])
+        if protectOnResize { try fixture.command("preventsCapture", ["key": "w1", "enabled": true, "afterResize": true]) }
+        else { try videoProtection(ids[1], enabled: true) }
         let pid = try harness.status().pid, before = try harness.stageMotion()
         try desktop.post(kVK_ANSI_R)
         let area = try desktop.observe().area
@@ -115,11 +155,11 @@ extension Acceptance.Journeys {
 
     @Test("#36 E5: removing capture protection lets the next move animate again")
     func protectedVideoBecomesCapturableAgain() throws {
-        let ids = try videoRail(), widths = try videoWidths([0.6, 0.6, 0.6])
+        let fractions = [1.0, 1.0, 1.0]
+        let ids = try videoRail(fractions), widths = try videoWidths(fractions)
         try desktop.post(kVK_ANSI_L)
         try expectVideoRail(ids, widths: widths, focus: 1)
-        try fixture.command("preventsCapture", ["key": "w1", "enabled": false])
-        try requireFinalState("the unprotected frame is ready for display") { try fixture.command("ping").videosReady?["w1"] == true }
+        try videoProtection(ids[1], enabled: false)
         let before = try harness.stageMotion()
         try desktop.post(kVK_ANSI_L)
         try expectVideoRail(ids, widths: widths, focus: 2)
@@ -128,7 +168,8 @@ extension Acceptance.Journeys {
 
     @Test("#36 E6: each move attempts exactly one screenshot of its protected window")
     func protectedVideoIsNeverRetried() throws {
-        let ids = try videoRail(), widths = try videoWidths([0.6, 0.6, 0.6])
+        let fractions = [1.0, 1.0, 1.0]
+        let ids = try videoRail(fractions), widths = try videoWidths(fractions)
         var move = try harness.stageMotion().stageMove
         for destination in [1, 2] {
             try desktop.post(kVK_ANSI_L)

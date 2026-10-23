@@ -1280,6 +1280,10 @@ final class Workspaces {
         staging = stagingNow
         // Every seen window is captured at once, and focus is requested. The
         // focus look changes when the real window replaces its stand-in.
+        stage.onCaptureFailed = { [weak self] in
+            guard let self, self.staging?.generation == generation else { return }
+            self.finishMotionImmediately()
+        }
         let focusChanges = takeFocus && focused != nil && focused != leavingFocus
         if first || !toCapture.isEmpty {
             stage.capture(toCapture, background: first ? Set(starts.keys).union(to.keys) : nil)
@@ -1292,8 +1296,7 @@ final class Workspaces {
                 guard let self, self.staging?.generation == generation else { return }
                 guard ok else {
                     // Without its captures the stage cannot hide the change.
-                    self.clearStage()
-                    self.renderCarouselInstant(focusing: self.focused, activateDesktop: false, takeFocus: self.pendingFocus, keepFocus: true)
+                    self.finishMotionImmediately()
                     return
                 }
                 self.staging?.shown = true
