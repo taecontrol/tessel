@@ -1390,6 +1390,11 @@ final class Workspaces {
     /// position and macOS later pull the window back to show 40 points.
     private static func onScreen(_ frame: CGRect, _ bounds: CGRect) -> Bool { frame.intersection(bounds).width >= 1 }
 
+    /// AX and native rounding can leave an accepted value up to a point from
+    /// the requested one. The presenter uses this one tolerance both to decide
+    /// that a window needs no placement and that it is in place.
+    private static func near(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) <= 1 }
+
     /// Places every window at once. Under the stage it runs once per motion
     /// change and keeps the focus the stage already requested.
     private func renderCarouselInstant(focusing selection: UInt32?, activateDesktop: Bool, takeFocus: Bool,
@@ -1426,8 +1431,7 @@ final class Workspaces {
             guard let frame = frames[id] else { continue }
             // Use the same one-point tolerance as width-limit learning. A
             // fractional accepted size must stay stable on focus-only input.
-            if let accepted = carouselSizes[id], abs(accepted.width - frame.width) <= 1,
-               abs(accepted.height - frame.height) <= 1 { continue }
+            if let accepted = carouselSizes[id], Self.near(accepted.width, frame.width), Self.near(accepted.height, frame.height) { continue }
             if carouselPresentation?.frames[id] == frame, !newlyShown.contains(id),
                frame.minX < bounds.minX || frame.maxX > bounds.maxX { continue }
             carouselSizing.insert(id)
@@ -1436,6 +1440,15 @@ final class Workspaces {
         let redraw = carouselPresentation?.workspace != status.active || carouselPresentation?.rail != rail || carouselPresentation?.frames != frames
         var positions = redraw ? Set(frames.keys).intersection(show) : (carouselPresentation?.pending.intersection(show) ?? [])
         positions.formUnion(newlyShown.intersection(frames.keys))
+        // A departing window waits on the tiles under it. A tile last observed
+        // away from its target, such as one its app moved, gets a position, so
+        // its own placement decides the handoff.
+        let departing = newlyHidden.compactMap { entries[$0]?.observation.frame.intersection(bounds) }
+        positions.formUnion(show.filter { id in
+            guard let target = frames[id], pointerFrames[id] == nil, !closeted.contains(id), let seen = entries[id]?.observation.frame,
+                  departing.contains(where: { target.intersects($0) }) else { return false }
+            return !Self.near(target.minX, seen.minX) || !Self.near(target.minY, seen.minY)
+        })
         carouselPresentation = CarouselPresentation(workspace: status.active, rail: rail, railIndex: carousel.workspaces[status.active]?.current ?? 0, frames: frames, pending: positions)
         if let focused, takeFocus { expectedFocus = focused }
         // Resolve the whole placement before writing. Hidden destinations are
@@ -1495,9 +1508,18 @@ final class Workspaces {
         let targets = Dictionary(uniqueKeysWithValues: show.compactMap { id in
             entries[id].map { (id, frames[id] ?? layerPlacements[id] ?? $0.observation.frame) }
         })
-        var ready = Set(show.filter { id in
-            pointerFrames[id] == nil && !closeted.contains(id) && targets[id] == entries[id]?.observation.frame
-        })
+        // A window is in place when tessel has no write of its own outstanding
+        // for it and its last observation is within the tolerance of its
+        // target. A scheduled window is judged only when its own placement
+        // ends: its cached frame can predate an earlier, unconfirmed write.
+        func inPlace(_ id: UInt32) -> Bool {
+            guard self.pointerFrames[id] == nil, !self.closeted.contains(id), let target = targets[id],
+                  let seen = self.entries[id]?.observation.frame else { return false }
+            return Self.near(target.minX, seen.minX) && Self.near(target.minY, seen.minY)
+                && Self.near(target.width, seen.width) && Self.near(target.height, seen.height)
+        }
+        let scheduled = Set(placements.map(\.id))
+        var ready = Set(show.filter { !scheduled.contains($0) && inPlace($0) })
         func commitVisibility() {
             guard self.transition == token, self.status.enabled, !self.pointerHeld, focusReady else { return }
             // A busy app must not delay an independent destination's focus.
@@ -1593,6 +1615,10 @@ final class Workspaces {
                                                  learnBounds: target.minX >= bounds.minX && target.maxX <= bounds.maxX)
                             if abs(accepted.width - target.width) > 1 || abs(accepted.height - target.height) > 1 { changedBounds = true }
                         }
+                    } else if inPlace(p.id) {
+                        // No write of tessel's is outstanding any more, so the
+                        // last observation decides, as for an unscheduled window.
+                        ready.insert(p.id)
                     }
                     geometryReady = finishedPlacements == placements.count
                     if p.id == self.focused {

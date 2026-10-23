@@ -36,9 +36,7 @@ import Testing
             f.near(f.frame(b).minX, before[b]!.minX, "the replacement eventually returns")
             s.expect("the replacement covers the shared point after the departure hides", f.mac.isVisible(b) && f.frame(b).contains(sharedPoint) && !f.mac.isVisible(c))
         }
-        withKnownIssue("Readiness seeds a scheduled replacement from its exact cached frame while tessel's own write has moved it") {
-            requireCarousel(result)
-        } when: { !fractional }
+        requireCarousel(result)
     }
 
     @Test("#33 E18: a transient focus-only timeout finishes the visibility handoff without replaying geometry")

@@ -496,6 +496,23 @@ the old or final owner; shared tile coverage must never expose desktop. AX write
 temporarily disable an app's enhanced UI flag and restore its value. No stage or
 capture is involved. Busy writes retain their bounded retries.
 
+A replacement is ready when it is in place: tessel has no write of its own
+outstanding for it, and its last observed frame is within one point of its
+target on each of x, y, width and height. The presenter uses the same
+tolerance to decide that a window needs no placement, so a tile it leaves
+alone is never waiting for a placement that will not come. A scheduled window
+is judged only when its own placement ends, because its cached frame can
+predate an earlier write of tessel's that has not been confirmed; such a write
+stays pending until a readback succeeds, so the next render schedules the
+window again. A placement that returns a frame makes its window ready; one
+that ends without a frame leaves the last observation to decide. A window
+still in the closet is never in place, so the old view stays until its
+replacement returns. A tile under a departing window whose last observation
+is more than a point from its target position, such as one its app moved,
+gets a position placement, so its own placement decides the handoff. Layer
+exits, workspace switches, rail handoffs and placement under the stage share
+this rule; focus and closet guards still apply.
+
 Quitting returns managed windows inside the desktop. Crash recovery uses the
 same closet boundary without persisted membership.
 
