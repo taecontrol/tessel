@@ -1,8 +1,165 @@
 import Carbon
+import CoreGraphics
 import Foundation
 import Testing
 
 extension Acceptance.Journeys {
+    private func videoRail(_ widths: [Double] = [0.6, 0.6, 0.6], protected: Bool = true) throws -> [UInt32] {
+        let ids = try desktop.railSetup(widths, duration: 0, video: 1)
+        try fixture.command("preventsCapture", ["key": "w1", "enabled": protected])
+        try requireFinalState("the video frame is ready for display") { try fixture.command("ping").videosReady?["w1"] == true }
+        try desktop.configure("[animation]\nduration = 1000\n", layout: "carousel")
+        let given = try harness.motionGiven()
+        try #require(try harness.status().workspaces?.motion == "on", "the protected-video journeys require motion; \(given)")
+        return ids
+    }
+
+    private func videoWidths(_ fractions: [Double]) throws -> [Double] {
+        let area = try desktop.observe().area
+        return fractions.map { ((area[2] - 20) * $0).rounded(.down) }
+    }
+
+    /// Expected strip geometry is worked out from the fixture's starting
+    /// widths and the smallest scroll that exposes the destination completely.
+    private func expectVideoRail(_ ids: [UInt32], widths: [Double], focus: Int) throws {
+        let screen = try #require(try harness.observer.command("contract", ["operation": "screen"]).contract?.cgDisplay)
+        let bounds = CGRect(x: screen[0], y: screen[1], width: screen[2], height: screen[3])
+        try requireFinalState("every video-rail window at its layout rect with the requested focus") {
+            let observation = try desktop.observe(), rows = try harness.rows(), area = observation.area
+            let starts = widths.indices.map { widths.prefix($0).reduce(0, +) + Double($0) * 10 }
+            let offset = max(0, starts[focus] + widths[focus] - (area[2] - 20))
+            return desktop.focused(ids[focus], in: observation) && ids.indices.allSatisfy { i in
+                let rect = CGRect(x: area[0] + 10 + starts[i] - offset, y: area[1] + 10, width: widths[i], height: area[3] - 20)
+                let visible = rect.intersection(bounds).width >= 1
+                guard rows.contains(where: { $0.id == ids[i] && $0.state == "tiled" && $0.rail == 1 && $0.slot == i + 1 && $0.visible == visible }) else { return false }
+                return observation.windows.contains { window in
+                    window.id == ids[i] && window.visible == visible
+                        && (!visible || desktop.near(window.frame, [rect.minX, rect.minY, rect.width, rect.height]))
+                }
+            }
+        }
+    }
+
+    @Test("#36 E2: protected video keeps tessel alive, motion enabled and every tile placed without showing the stage")
+    func protectedVideoMovesInstantly() throws {
+        let ids = try videoRail(), widths = try videoWidths([0.6, 0.6, 0.6])
+        let pid = try harness.status().pid
+        for destination in [1, 2] {
+            let shows = try harness.stageMotion().stageShows
+            try desktop.post(kVK_ANSI_L)
+            try expectVideoRail(ids, widths: widths, focus: destination)
+            let status = try harness.status()
+            try #require(status.pid == pid, "protected video must not crash or restart tessel")
+            try #require(status.workspaces?.motion == "on", "a failed capture does not disable motion")
+            try #require(try harness.stageMotion().stageShows == shows, "the failed-capture move shows no stand-ins")
+        }
+    }
+
+    @Test("#36 E3: three commands survive protected video first captured at the start or by a retarget", arguments: [false, true])
+    func protectedVideoRetargets(firstSeenByRetarget: Bool) throws {
+        let fractions = Array(repeating: firstSeenByRetarget ? 1.0 : 0.6, count: 3)
+        let ids = try videoRail(fractions), widths = try videoWidths(fractions)
+        let pid = try harness.status().pid, before = try harness.stageMotion()
+        // Full-width tiles put w1 wholly off screen. A left-wall bounce
+        // captures only w0; the next right press first requests protected w1
+        // while that stage is shown. The narrower rail includes w1 in its
+        // first rightward move, with repeats while its captures are pending.
+        try desktop.post(firstSeenByRetarget ? kVK_ANSI_H : kVK_ANSI_L)
+        try requireFinalState("the first move is shown, or has requested its protected capture") {
+            let motion = try harness.stageMotion()
+            return firstSeenByRetarget ? motion.stageShows > before.stageShows : motion.stageScreenshots[String(ids[1])] != nil
+        }
+        let first = try harness.stageMotion()
+        if firstSeenByRetarget {
+            try #require(first.stageScreenshots[String(ids[1])] == nil, "the protected tile must be first seen by the retarget")
+        }
+        try desktop.post(firstSeenByRetarget ? kVK_ANSI_L : kVK_ANSI_H)
+        try requireFinalState("the protected window is requested in that same move") {
+            let motion = try harness.stageMotion()
+            return motion.stageMove == first.stageMove && motion.stageScreenshots[String(ids[1])] != nil
+        }
+        try desktop.post(kVK_ANSI_L)
+        try expectVideoRail(ids, widths: widths, focus: firstSeenByRetarget ? 2 : 1)
+        try requireFinalState("the failed capture clears the move") { try harness.stageMotion().stageClears > first.stageClears }
+        try #require(try harness.stageMotion().stageSettles == first.stageSettles, "the retarget ends instantly, before the motion settles")
+        try #require(try harness.status().pid == pid, "retargeting a protected window must keep the same process alive")
+    }
+
+    @Test("#36 E4: cycling a protected video's width survives both the first capture and an unreadable resize refresh", arguments: [false, true])
+    func protectedVideoWidthCycle(protectOnResize: Bool) throws {
+        let ids = try videoRail(protected: false)
+        var widths = try videoWidths([0.6, 0.6, 0.6])
+        try desktop.post(kVK_ANSI_L)
+        try expectVideoRail(ids, widths: widths, focus: 1)
+        // Finish setup without inheriting a capture from the focus move.
+        try desktop.configure("[animation]\nduration = 0\n", layout: "carousel")
+        try desktop.configure("[animation]\nduration = 1000\n", layout: "carousel")
+        try fixture.command("preventsCapture", ["key": "w1", "enabled": true, "afterResize": protectOnResize])
+        let pid = try harness.status().pid, before = try harness.stageMotion()
+        try desktop.post(kVK_ANSI_R)
+        let area = try desktop.observe().area
+        widths[1] = (area[2] - 10) * (2.0 / 3) - 10
+        try expectVideoRail(ids, widths: widths, focus: 1)
+        if protectOnResize {
+            try requireFinalState("the shown stand-in has requested its resize refresh") {
+                try (harness.stageMotion().stageScreenshots[String(ids[1])] ?? 0) >= 2
+            }
+            try requireFinalState("the protected refresh has completed without a crash") { try harness.stageMotion().stageCapturesPending == 0 }
+            try #require(try harness.stageMotion().stageShows == before.stageShows + 1, "the readable initial capture animates before its protected refresh")
+            try requireFinalState("the resize motion finishes with its previous capture") { try harness.stageMotion().stageClears > before.stageClears }
+            try #require(try harness.stageMotion().stageSettles == before.stageSettles + 1,
+                         "an unreadable refresh keeps the previous capture until the motion settles")
+        }
+        try #require(try harness.status().pid == pid, "an unreadable width capture must not crash tessel")
+    }
+
+    @Test("#36 E5: removing capture protection lets the next move animate again")
+    func protectedVideoBecomesCapturableAgain() throws {
+        let ids = try videoRail(), widths = try videoWidths([0.6, 0.6, 0.6])
+        try desktop.post(kVK_ANSI_L)
+        try expectVideoRail(ids, widths: widths, focus: 1)
+        try fixture.command("preventsCapture", ["key": "w1", "enabled": false])
+        try requireFinalState("the unprotected frame is ready for display") { try fixture.command("ping").videosReady?["w1"] == true }
+        let before = try harness.stageMotion()
+        try desktop.post(kVK_ANSI_L)
+        try expectVideoRail(ids, widths: widths, focus: 2)
+        try #require(try harness.stageMotion().stageShows > before.stageShows, "protection is not remembered between moves")
+    }
+
+    @Test("#36 E6: each move attempts exactly one screenshot of its protected window")
+    func protectedVideoIsNeverRetried() throws {
+        let ids = try videoRail(), widths = try videoWidths([0.6, 0.6, 0.6])
+        var move = try harness.stageMotion().stageMove
+        for destination in [1, 2] {
+            try desktop.post(kVK_ANSI_L)
+            try expectVideoRail(ids, widths: widths, focus: destination)
+            let motion = try harness.stageMotion()
+            try #require(motion.stageMove > move, "each command starts a new capture attempt")
+            try #require(motion.stageScreenshots[String(ids[1])] == 1, "a protected capture is attempted once per move, without a retry")
+            move = motion.stageMove
+        }
+    }
+
+    @Test("#36 E7: a horizontal move in another workspace animates while protected video remains open")
+    func protectedVideoDoesNotDisableOtherWorkspaces() throws {
+        let ids = try videoRail(), widths = try videoWidths([0.6, 0.6])
+        try desktop.configure("[animation]\nduration = 0\n", layout: "carousel")
+        try desktop.post(kVK_ANSI_L)
+        try desktop.expectFocus(ids[1])
+        try desktop.key(2, send: true)
+        try desktop.expectFocus(ids[1])
+        try desktop.key(1)
+        try desktop.activate(key: "w0")
+        try expectVideoRail([ids[0], ids[2]], widths: widths, focus: 0)
+        try #require(try harness.row(ids[1])?.workspace == 2 && harness.status().workspaces?.active == 1)
+        try desktop.configure("[animation]\nduration = 1000\n", layout: "carousel")
+        let before = try harness.stageMotion()
+        try desktop.post(kVK_ANSI_L)
+        try expectVideoRail([ids[0], ids[2]], widths: widths, focus: 1)
+        try requireFinalState("the other workspace animates") { try harness.stageMotion().stageShows > before.stageShows }
+        try #require(try harness.stageMotion().stageScreenshots[String(ids[1])] == nil, "the protected window is outside this move")
+    }
+
     @Test("Reduce Motion journey")
     func reduceMotionMakesCarouselMovesInstant() throws {
         try step("Reduce Motion makes a configured carousel move instant (wiring)") {

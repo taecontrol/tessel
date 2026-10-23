@@ -103,7 +103,17 @@ struct AppStatus: Codable, Sendable {
     #if TESSEL_DEVELOPMENT
     /// Stage work in a fixture-only development build: window captures and
     /// shown motions. Both stay unchanged at rest.
-    struct TestMotion: Codable, Sendable { var stageCaptures: UInt64 = 0; var stageShows: UInt64 = 0 }
+    struct TestMotion: Codable, Sendable {
+        var stageCaptures: UInt64 = 0
+        var stageShows: UInt64 = 0
+        var stageSettles: UInt64 = 0
+        var stageClears: UInt64 = 0
+        var stageMove: UInt64 = 0
+        var stageCapturesPending = 0
+        /// Screenshot requests per window in the current or last staged move,
+        /// including unsuccessful requests and resize refreshes.
+        var stageScreenshots: [String: UInt64] = [:]
+    }
     var testMotion: TestMotion? = nil
     #endif
 }

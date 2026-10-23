@@ -32,6 +32,9 @@ struct NativeContractReply: Codable {
     let preflightStable: Bool?
     let preflightMilliseconds: Double?
     struct Stage: Codable {
+        let hasSurface: Bool?
+        let lockResult: Int32?
+        let readable: Bool?
         let captureSize: [Double]?
         let scale: Double?
         let frameBefore: [Double]?

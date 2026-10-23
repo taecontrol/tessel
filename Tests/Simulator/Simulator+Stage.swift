@@ -62,7 +62,10 @@ extension SimulatedMac {
         stageState.screenRecording = granted
     }
     /// Failure injection: a window ScreenCaptureKit cannot capture.
-    @MainActor package func failCapture(of id: UInt32) { stageState.failing.insert(id) }
+    @MainActor package func failCapture(of id: UInt32) {
+        assume(.stageProtectedCapture)
+        stageState.failing.insert(id)
+    }
     @MainActor package func clearStageHistory() {
         stageState.events.removeAll()
         stageState.captureRequests.removeAll()

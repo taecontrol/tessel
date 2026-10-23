@@ -121,7 +121,7 @@ final class FixtureContracts: NSObject {
         case "stageCapture":
             guard let id = command["id"] as? UInt32 else { throw FixtureContractError("a stage capture needs a window") }
             _ = try retained(["id": id], pid: pid)
-            return try stage.capture(id, pid: pid)
+            return try stage.capture(id, pid: pid, display: command["display"] as? Bool == true)
         case "motionStart": try motionProbe.start(command); return motionProbe.facts()
         case "motionStop": motionProbe.stop(); return motionProbe.facts()
         case "motionSamples": return motionProbe.facts(draining: command["drain"] as? Bool == true)

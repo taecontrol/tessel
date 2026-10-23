@@ -220,6 +220,11 @@ final class Fixture: NSObject, NSApplicationDelegate {
             guard let window = windows[key], let color = command["color"] as? Int, FixtureInstantRecording.colors.indices.contains(color) else { return ["error": "paint needs a fixture window and palette index"] }
             paint(window, color: color)
             window.displayIfNeeded()
+        case "preventsCapture":
+            guard let video = windows[key]?.contentView as? FixtureVideo, let enabled = command["enabled"] as? Bool else {
+                return ["error": "capture protection needs a video fixture and a boolean"]
+            }
+            video.preventCapture(enabled, afterResize: command["afterResize"] as? Bool == true)
         case "windowLevels":
             let ordinary = makeWindow(key: "ordinary", kind: "standard")
             let dialog = makeWindow(key: "dialog", kind: "dialog")
@@ -438,6 +443,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
          "mainWindow": NSApp.mainWindow.map { $0.windowNumber } as Any? ?? NSNull(),
          "minimizeEvents": minimizeRecorders.mapValues(\.events),
          "miniaturized": windows.mapValues(\.isMiniaturized),
+         "videosReady": windows.mapValues { ($0.contentView as? FixtureVideo)?.video.isReadyForDisplay ?? false },
          "axWindowOrder": (NSApp.accessibilityWindows() ?? []).compactMap { ($0 as? NSWindow).map { $0.windowNumber } },
          "frames": windows.mapValues { window in
              let frame = window.frame
@@ -481,6 +487,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
         let label = NSTextField(labelWithString: "Generic fixture window")
         label.frame = NSRect(x: 30, y: 100, width: 350, height: 30)
         window.contentView?.addSubview(label)
+        if kind == "video" { window.contentView = FixtureVideo(frame: window.contentView!.bounds) }
         if kind == "heavyText" {
             let scroll = NSScrollView(frame: window.contentView!.bounds)
             scroll.autoresizingMask = [.width,.height]

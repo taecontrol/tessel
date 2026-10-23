@@ -1,6 +1,8 @@
 import AppKit
 import CoreGraphics
+import IOSurface
 import ScreenCaptureKit
+import VideoToolbox
 
 /// Native facts behind the motion stage: Screen Recording preflight, whole
 /// captures of signed fixture windows, and a click-through overlay. Captures
@@ -18,14 +20,14 @@ final class FixtureStage {
 
     /// Captures a fixture window sized from its live bounds and reports what
     /// came back, with the window's frame and the frontmost app around it.
-    func capture(_ id: UInt32, pid: pid_t) throws -> [String: Any] {
+    func capture(_ id: UInt32, pid: pid_t, display: Bool = false) throws -> [String: Any] {
         guard CGPreflightScreenCaptureAccess() else { throw FixtureContractError("grant Screen Recording to the signed fixture observer") }
         let before = fixtureCGFrames([pid])[id]?.frame ?? []
         let front = FixtureProbe.frontmostPID()
         // ScreenCaptureKit replies off the main thread; wait for it here.
         let box = CaptureBox(), done = DispatchSemaphore(value: 0)
         Task.detached {
-            do { box.result = .success(try await Self.capture(id, pid: pid, size: before)) }
+            do { box.result = .success(try await Self.capture(id, pid: pid, size: before, display: display)) }
             catch { box.result = .failure(error) }
             done.signal()
         }
@@ -39,21 +41,48 @@ final class FixtureStage {
 
     private final class CaptureBox: @unchecked Sendable { var result: Result<[String: Any], Error>? }
 
-    private nonisolated static func capture(_ id: UInt32, pid: pid_t, size before: [Double]) async throws -> [String: Any] {
+    private nonisolated static func capture(_ id: UInt32, pid: pid_t, size before: [Double], display: Bool) async throws -> [String: Any] {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         guard let window = content.windows.first(where: { $0.windowID == id && $0.owningApplication?.processID == pid }),
               before.count == 4 else { throw FixtureContractError("the fixture window is not shareable") }
-        let filter = SCContentFilter(desktopIndependentWindow: window)
+        let filter: SCContentFilter
+        let size: CGSize
+        if display {
+            guard let screen = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) else {
+                throw FixtureContractError("the primary display is not shareable")
+            }
+            filter = SCContentFilter(display: screen, excludingWindows: content.windows.filter { $0.windowID != id })
+            size = CGSize(width: screen.width, height: screen.height)
+        } else {
+            filter = SCContentFilter(desktopIndependentWindow: window)
+            size = CGSize(width: before[2], height: before[3])
+        }
         let configuration = SCStreamConfiguration()
         let scale = Double(filter.pointPixelScale)
-        configuration.width = Int(before[2] * scale); configuration.height = Int(before[3] * scale)
+        configuration.width = Int(size.width * scale); configuration.height = Int(size.height * scale)
         configuration.showsCursor = false
         configuration.ignoreShadowsSingleWindow = true
+        configuration.pixelFormat = kCVPixelFormatType_32BGRA
         let start = CACurrentMediaTime()
-        let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
+        let sample = try await SCScreenshotManager.captureSampleBuffer(contentFilter: filter, configuration: configuration)
         let elapsed = (CACurrentMediaTime() - start) * 1_000
-        return ["captureSize": [Double(image.width), Double(image.height)], "scale": scale, "frameBefore": before,
-                "opaque": opaqueShare(image), "captureMilliseconds": elapsed]
+        var facts: [String: Any] = ["scale": scale, "frameBefore": before, "captureMilliseconds": elapsed, "hasSurface": false]
+        guard let buffer = CMSampleBufferGetImageBuffer(sample),
+              let surface = CVPixelBufferGetIOSurface(buffer)?.takeUnretainedValue() else { return facts }
+        facts["hasSurface"] = true
+        facts["captureSize"] = [IOSurfaceGetWidth(surface), IOSurfaceGetHeight(surface)]
+        let locked = IOSurfaceLock(surface, .readOnly, nil)
+        facts["lockResult"] = locked
+        guard locked == kIOReturnSuccess else { return facts }
+        defer { IOSurfaceUnlock(surface, .readOnly, nil) }
+        let readable = Int(bitPattern: IOSurfaceGetBaseAddress(surface)) != 0
+        facts["readable"] = readable
+        if readable {
+            var image: CGImage?
+            VTCreateCGImageFromCVPixelBuffer(buffer, options: nil, imageOut: &image)
+            if let image { facts["opaque"] = opaqueShare(image) }
+        }
+        return facts
     }
 
     /// Shows a transparent, click-through overlay at floating level with one

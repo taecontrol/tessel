@@ -10,7 +10,7 @@ import VideoToolbox
 /// ScreenCaptureKit: the recording indicator goes out a few seconds after the
 /// last one. Every image is released when the stage clears.
 #if TESSEL_DEVELOPMENT
-enum StageEvent { case capture, show }
+enum StageEvent { case begin, screenshot(UInt32), pending(Int), capture, show, settled, clear }
 #endif
 
 @MainActor
@@ -147,7 +147,13 @@ final class SystemMotionStage: MotionStagePort {
     private var background: Task<Capture?, Never>?
     /// Unlike the session's image tasks, this count survives `clear()`. A
     /// cancelled Swift task does not cancel replayd's native request.
-    private var pendingCaptures = 0
+    private var pendingCaptures = 0 {
+        didSet {
+            #if TESSEL_DEVELOPMENT
+            onEvent?(.pending(pendingCaptures))
+            #endif
+        }
+    }
     var capturesPending: Bool { pendingCaptures > 0 }
     var onCapturesSettled: (@MainActor @Sendable () -> Void)?
     /// Whether a window rests in tessel's closet, the only place a window
@@ -210,6 +216,9 @@ final class SystemMotionStage: MotionStagePort {
         let token = session
         if activity == nil {
             activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical], reason: "carousel motion")
+            #if TESSEL_DEVELOPMENT
+            onEvent?(.begin)
+            #endif
         }
         for id in windows.sorted() where captures[id] == nil {
             captures[id] = Task { [weak self] in
@@ -327,7 +336,13 @@ final class SystemMotionStage: MotionStagePort {
         let token = session
         settle?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            MainActor.assumeIsolated { guard let self, token == self.session else { return }; settled() }
+            MainActor.assumeIsolated {
+                guard let self, token == self.session else { return }
+                #if TESSEL_DEVELOPMENT
+                self.onEvent?(.settled)
+                #endif
+                settled()
+            }
         }
         settle = Cancel(work)
         DispatchQueue.main.asyncAfter(deadline: .now() + duration * p, execute: work)
@@ -418,6 +433,9 @@ final class SystemMotionStage: MotionStagePort {
     }
 
     func clear() {
+        #if TESSEL_DEVELOPMENT
+        onEvent?(.clear)
+        #endif
         session += 1
         if let activity { ProcessInfo.processInfo.endActivity(activity); self.activity = nil }
         settle?.cancel(); settle = nil
@@ -499,6 +517,9 @@ final class SystemMotionStage: MotionStagePort {
         configuration.ignoreShadowsSingleWindow = true
         // Measured as BGRA, with the window's own transparent corners.
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
+        #if TESSEL_DEVELOPMENT
+        onEvent?(.screenshot(id))
+        #endif
         guard let sample = await screenshot(filter, configuration) else {
             // Waiting again could only leave another capture behind.
             retried.insert(id)
