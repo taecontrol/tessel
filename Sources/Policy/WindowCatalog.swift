@@ -740,7 +740,7 @@ private final class AppWindows: @unchecked Sendable {
             }
             guard presentationLock.withLock({ presentation == token }) else { return }
             if focus {
-                guard try canPresent(window,id:id) else { return }
+                guard try canPresent(window,id:id) else { outcome = .withdrawn; return }
                 let active = try value(application, .frontmost)?.bool == true
                 guard presentationLock.withLock({ presentation == token }) else { return }
                 let followed = try requestActivation {
@@ -751,7 +751,10 @@ private final class AppWindows: @unchecked Sendable {
                     try check(ax.perform(.raise, on: window))
                     return true
                 }
-                guard followed else { return }
+                // The activation stops only on a cancellation, which the end
+                // of the request reports as superseded, or on a window it no
+                // longer finds presentable.
+                guard followed else { outcome = .withdrawn; return }
                 awaitedActivation?.expiry.cancel()
                 awaitedActivation = nil
                 if !active {

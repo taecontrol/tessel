@@ -204,25 +204,23 @@ import Testing
     @Test("#19 E7: a focus request that reads its window minimized reports withdrawn",
           arguments: WriteOrder.allCases, ["presentability check", "activation"])
     func focusRequestThatReadsMinimizedIsWithdrawn(_ writes: WriteOrder, _ check: String) {
-        withKnownIssue("A focus request that reads its window minimized reports superseded") {
-            requireLayer(Scenario.run("a window is minimized before a focus request's \(check) reads it / \(writes)", writes: writes) { s in
-                let f = CarouselFixture(s, duration: 0)
-                let b = f.ids[1], answer = PlacementAnswer()
-                f.tessel.catalog.presentRail(pid: f.app.pid, id: b, frame: nil, position: false, resize: false, focus: true,
-                                             screenRight: f.mac.screens.primaryScreen!.frame.maxX) { answer.result = $0 }
-                // The first presentability check reads B as presentable. Either the
-                // second check, before the focus request, or the activation's own
-                // check, after it made B main, then reads it minimized. Nothing
-                // cancels the request.
-                let point = check == "activation" ? "AccessibilityPort.set AXMain=true window \(b) \(f.app.alias)"
-                    : "AccessibilityPort.copy AXFullScreen window \(b) \(f.app.alias)"
-                let held = f.mac.pause(after: .call(point))
-                if case .paused = held {} else { s.expect("the request is held before its \(check) reads B: \(held)", false) }
-                f.app.minimize(b)
-                s.settle()
-                s.expect("the request reports withdrawn: \(String(describing: answer.result?.outcome))", answer.result?.outcome == .withdrawn)
-            })
-        }
+        requireLayer(Scenario.run("a window is minimized before a focus request's \(check) reads it / \(writes)", writes: writes) { s in
+            let f = CarouselFixture(s, duration: 0)
+            let b = f.ids[1], answer = PlacementAnswer()
+            f.tessel.catalog.presentRail(pid: f.app.pid, id: b, frame: nil, position: false, resize: false, focus: true,
+                                         screenRight: f.mac.screens.primaryScreen!.frame.maxX) { answer.result = $0 }
+            // The first presentability check reads B as presentable. Either the
+            // second check, before the focus request, or the activation's own
+            // check, after it made B main, then reads it minimized. Nothing
+            // cancels the request.
+            let point = check == "activation" ? "AccessibilityPort.set AXMain=true window \(b) \(f.app.alias)"
+                : "AccessibilityPort.copy AXFullScreen window \(b) \(f.app.alias)"
+            let held = f.mac.pause(after: .call(point))
+            if case .paused = held {} else { s.expect("the request is held before its \(check) reads B: \(held)", false) }
+            f.app.minimize(b)
+            s.settle()
+            s.expect("the request reports withdrawn: \(String(describing: answer.result?.outcome))", answer.result?.outcome == .withdrawn)
+        })
     }
 
     @Test("#19 E7: an accepted tile frame within one point does not block hiding the layer", arguments: WriteOrder.allCases)
