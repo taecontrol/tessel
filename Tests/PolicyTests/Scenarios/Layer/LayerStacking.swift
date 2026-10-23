@@ -299,6 +299,9 @@ import Testing
             f.tessel.press("toggle layer")
             f.tessel.changeConfig("[animation]\nduration = 400\n[gaps]\nouter = 20\n")
             s.after(milliseconds: 40, "retarget the shown-layer relayout") {
+                s.expect("the stage is preparing before the retarget", !f.mac.stageCaptureRequests.isEmpty && !f.mac.stageEvents.contains { if case .show = $0.kind { true } else { false } })
+                s.expect("B's activation is still pending at the retarget", f.apps[1].activationPending && f.mac.frontmostApp == f.apps[0].pid)
+                s.expect("no background pass precedes the retarget", f.raises(since: start).allSatisfy { ![f.floats[0], f.floats[2]].contains($0) })
                 f.tessel.changeConfig("[animation]\nduration = 400\n[gaps]\nouter = 30\n")
             }
             s.after(milliseconds: 500, "native activation finishes on the selected float") {
@@ -352,6 +355,9 @@ import Testing
             s.expect("A still owns keyboard focus before the interruption", f.mac.focusedWindow == f.tiles[0] && f.mac.frontmostApp == f.apps[0].pid)
             f.tessel.changeConfig("[animation]\nduration = 250\n[gaps]\nouter = 20\n")
             s.after(milliseconds: 40, "interrupt the preparing shown-layer relayout") {
+                s.expect("the stage is preparing before the interruption", !f.mac.stageCaptureRequests.isEmpty && !f.mac.stageEvents.contains { if case .show = $0.kind { true } else { false } })
+                s.expect("B's activation is still pending at the interruption", f.apps[1].activationPending && f.mac.frontmostApp == f.apps[0].pid)
+                s.expect("no background pass precedes the interruption", f.raises(since: start).allSatisfy { ![f.floats[0], f.floats[2]].contains($0) })
                 f.apps[0].drag(f.tiles[0], to: f.mac.frame(f.tiles[0])!.origin)
                 // A later native selection must still finish restacking.
                 f.apps[1].select(f.floats[1])
@@ -372,18 +378,31 @@ import Testing
     func interruptedStageRestacksAfterFloatFocus(_ writes: WriteOrder) {
         requireLayer(Scenario.run("interrupted shown-layer float focus / \(writes)", writes: writes) { s in
             let f = LayerStackingFixture(s, duration: 250)
-            f.press("toggle layer"); f.press("focus right")
+            f.press("toggle layer")
             f.mac.setStageCaptureCost(milliseconds: 24)
             f.mac.clearMotionHistory()
+            let start = f.mac.scheduler.trace.count
+            f.tessel.press("focus right")
+            let held = f.mac.pause(after: .read(f.apps[1]))
+            if case .paused = held {} else { s.expect("the focused destination's publication is held: \(held)", false) }
+            s.expect("native focus changed before its publication", f.mac.focusedWindow == f.floats[1] && f.mac.frontmostApp == f.apps[1].pid)
             f.tessel.changeConfig("[animation]\nduration = 250\n[gaps]\nouter = 20\n")
             s.after(milliseconds: 40, "interrupt the shown-layer relayout after focus") {
                 s.expect("the new app already owns keyboard focus", f.mac.focusedWindow == f.floats[1] && f.mac.frontmostApp == f.apps[1].pid)
+                s.expect("the relayout began preparing captures", !f.mac.stageCaptureRequests.isEmpty)
                 s.expect("the stage has not drawn before the pointer press", !f.mac.stageEvents.contains { if case .show = $0.kind { true } else { false } })
+                s.expect("no background pass precedes the interruption", f.raises(since: start).allSatisfy { ![f.floats[0], f.floats[2]].contains($0) })
                 f.apps[0].drag(f.tiles[0], to: f.mac.frame(f.tiles[0])!.origin)
             }
+            // Advance other lanes and timers without releasing B's focus
+            // publication. Only settle releases it, after the interruption.
+            let interrupted = f.mac.scheduler.run()
+            if case .paused = interrupted {} else { s.expect("the focus publication stays held through interruption: \(interrupted)", false) }
             s.settle()
             s.expect("the cancelled stage never draws", !f.mac.stageEvents.contains { if case .show = $0.kind { true } else { false } })
             f.stacking(focus: f.floats[1], owner: f.apps[1].pid)
+            let raised = f.raises(since: start).filter { [f.floats[0], f.floats[2]].contains($0) }
+            s.expect("the owed pass after interruption raises C, then A: \(raised)", raised == [f.floats[2], f.floats[0]])
             s.expect("every extra float raise keeps the new float's keyboard focus", f.mac.focusEffects.filter {
                 $0.raisedWindow.map { f.floats.contains($0) } ?? false
             }.allSatisfy { $0.window == f.floats[1] })
