@@ -166,6 +166,38 @@ extension Acceptance.Journeys {
         try #require(try harness.stageMotion().stageShows > before.stageShows, "protection is not remembered between moves")
     }
 
+    @Test("an unreadable resize refresh is not captured again by another width change in the same move")
+    func protectedRefreshIsNotRetriedByAnotherResize() throws {
+        let ids = try videoRail(protected: false)
+        var widths = try videoWidths([0.6, 0.6, 0.6])
+        try desktop.post(kVK_ANSI_L)
+        try expectVideoRail(ids, widths: widths, focus: 1)
+        try desktop.configure("[animation]\nduration = 0\n", layout: "carousel")
+        try desktop.configure("[animation]\nduration = 1000\n", layout: "carousel")
+        try fixture.command("preventsCapture", ["key": "w1", "enabled": true, "afterResize": true])
+        let before = try harness.stageMotion()
+        try desktop.post(kVK_ANSI_R)
+        let area = try desktop.observe().area
+        widths[1] = (area[2] - 10) * (2.0 / 3) - 10
+        try expectVideoRail(ids, widths: widths, focus: 1)
+        try requireFinalState("the first unreadable resize refresh has completed") {
+            let motion = try harness.stageMotion()
+            return motion.stageScreenshots[String(ids[1])] == 2 && motion.stageCapturesPending == 0
+        }
+        let refreshed = try harness.stageMotion()
+        try desktop.post(kVK_ANSI_R)
+        widths[1] = area[2] - 20
+        try expectVideoRail(ids, widths: widths, focus: 1)
+        try requireFinalState("the retargeted resize settles and clears its stage") {
+            let motion = try harness.stageMotion()
+            return motion.stageClears > before.stageClears && motion.stageCapturesPending == 0
+        }
+        let finished = try harness.stageMotion()
+        try #require(finished.stageMove == refreshed.stageMove, "the second width change retargets the same move")
+        try #require(finished.stageSettles == before.stageSettles + 1, "both resizes keep the previous capture until settling")
+        try #require(finished.stageScreenshots[String(ids[1])] == 2, "only the initial capture and first resize refresh are requested")
+    }
+
     @Test("#36 E6: each move attempts exactly one screenshot of its protected window")
     func protectedVideoIsNeverRetried() throws {
         let fractions = [1.0, 1.0, 1.0]

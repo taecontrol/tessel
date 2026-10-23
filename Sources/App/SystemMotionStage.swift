@@ -167,6 +167,9 @@ final class SystemMotionStage: MotionStagePort {
     var inCloset: @MainActor (UInt32) -> Bool = { _ in false }
     private var refreshes: [UInt32: Int] = [:]
     private var retried = Set<UInt32>()
+    /// Protection cannot improve during a move, including later resize
+    /// refreshes. Forget it when the stage clears so the next move tries again.
+    private var unreadable = Set<UInt32>()
     /// Windows not drawn when their capture was due: closing, or in a hidden
     /// app. Nothing of them shows, so the stage needs no stand-in for them.
     private var undrawn = Set<UInt32>()
@@ -452,6 +455,7 @@ final class SystemMotionStage: MotionStagePort {
         ready.removeAll()
         refreshes.removeAll()
         retried.removeAll()
+        unreadable.removeAll()
         undrawn.removeAll()
         stacking.removeAll()
         background?.cancel(); background = nil
@@ -507,7 +511,8 @@ final class SystemMotionStage: MotionStagePort {
         guard token == session else { return nil }
         pendingCaptures += 1
         defer { captureSettled() }
-        guard let window = await shareable(id), token == session, let live = windowServer([id])[id] else { return nil }
+        guard let window = await shareable(id), token == session, !unreadable.contains(id),
+              let live = windowServer([id])[id] else { return nil }
         // A window ordering out, as a closing one does, is not drawn: a
         // screenshot of it never completes, and replayd then keeps the
         // capture's recording attribution until it restarts. Every later
@@ -539,7 +544,7 @@ final class SystemMotionStage: MotionStagePort {
             image = converted
         } catch {
             // An unreadable surface cannot improve within this move.
-            if token == session { retried.insert(id) }
+            if token == session { retried.insert(id); unreadable.insert(id) }
             return nil
         }
         guard token == session else { return nil }
