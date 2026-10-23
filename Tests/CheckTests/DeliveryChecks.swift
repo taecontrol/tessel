@@ -42,7 +42,7 @@ import Testing
         #expect(UInt64(value) == 200_000_000)
     }
 
-    @Test("#33 E22: real changes require the full evidence block for exactly this head")
+    @Test("#33 E22; #38 E9: real changes require the full evidence block for exactly this head")
     func exactHeadEvidence() throws {
         let repo = try RepositoryFixture(); defer { repo.remove() }
         let head = try repo.commit(path: "Sources/App/Generic.swift", content: "// changed\n")

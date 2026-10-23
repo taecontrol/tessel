@@ -107,7 +107,7 @@ extension Acceptance {
             try instructions("E11", "Review E11-pinned-rails.mov. The stage must draw pinned floats in their at-rest stacking order: above every tile macOS lets them cover (background apps' tiles), below the frontmost app's windows that remain above them. The panels use a different signed fixture app from both tile apps; the mixed-app rail supplies background tiles they can cover. macOS 27 retains the frontmost app's focused tile above these background panels even after AXRaise. The movie must preserve that order throughout motion and clearing, without a pop. Same-app floats are never raised because AXRaise may select them; their native at-rest order also determines their stand-ins. Record the owner's visual verdict separately; creating this movie does not approve the behavior. Keep the movie local until any personal content is removed.")
         }
 
-        @Test("#19 E30: execute the selected prototype walkthroughs and record observed versus expected fidelity")
+        @Test("#19 E30; #38 E8: execute the selected prototype walkthroughs and record observed versus expected fidelity")
         func captureOwnerPrototypeComparison() throws {
             var fidelity = LayerFidelity(desktop: desktop, directory: directory)
             try fidelity.run()

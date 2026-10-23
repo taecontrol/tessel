@@ -3,7 +3,7 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct LayerNavigation {
-    @Test("#19 E7: toggling shows the most recent float and returns to the remembered rail without moving tiles")
+    @Test("#19 E7; #38 E4: toggling shows the most recent float and returns to the remembered rail without moving tiles")
     func enterAndLeaveRememberFocus() {
         requireLayer(Scenario.run("toggle layer round trip and MRU entry") { s in
             let f = LayerFixture(s), a = f.floats[0], b = f.floats[1]

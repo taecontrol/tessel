@@ -67,7 +67,7 @@ import Testing
 }
 
 @Suite @MainActor struct LayerStacking {
-    @Test("#19 E9: spec gap — a frontmost change that needs no placement still restacks the pinned layer", arguments: WriteOrder.allCases)
+    @Test("#38 E6: spec gap — a frontmost change that needs no placement still restacks the pinned layer", arguments: WriteOrder.allCases)
     func unmanagedFrontmostRestacks(_ writes: WriteOrder) {
         requireLayer(Scenario.run("pinned layer under an unmanaged frontmost app / \(writes)", writes: writes) { s in
             let f = LayerStackingFixture(s)
