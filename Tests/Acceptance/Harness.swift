@@ -41,6 +41,16 @@ struct Status: Decodable {
     let config: Config
     let version: String
     let pid: pid_t
+    struct TestMotion: Decodable {
+        let stageCaptures: UInt64
+        let stageShows: UInt64
+        let stageSettles: UInt64
+        let stageClears: UInt64
+        let stageMove: UInt64
+        let stageCapturesPending: Int
+        let stageScreenshots: [String: UInt64]
+    }
+    let testMotion: TestMotion?
     let workspaces: Workspaces?
     struct Workspaces: Decodable {
         let enabled: Bool
@@ -87,6 +97,7 @@ struct FixtureReply: Decodable {
     let mainWindow: UInt32?
     let minimizeEvents: [String: [MinimizeEvent]]?
     let miniaturized: [String: Bool]?
+    let videosReady: [String: Bool]?
 }
 
 struct Observation: Decodable {
@@ -398,13 +409,13 @@ final class Harness {
     /// Fixture-only status instrumentation: the app's real stage adapter
     /// counts its window captures and shown motions.
     func stageWork() throws -> UInt64 {
-        let reply = try invoke("status", "--json")
-        let object = try JSONSerialization.jsonObject(with: reply.outputData) as? [String: Any]
-        guard let motion = object?["testMotion"] as? [String: Any], let captures = (motion["stageCaptures"] as? NSNumber)?.uint64Value,
-              let shows = (motion["stageShows"] as? NSNumber)?.uint64Value else {
-            throw HarnessError("fixture-only status must expose testMotion stage instrumentation")
-        }
-        return captures + shows
+        let motion = try stageMotion()
+        return motion.stageCaptures + motion.stageShows
+    }
+
+    func stageMotion() throws -> Status.TestMotion {
+        guard let motion = try status().testMotion else { throw HarnessError("fixture-only status must expose testMotion stage instrumentation") }
+        return motion
     }
 
     /// States the motion Given, so a failed motion example explains itself.
@@ -413,6 +424,7 @@ final class Harness {
         return "effective animation duration \(status.workspaces.map { "\($0.animationDuration) ms, motion \($0.motion ?? "unknown")" } ?? "unknown")"
             + " (configured \(status.config.effective.animation.duration) ms); Reduce Motion: tessel \(appReduceMotion ? "on" : "off")"
             + " (set by the harness), desktop \(desktopReduceMotion ? "on" : "off")"
+            + (status.testMotion.map { "; stage move \($0.stageMove), screenshots \($0.stageScreenshots)" } ?? "")
     }
 
     func status() throws -> Status {

@@ -15,6 +15,10 @@ package protocol MotionStagePort: AnyObject {
     /// without those windows. A window already captured for this stage is not
     /// captured again.
     func capture(_ windows: Set<UInt32>, background excluding: Set<UInt32>?)
+    /// A drawn window's capture failed for good, including one added by a
+    /// retarget after `show`. The owner ends the move instantly. Undrawn
+    /// windows need no stand-in and do not report failure. Clear cancels it.
+    var onCaptureFailed: (@MainActor @Sendable () -> Void)? { get set }
     /// Front-to-back order of the stand-ins at rest. Retargeting can change
     /// this order without requesting another capture.
     func order(_ windows: [UInt32])

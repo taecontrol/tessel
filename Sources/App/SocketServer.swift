@@ -89,8 +89,15 @@ final class SnapshotStore: WindowPublishing, @unchecked Sendable {
     func recordStage(_ event: StageEvent) {
         lock.withLock {
             switch event {
+            case .begin:
+                status.testMotion?.stageMove += 1
+                status.testMotion?.stageScreenshots = [:]
+            case .screenshot(let id): status.testMotion?.stageScreenshots[String(id), default: 0] += 1
+            case .pending(let count): status.testMotion?.stageCapturesPending = count
             case .capture: status.testMotion?.stageCaptures += 1
             case .show: status.testMotion?.stageShows += 1
+            case .settled: status.testMotion?.stageSettles += 1
+            case .clear: status.testMotion?.stageClears += 1
             }
         }
     }

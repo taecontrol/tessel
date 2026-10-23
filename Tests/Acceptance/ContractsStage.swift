@@ -2,6 +2,37 @@ import Foundation
 import Testing
 
 extension Acceptance.Contracts {
+    @Test("#36 E1: stage-protected-capture: protected video has a locked surface without a base address; display and unprotected captures are readable", contract(.stageProtectedCapture))
+    func stageProtectedCapture() throws {
+        try #require(try native("screenRecording").screenRecording == true, "grant Screen Recording to the signed fixture observer")
+        let id = try fixture.open(kind: "video")
+        let managed = try window(id)
+        try #require(managed.layer == 0 && managed.subrole == "AXStandardWindow", "the video fixture is an ordinary managed window")
+        try desktop.activate()
+        try fixture.command("preventsCapture", ["enabled": true])
+        try requireFinalState("the protected video frame is ready for display") { try fixture.command("ping").videosReady?["window"] == true }
+        // Only drawn windows are captured: an undrawn screenshot leaks a
+        // recording attribution in replayd (ADR-0007).
+        try requireFinalState("the video window is drawn on the active desktop") { try native().visible.contains(id) }
+        var protected = try #require(try native("stageCapture", ["id": id]).stage)
+        try requireFinalState("WindowServer applies protection to the drawn video") {
+            if protected.readable == false { return true }
+            protected = try #require(try native("stageCapture", ["id": id]).stage)
+            return protected.readable == false
+        }
+        try #require(protected.hasSurface == true, "the protected screenshot still returns an IOSurface")
+        try #require(protected.lockResult == 0, "the protected surface locks successfully")
+        try #require(protected.readable == false, "a successful lock does not make protected pixels readable")
+        let display = try #require(try native("stageCapture", ["id": id, "display": true]).stage)
+        try #require(display.hasSurface == true && display.lockResult == 0 && display.readable == true,
+                     "a display capture including the protected window has a base address")
+        try fixture.command("preventsCapture", ["enabled": false])
+        try requireFinalState("the unprotected video frame is ready for display") { try fixture.command("ping").videosReady?["window"] == true }
+        let plain = try #require(try native("stageCapture", ["id": id]).stage)
+        try #require(plain.hasSurface == true && plain.lockResult == 0 && plain.readable == true,
+                     "removing protection restores a readable window capture")
+    }
+
     @Test("screen-recording-preflight: the Screen Recording grant reads without a prompt and stays stable", contract(.screenRecordingPreflight))
     func screenRecordingPreflight() throws {
         let facts = try native("screenRecording")

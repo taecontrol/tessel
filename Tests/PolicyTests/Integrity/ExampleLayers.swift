@@ -24,7 +24,7 @@ enum ExampleLayers {
         var pendingCaptures: Set<String> = []
     }
     static let heading = "## Acceptance example layers (#24)"
-    private static let idPattern = #"#(?:1|2|19|26|33) (?:E[1-9][0-9]*|U-[a-z0-9]+(?:-[a-z0-9]+)*)(?![A-Za-z0-9_-])"#
+    private static let idPattern = #"#(?:1|2|19|26|33|36) (?:E[1-9][0-9]*|U-[a-z0-9]+(?:-[a-z0-9]+)*)(?![A-Za-z0-9_-])"#
 
     static func parse(_ document: String) -> Map {
         var result = Map()

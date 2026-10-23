@@ -425,8 +425,14 @@ back, 70 ms each way, and moves no real window.
 
 A pointer press or native fullscreen entry clears the stage at once. Duration
 zero and Reduce Motion also clear an animation already in flight and place its
-final layout immediately. Duration zero never queries Screen Recording. A failed capture clears it and places the windows at once, and so
-does a screenshot that has not returned after 1 s. A window that WindowServer
+final layout immediately. Duration zero never queries Screen Recording. A failed
+or unreadable capture clears it and places the windows at once, including a
+window first captured by a retarget after the stage has shown. The stage reports
+a final drawn-window capture failure to policy, which renders the current focus
+instantly. An unreadable window capture is attempted once per move; nothing
+remembers it between moves. An unreadable background prevents the stage from
+showing, and an unreadable resize refresh keeps the previous capture. A screenshot
+that has not returned after 1 s also makes the move instant. A window that WindowServer
 lists off screen outside the closet is ordering out or hidden: the stage never
 captures it and shows no stand-in for it
 ([ADR 0007](adr/0007-capture-only-windows-that-are-drawn.md)). A
@@ -465,8 +471,13 @@ termination loop. Real-system journeys exercise SIGTERM teardown after each
 test and must confirm process exit.
 
 Fixture-only development status adds `testMotion.stageCaptures` and
-`testMotion.stageShows`. The app's real stage adapter increments them, and the
-signed development CLI preserves them. The resource suite samples them only
+`testMotion.stageShows`, plus `stageSettles` and `stageClears` to distinguish
+normal completion from an instant fallback. `stageMove` identifies the current
+or last staged move; `stageScreenshots` counts screenshot requests by window ID
+within that move, including failures and resize refreshes. `stageCapturesPending`
+counts outstanding native capture work, including work from a cleared move.
+The app's real stage adapter updates them, and the signed development CLI
+preserves them. The resource suite samples its work counters only
 outside its measured idle window. Daily builds contain neither the counters
 nor this status field.
 
@@ -508,6 +519,9 @@ motion runs on a stage. The signed contracts in `ContractsMotion.swift` pin:
 - the Screen Recording preflight;
 - whole-window captures on screen, as a sliver and in the closet, without
   moving or activating the window;
+- a protected video's BGRA window capture returning a surface that locks but
+  has no base address, while a display capture including it is readable and
+  removing protection restores a readable window capture;
 - a click-through floating overlay listed above windows and below the menu bar
   that reads back drawn from its own window within the stage's 150 ms wait;
 - AX sizes bounded by the current x and by the current top against the screen
@@ -867,7 +881,7 @@ hidden-layer Given; a live new panel would enter its single-window layer.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2, #19, #26 and #33.
+This table is the maintained example-to-layer map for issues #1, #2, #19, #26, #33 and #36.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -1027,7 +1041,16 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #33 E22 | T |
 | #33 E23 | T |
 | #33 E24 | T |
+| #36 E1 | C |
+| #36 E2 | J |
+| #36 E3 | J |
+| #36 E4 | J |
+| #36 E5 | J |
+| #36 E6 | J |
+| #36 E7 | J |
+| #36 E8 | X |
 <!-- Pending capture: #33 E20 -->
+<!-- Pending capture: #36 E8 -->
 
 E21 has an opt-in executable capture in `CapturesCarousel.swift`; it needs a
 pixel recording of the stage before the owner can review it again. All mapped
