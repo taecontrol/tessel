@@ -2,6 +2,9 @@ import CoreGraphics
 
 /// A burst excuses only its own visible geometry and affected points. Other
 /// windows and uncovered parts of the desktop remain observable throughout it.
+/// The oracle judges tessel's own ordering (#33 E18). A window an app removes
+/// leaves the start view; what its removal exposes is checked against the
+/// same change at rest.
 struct InstantHandoffOracle {
     let area: CGRect
     let ids: Set<UInt32>

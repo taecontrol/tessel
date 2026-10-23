@@ -492,7 +492,9 @@ Instant presentation computes one layout. It prepares returning windows while
 hidden, shows them at their final frames, places visible windows, transfers
 focus only to a visible destination, then hides departing windows once their
 replacements are ready. At every point the top visible managed window must be
-the old or final owner; shared tile coverage must never expose desktop. AX writes
+the old or final owner. tessel's own ordering never exposes the desktop; an
+external change during a handoff exposes what it would expose at rest, and the
+exposure ends with the render its snapshot triggers (#33 E18). AX writes
 temporarily disable an app's enhanced UI flag and restore its value. No stage or
 capture is involved. Busy writes retain their bounded retries.
 
@@ -873,6 +875,19 @@ visible-before-focus assertions are retained. The matrix covers fourteen
 operations in all three schedulers, each with one app, two apps, and delays to
 either app's AX replies (168 scenarios); its gap-change cases require reply
 completion to reorder when the delayed app changes.
+#38 amended E18 a fourth time. Its shared-coverage clause had read as if no
+external change could expose desktop during a handoff, but no observation can
+outrun a change made after it: an app can minimize a window just after tessel
+read it. The clause now reads: tessel's own ordering never exposes the desktop;
+an external change during a handoff exposes what it would expose at rest, and
+the exposure ends with the render its snapshot triggers. The oracle above
+judges tessel's own ordering, and its close case already removes the window
+the app destroys from the start view. The layer's external-change scenarios
+check the other half: an app's minimize, close, hide or resize during a layer
+exit may expose a point only until the render its snapshot triggers, as the
+same change does at rest. A change tessel has already observed is not
+external: a tile it read as moved gets a placement, and a placement that finds
+its window withdrawn never counts the window in place.
 E20 retains its pixel rule for workspace, rail, width, stop and close, without
 an exception for AX geometry bursts.
 Its recorder starts close comparison at the first frame excluding the destroyed

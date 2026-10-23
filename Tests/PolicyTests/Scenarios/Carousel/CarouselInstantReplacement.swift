@@ -122,6 +122,7 @@ import Testing
                 case "close":
                     f.app.close(a, selecting: c)
                     // The app has destroyed this window before policy can react.
+                    // Its area is the app's to expose, not tessel's (#33 E18).
                     before[a] = nil
                 case "send": t.press("send 2")
                 case "layer-show", "layer-hide": t.press("toggle layer")
