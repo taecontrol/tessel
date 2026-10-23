@@ -85,11 +85,12 @@ struct LayerFidelity {
 
     private func prepare() throws -> Scene {
         try desktop.clear()
+        harness.stopApp()
         let screen = try desktop.observe().area
         let area = [screen[0] + 10, screen[1] + 10, screen[2] - 20, screen[3] - 20]
         var ids: [String: UInt32] = [:]
-        // The prototype starts with three mixed-width tiles and two on a
-        // second rail. Set exact preset widths before enabling management.
+        // Create the prototype's mixed-width tiles before tessel starts,
+        // so live arrivals cannot replace their requested presets.
         for (i, preset) in [0.5, 1.0 / 3, 2.0 / 3, 0.5, 0.5].enumerated() {
             let key = "w\(i)"
             ids[key] = try fixture.open(key: key)
@@ -97,16 +98,17 @@ struct LayerFidelity {
         }
         let frames = ["f0": [0.52, 0.08, 0.38, 0.48], "f1": [0.70, 0.20, 0.25, 0.65], "f2": [0.09, 0.50, 0.30, 0.40]]
         var scene = Scene(ids: ids, area: area, floatFrames: frames, initialFrames: [:])
-        // Create floats while management is off. Ordinary carousel would
-        // select each arrival and make the last one MRU before E30 starts.
+        // The floats must be initial windows too: a live arrival takes focus
+        // and establishes MRU before the untouched-layer walkthrough starts.
         for (key, kind) in [("f0", "fixed"), ("f1", "normalPanel"), ("f2", "normalPanel")] {
             ids[key] = try fixture.open(kind: kind, key: key, ["background": true])
             try fixture.command("move", ["key": key, "frame": scene.absolute(frames[key]!)])
         }
-        try requireFinalState("E30's floats reach the catalog in arrival order") { Set(try harness.rows().map(\.id)) == Set(ids.values) }
         let tiles = (0..<5).map { ids["w\($0)"]! }
         try select("w0", id: ids["w0"]!)
-        try desktop.configure(desktop.carousel + "[animation]\nduration = 0\n", layout: "carousel")
+        try desktop.writeConfig("[animation]\nduration = 0\n")
+        try harness.startApp(fixtureReady: false)
+        try requireFinalState("E30's floats reach the catalog in arrival order") { Set(try harness.rows().map(\.id)) == Set(ids.values) }
         try expectRail(1, focus: ids["w0"]!, tiles: tiles, area: area)
         for key in ["w3", "w4"] {
             try select(key, id: ids[key]!)
@@ -115,7 +117,7 @@ struct LayerFidelity {
             try expectRail(2, focus: ids[key]!, tiles: tiles, area: area)
         }
         // Select the remembered tile through tessel, as the passing rail
-        // journey does, then finish the native return before enabling layer.
+        // journey does, then finish the native return before the walkthrough.
         try desktop.post(kVK_ANSI_H)
         try desktop.expectFocus(ids["w3"]!)
         try select("w0", id: ids["w0"]!)
