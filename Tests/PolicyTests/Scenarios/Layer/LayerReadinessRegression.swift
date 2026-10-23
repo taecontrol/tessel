@@ -117,6 +117,120 @@ import Testing
         requireLayer(result)
     }
 
+    @Test("#19 E7: a hide that cancels a layer exit placement during its readback does not count as in place", arguments: WriteOrder.allCases)
+    func hideDuringPlacementReadbackKeepsFloatUntilSuccessor(_ writes: WriteOrder) {
+        let result = Scenario.run("an app hide cancels a tile's placement during its readback / \(writes)", writes: writes) { s in
+            let f = CarouselFixture(s, presets: [0.5, 0.5, 0.5, 0.5, 0.5], duration: 0, appCount: 2)
+            let a = f.ids[0], b = f.ids[1], c = f.ids[2], next = f.ids[4], app = f.apps[1]
+            let target = CGRect(x: 869, y: 43, width: 849, height: 1064), point = CGPoint(x: 1000, y: 100)
+            let float = f.app.open(WindowSpec(frame: CGRect(x: 1000, y: 100, width: 200, height: 200), subrole: "AXDialog"))
+            s.settle()
+            f.select(a)
+            f.press("toggle layer")
+            s.expect("the shown float overlaps tile B at its target", f.frame(b) == target && f.tessel.status.layer?.state == "shown" && f.mac.isVisible(float))
+            // B's snapshot read is held so that its position request stays
+            // pending into the exit, as in the withdrawal regression above.
+            app.resizeFromApplication(b, to: target.size)
+            let held = f.mac.pause(after: .call("AccessibilityPort.copy AXSize window \(b) \(app.alias)"))
+            if case .paused = held {} else { s.expect("B's snapshot read is held: \(held)", false) }
+            f.app.close(c, selecting: float)
+            let closed = f.mac.scheduler.run()
+            if case .paused = closed {} else { s.expect("B's lane stays held through the relayout: \(closed)", false) }
+            s.step("toggle layer") { f.tessel.press("toggle layer") }
+            let exit = f.mac.scheduler.run()
+            if case .paused = exit {} else { s.expect("B's lane stays held through the exit: \(exit)", false) }
+            s.expect("the float covers B's target while B's placement waits", f.mac.isVisible(float) && f.frame(float).contains(point))
+            // B's placement wrote its target and is reading it back when the
+            // hide arrives. Tessel processes the hide, which cancels the
+            // placement, before the readback answers.
+            f.mac.scheduler.resume()
+            let readback = f.mac.pause(after: .call("AccessibilityPort.copy AXSize window \(b) \(app.alias)"))
+            if case .paused = readback {} else { s.expect("B's placement readback is held: \(readback)", false) }
+            f.mac.beginPresentationTrace()
+            app.hide()
+            let hidden = f.mac.scheduler.run()
+            if case .paused = hidden {} else { s.expect("the hide is delivered while the readback is held: \(hidden)", false) }
+            s.settle()
+            let exposed = f.mac.presentationStates.filter { state in !state.frames.values.contains { $0.contains(point) } }
+            s.expect("no presentation state exposes desktop at the float: \(exposed.map(\.operation))", exposed.isEmpty)
+            s.expect("leaving the layer returns focus to the remembered tile", f.tessel.status.layer?.state == "hidden" && f.mac.focusedWindow == a)
+            s.expect("the hide renders the next layout, whose tile covers the point", f.mac.isVisible(next) && f.frame(next).contains(point))
+            s.expect("the float leaves the desktop once the next tile covers it", f.mac.isInCloset(float) && !f.mac.isVisible(float))
+        }
+        withKnownIssue("A placement its app's hide cancelled during the readback counts the frame it read, so the float hides before the next tile shows") {
+            requireLayer(result)
+        }
+    }
+
+    @Test("#19 E7: a placement cancelled during its readback reports superseded, without a frame", arguments: WriteOrder.allCases)
+    func placementCancelledDuringReadbackIsSuperseded(_ writes: WriteOrder) {
+        withKnownIssue("A placement cancelled during its readback reports the frame it read as presented") {
+            requireLayer(Scenario.run("an app hide cancels a placement during its readback / \(writes)", writes: writes) { s in
+                let f = CarouselFixture(s, duration: 0, appCount: 2)
+                let b = f.ids[1], app = f.apps[1], answer = PlacementAnswer()
+                f.tessel.catalog.presentRail(pid: app.pid, id: b, frame: f.frame(b), position: true, resize: false, focus: false,
+                                             screenRight: f.mac.screens.primaryScreen!.frame.maxX) { answer.result = $0 }
+                let held = f.mac.pause(after: .call("AccessibilityPort.copy AXSize window \(b) \(app.alias)"))
+                if case .paused = held {} else { s.expect("the placement readback is held: \(held)", false) }
+                app.hide()
+                let hidden = f.mac.scheduler.run()
+                if case .paused = hidden {} else { s.expect("the hide is delivered while the readback is held: \(hidden)", false) }
+                s.settle()
+                s.expect("the cancelled placement reports superseded: \(String(describing: answer.result?.outcome))", answer.result?.outcome == .superseded)
+                s.expect("the cancelled placement carries no frame: \(String(describing: answer.result?.frame))", answer.result != nil && answer.result?.frame == nil)
+            })
+        }
+    }
+
+    @Test("#19 E7: a placement cancelled during its last unanswered attempt reports superseded, not unanswered", arguments: WriteOrder.allCases)
+    func placementCancelledDuringLastAttemptIsSuperseded(_ writes: WriteOrder) {
+        withKnownIssue("A placement cancelled during its last attempt reports unanswered") {
+            requireLayer(Scenario.run("an app hide cancels a hung app's last placement attempt / \(writes)", writes: writes) { s in
+                let f = CarouselFixture(s, duration: 0, appCount: 2)
+                let b = f.ids[1], app = f.apps[1], answer = PlacementAnswer()
+                app.hang()
+                f.tessel.catalog.presentRail(pid: app.pid, id: b, frame: f.frame(b), position: true, resize: false, focus: false,
+                                             screenRight: f.mac.screens.primaryScreen!.frame.maxX) { answer.result = $0 }
+                // The initial attempt and four retries each time out on their
+                // first presentability read. The hide arrives during the last.
+                for attempt in 0..<5 {
+                    if attempt > 0 { f.mac.scheduler.resume() }
+                    let held = f.mac.pause(after: .call("AccessibilityPort.copy AXHidden \(app.alias) pid=\(app.pid)"))
+                    if case .paused = held {} else { s.expect("attempt \(attempt) is held: \(held)", false) }
+                }
+                app.hide()
+                let hidden = f.mac.scheduler.run()
+                if case .paused = hidden {} else { s.expect("the hide is delivered during the last attempt: \(hidden)", false) }
+                s.settle()
+                s.expect("the cancelled attempt reports superseded: \(String(describing: answer.result?.outcome))", answer.result?.outcome == .superseded)
+            })
+        }
+    }
+
+    @Test("#19 E7: a focus request that reads its window minimized reports withdrawn",
+          arguments: WriteOrder.allCases, ["presentability check", "activation"])
+    func focusRequestThatReadsMinimizedIsWithdrawn(_ writes: WriteOrder, _ check: String) {
+        withKnownIssue("A focus request that reads its window minimized reports superseded") {
+            requireLayer(Scenario.run("a window is minimized before a focus request's \(check) reads it / \(writes)", writes: writes) { s in
+                let f = CarouselFixture(s, duration: 0)
+                let b = f.ids[1], answer = PlacementAnswer()
+                f.tessel.catalog.presentRail(pid: f.app.pid, id: b, frame: nil, position: false, resize: false, focus: true,
+                                             screenRight: f.mac.screens.primaryScreen!.frame.maxX) { answer.result = $0 }
+                // The first presentability check reads B as presentable. Either the
+                // second check, before the focus request, or the activation's own
+                // check, after it made B main, then reads it minimized. Nothing
+                // cancels the request.
+                let point = check == "activation" ? "AccessibilityPort.set AXMain=true window \(b) \(f.app.alias)"
+                    : "AccessibilityPort.copy AXFullScreen window \(b) \(f.app.alias)"
+                let held = f.mac.pause(after: .call(point))
+                if case .paused = held {} else { s.expect("the request is held before its \(check) reads B: \(held)", false) }
+                f.app.minimize(b)
+                s.settle()
+                s.expect("the request reports withdrawn: \(String(describing: answer.result?.outcome))", answer.result?.outcome == .withdrawn)
+            })
+        }
+    }
+
     @Test("#19 E7: an accepted tile frame within one point does not block hiding the layer", arguments: WriteOrder.allCases)
     func acceptedSubpointTileFrameDoesNotBlockLayerExit(_ writes: WriteOrder) {
         requireLayer(Scenario.run("layer exit over an already accepted subpoint tile frame / \(writes)", writes: writes) { s in
@@ -142,3 +256,5 @@ import Testing
         })
     }
 }
+
+@MainActor private final class PlacementAnswer { var result: RailPresentationResult? }
