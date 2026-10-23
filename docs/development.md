@@ -895,7 +895,7 @@ render's own work never waits for time to pass, so the exposure must end, with
 the successor covering the point, before any timer scheduled from that job on
 comes due. The handoff arm may expose the point no longer than the at-rest
 arm; a change that exposes the point by itself is measured from the change. A
-repair delayed by a timer, or left to a later render, fails them. A change
+repair delayed by a timer, or a dropped render, fails them. A change
 tessel has already observed is not external: a tile it read as moved gets a
 placement, and a placement that finds its window withdrawn never counts the
 window in place. A placement cancelled at any point, its readback or last
