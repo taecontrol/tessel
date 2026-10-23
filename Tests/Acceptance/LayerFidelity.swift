@@ -19,8 +19,8 @@ struct LayerFidelity {
     is one point; final states use the harness's shared 5 s margin.
     All layer/navigation/transfer actions use real keys. The prototype's external
     Cmd-Tab/click actions use signed fixture focus selection. No owner is needed.
-    Wrap in all four directions, pinning a transferred tile, returning to its
-    remembered neighbor, and a non-half nearest-width case extend the scripts.
+    Wrap in all four directions and a non-half nearest-width case extend the
+    surviving walkthroughs.
 
     | Walkthrough / action | Focus expected → observed | Layer expected → observed | Visible floats expected → observed | Frames expected → observed | Result |
     | --- | --- | --- | --- | --- | --- |
@@ -85,11 +85,12 @@ struct LayerFidelity {
 
     private func prepare() throws -> Scene {
         try desktop.clear()
+        harness.stopApp()
         let screen = try desktop.observe().area
         let area = [screen[0] + 10, screen[1] + 10, screen[2] - 20, screen[3] - 20]
         var ids: [String: UInt32] = [:]
-        // The prototype starts with three mixed-width tiles and two on a
-        // second rail. Set exact preset widths before enabling management.
+        // Create the prototype's mixed-width tiles before tessel starts,
+        // so live arrivals cannot replace their requested presets.
         for (i, preset) in [0.5, 1.0 / 3, 2.0 / 3, 0.5, 0.5].enumerated() {
             let key = "w\(i)"
             ids[key] = try fixture.open(key: key)
@@ -97,16 +98,17 @@ struct LayerFidelity {
         }
         let frames = ["f0": [0.52, 0.08, 0.38, 0.48], "f1": [0.70, 0.20, 0.25, 0.65], "f2": [0.09, 0.50, 0.30, 0.40]]
         var scene = Scene(ids: ids, area: area, floatFrames: frames, initialFrames: [:])
-        // Create floats while management is off. Ordinary carousel would
-        // select each arrival and make the last one MRU before E30 starts.
+        // The floats must be initial windows too: a live arrival takes focus
+        // and establishes MRU before the untouched-layer walkthrough starts.
         for (key, kind) in [("f0", "fixed"), ("f1", "normalPanel"), ("f2", "normalPanel")] {
             ids[key] = try fixture.open(kind: kind, key: key, ["background": true])
             try fixture.command("move", ["key": key, "frame": scene.absolute(frames[key]!)])
         }
-        try requireFinalState("E30's floats reach the catalog in arrival order") { Set(try harness.rows().map(\.id)) == Set(ids.values) }
         let tiles = (0..<5).map { ids["w\($0)"]! }
         try select("w0", id: ids["w0"]!)
-        try desktop.configure(desktop.carousel + "[animation]\nduration = 0\n", layout: "carousel")
+        try desktop.writeConfig("[animation]\nduration = 0\n")
+        try harness.startApp(fixtureReady: false)
+        try requireFinalState("E30's floats reach the catalog in arrival order") { Set(try harness.rows().map(\.id)) == Set(ids.values) }
         try expectRail(1, focus: ids["w0"]!, tiles: tiles, area: area)
         for key in ["w3", "w4"] {
             try select(key, id: ids[key]!)
@@ -115,7 +117,7 @@ struct LayerFidelity {
             try expectRail(2, focus: ids[key]!, tiles: tiles, area: area)
         }
         // Select the remembered tile through tessel, as the passing rail
-        // journey does, then finish the native return before enabling layer.
+        // journey does, then finish the native return before the walkthrough.
         try desktop.post(kVK_ANSI_H)
         try desktop.expectFocus(ids["w3"]!)
         try select("w0", id: ids["w0"]!)
@@ -185,7 +187,6 @@ struct LayerFidelity {
         do {
             try visitLayer()
             try dialogs()
-            try pinLayer()
             try transfer()
             try externalFocusAndFixedSize()
             report += "\nAll scripted walkthroughs and selected-variant extensions passed.\n"
@@ -232,19 +233,6 @@ struct LayerFidelity {
         try check("Dialog then explore / alt-z", scene, focus: "w0", state: "hidden", inLayer: false, visible: [], floating: floats, frames: frames)
     }
 
-    private mutating func pinLayer() throws {
-        let scene = try prepare()
-        try desktop.post(kVK_ANSI_Z, shift: true)
-        try check("Pin / alt-shift-z", scene, focus: "w0", state: "pinned", inLayer: false, visible: scene.floats)
-        for (code, label, target, entered) in [(kVK_ANSI_L, "alt-l", "w1", false), (kVK_ANSI_L, "alt-l", "w2", false),
-                                               (kVK_ANSI_Z, "alt-z enters", "f0", true), (kVK_ANSI_Z, "alt-z returns", "w2", false)] {
-            try desktop.post(code)
-            try check("Pin / \(label)", scene, focus: target, state: "pinned", inLayer: entered, visible: scene.floats)
-        }
-        try desktop.post(kVK_ANSI_Z, shift: true)
-        try check("Pin / alt-shift-z hides", scene, focus: "w2", state: "hidden", inLayer: false, visible: [])
-    }
-
     private mutating func transfer() throws {
         let scene = try prepare(), center = [0.25, 1.0 / 6, 0.5, 2.0 / 3]
         let floats = scene.floats.union(["w2"]), centered = scene.floatFrames.merging(["w2": center]) { _, value in value }
@@ -254,14 +242,6 @@ struct LayerFidelity {
         try check("Transfer / second alt-l", scene, focus: "w2", state: "hidden", inLayer: false, visible: [])
         try desktop.post(kVK_ANSI_F)
         try check("Transfer / alt-f centers at half × two-thirds", scene, focus: "w2", state: "shown", inLayer: true, visible: floats, floating: floats, frames: centered)
-        try desktop.post(kVK_ANSI_Z, shift: true)
-        try check("Transfer / alt-shift-z pins, does not move", scene, focus: "w2", state: "pinned", inLayer: true, visible: floats, floating: floats, frames: centered)
-        try desktop.post(kVK_ANSI_Z)
-        try check("Transfer / alt-z returns to left neighbor", scene, focus: "w1", state: "pinned", inLayer: false, visible: floats, floating: floats, frames: centered)
-        try desktop.post(kVK_ANSI_Z)
-        try check("Transfer / alt-z recalls moved float", scene, focus: "w2", state: "pinned", inLayer: true, visible: floats, floating: floats, frames: centered)
-        try desktop.post(kVK_ANSI_Z, shift: true)
-        try check("Transfer / unpin stays entered", scene, focus: "w2", state: "shown", inLayer: true, visible: floats, floating: floats, frames: centered)
         try desktop.post(kVK_ANSI_F)
         try check("Transfer / alt-f returns at nearest half", scene, focus: "w2", state: "hidden", inLayer: false, visible: [],
                   frames: scene.floatFrames.merging(["w2": scene.returning(0.5)]) { _, value in value }, returned: "w2")

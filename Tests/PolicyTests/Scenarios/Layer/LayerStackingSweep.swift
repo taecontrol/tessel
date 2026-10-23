@@ -16,18 +16,20 @@ private struct SplitMix {
 
 extension LayerStackingFixture {
     /// The resting rule, from CG order, the native frontmost app and published
-    /// membership only: while the active layer is pinned or shown, every
+    /// membership only: while the active layer is shown, every
     /// visible float of a background app is above every background tile.
     /// Returns whether the rule had a background float and tile to compare.
-    @discardableResult func restingOrder(_ label: String) -> Bool {
-        guard let state = tessel.status.layer?.state, state == "pinned" || state == "shown",
+    @discardableResult func restingOrder(_ label: String, excludingPendingActivations pending: Set<Int32> = []) -> Bool {
+        guard let state = tessel.status.layer?.state, state == "shown",
               let front = mac.frontmostApp else { return false }
         var owners: [UInt32: Int32] = [:]
         for (index, id) in tiles.enumerated() { owners[id] = apps[index < 2 ? 0 : 1].pid }
         for (index, id) in floats.enumerated() { owners[id] = apps[index].pid }
         let order = mac.windowOrder.onScreenOrder()
         let rows = tessel.windows.filter { $0.workspace == tessel.status.active && order.contains($0.id) && owners[$0.id] != front }
-        let backgroundFloats = rows.filter { $0.state == .floats && $0.rail == nil }.map(\.id)
+        let backgroundFloats = rows.filter {
+            $0.state == .floats && $0.rail == nil && !pending.contains(owners[$0.id] ?? 0)
+        }.map(\.id)
         let backgroundTiles = rows.filter { $0.state == .tiled }.map(\.id)
         for float in backgroundFloats {
             for tile in backgroundTiles {
@@ -86,23 +88,26 @@ extension LayerStackingFixture {
 @Suite @MainActor struct LayerStackingSweep {
     /// Weighted toward the rail and layer of workspace 1, where the rule has
     /// windows to compare; every listed command still occurs.
-    static let commands = ["toggle layer", "toggle layer", "pin layer", "pin layer", "focus right", "focus right",
+    static let commands = ["toggle layer", "toggle layer", "focus right", "focus right",
                            "focus right", "focus left", "focus left", "focus left", "cycle width", "toggle float",
                            "workspace 2", "workspace 1", "workspace 1", "send 2"]
-    static let retargets = ["cycle width", "focus right", "focus left", "pin layer"]
+    static let retargets = ["cycle width", "focus right", "focus left"]
 
-    @Test("#19 E9: spec gap — command sequences under deferred activation and stage retargets rest in the background-float order",
+    @Test("#38 E6: spec gap — command sequences under deferred activation and stage retargets rest in the background-float order",
           arguments: WriteOrder.allCases)
     func restingOrderSweep(_ writes: WriteOrder) {
         var compared = 0, passive = 0
         for seed in UInt64(1)...40 {
             requireLayer(Scenario.run("resting order sweep \(seed) / \(writes)", writes: writes) { s in
                 var random = SplitMix(state: seed)
-                // Instant placements, a warm stage, or a cold one: six windows,
-                // the backdrop and one frame take 232 virtual ms before show.
+                // Instant placements, a warm stage, or cold serial captures.
                 let stage = random.next(3)
                 let f = LayerStackingFixture(s, duration: stage == 0 ? 0 : 250)
                 if stage == 2 { f.mac.setStageCaptureCost(milliseconds: 24) }
+                let entryStart = f.mac.scheduler.trace.count, entryEffects = f.mac.focusEffects.count
+                f.press("toggle layer")
+                if f.restingOrder("seed \(seed) shown entry") { compared += 1 }
+                passive += f.passiveRaisesKeepFocus(since: entryStart, effects: entryEffects, excluding: [], "seed \(seed) shown entry")
                 var completions: [Int32: DeferredActivationCompletion] = [:], retriggered = Set<Int32>()
                 for step in 0..<10 {
                     // deferred-ax-activation: completion on a main/raise write,
@@ -128,11 +133,16 @@ extension LayerStackingFixture {
                         s.step("\(step): select stuck app \(app.pid)'s key window \(key)") { app.select(key) }
                         s.settle()
                     }
-                    if f.restingOrder("seed \(seed) step \(step) after \(command)") { compared += 1 }
+                    // An unresolved native request deliberately prevents a
+                    // passive raise. Exclude only that app's floats; all tiles
+                    // and every other float retain the same order oracle.
+                    let pending = Set(f.apps.filter { $0.activationPending }.map(\.pid))
+                    if f.restingOrder("seed \(seed) step \(step) after \(command)", excludingPendingActivations: pending) { compared += 1 }
                     passive += f.passiveRaisesKeepFocus(since: start, effects: effects, excluding: retriggered, "seed \(seed) step \(step) after \(command)")
                 }
             })
         }
+        print("Layer resting sweep \(writes): compared=\(compared) passive=\(passive)")
         #expect(compared >= 100, "the sweep compares background floats with background tiles at rest")
         #expect(passive >= 100, "the sweep checks keyboard focus after passive float raises: \(passive)")
     }
@@ -147,28 +157,30 @@ extension LayerStackingFixture {
             requireLayer(Scenario.run("passive raise sweep \(seed) / \(writes)", writes: writes) { s in
                 var random = SplitMix(state: seed)
                 let f = LayerStackingFixture(s)
-                f.press("pin layer")
+                let entryStart = f.mac.scheduler.trace.count, entryEffects = f.mac.focusEffects.count
+                f.press("toggle layer")
+                passive += f.passiveRaisesKeepFocus(since: entryStart, effects: entryEffects, excluding: [], "seed \(seed) shown entry")
                 // One completion trigger per app, so a later deferral never
                 // changes the trigger of a request already pending. A passive
                 // raise can only complete one waiting for a focus write.
                 let triggers: [DeferredActivationCompletion] = [.focusWrite, .focusWrite, .nativeEvent, .nextRequest]
                 let completions = f.apps.map { _ in triggers[random.next(triggers.count)] }
-                // The rail is A's two tiles, then B's. At rest tessel's
-                // selection is the natively focused tile.
+                // Each app owns one shown float. At rest tessel's
+                // selection is the natively focused float.
                 var gap = 0
-                func owner(_ index: Int) -> SimulatedApp { f.apps[index < 2 ? 0 : 1] }
+                func owner(_ index: Int) -> SimulatedApp { f.apps[index] }
                 func direction(from index: Int) -> Int { index == 0 ? 1 : index == 2 ? -1 : random.next(2) == 0 ? -1 : 1 }
                 func command(_ direction: Int) -> String { direction > 0 ? "focus right" : "focus left" }
                 for step in 0..<10 {
                     let start = f.mac.scheduler.trace.count, effects = f.mac.focusEffects.count
-                    let selected = f.mac.focusedWindow.flatMap { f.tiles.firstIndex(of: $0) }
+                    let selected = f.mac.focusedWindow.flatMap { f.floats.firstIndex(of: $0) }
                     switch random.next(4) {
                     case 0:
                         guard let selected else { continue }
                         f.press(command(direction(from: selected)))
                     case 1:
                         guard let selected else { continue }
-                        let move = direction(from: selected), target = selected + move, app = target < 2 ? 0 : 1
+                        let move = direction(from: selected), target = selected + move, app = target
                         // Only across apps: no contract shows whether an app
                         // that is already frontmost can keep a request pending.
                         guard f.apps[app].pid != f.mac.frontmostApp else { continue }
@@ -179,7 +191,7 @@ extension LayerStackingFixture {
                         s.settle()
                     case 2:
                         let index = random.next(3)
-                        s.step("\(step): the user selects tile \(f.tiles[index])") { owner(index).select(f.tiles[index]) }
+                        s.step("\(step): the user selects float \(f.floats[index])") { owner(index).select(f.floats[index]) }
                         s.settle()
                     default:
                         gap = 20 - gap
@@ -192,6 +204,7 @@ extension LayerStackingFixture {
                 }
             })
         }
+        print("Layer passive sweep \(writes): passive=\(passive)")
         #expect(passive >= 50, "the sweep checks keyboard focus after passive float raises: \(passive)")
     }
 }

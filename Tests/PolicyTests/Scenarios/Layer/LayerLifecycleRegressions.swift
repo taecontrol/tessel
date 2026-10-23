@@ -3,14 +3,14 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct LayerLifecycleRegressions {
-    @Test("unpinning after a native selection never closets keyboard focus before its catalog notification", arguments: WriteOrder.allCases)
-    func unpinBeforeFocusPublication(_ order: WriteOrder) {
-        requireLayer(Scenario.run("unpin with unpublished float focus \(order.rawValue)", writes: order) { s in
+    @Test("leaving a shown layer after a native selection never closets keyboard focus before its catalog notification", arguments: WriteOrder.allCases)
+    func layerExitBeforeFocusPublication(_ order: WriteOrder) {
+        requireLayer(Scenario.run("layer exit with unpublished float focus \(order.rawValue)", writes: order) { s in
             let f = LayerFixture(s)
-            f.enter(.pinnedRails)
+            f.enter(.shown)
             f.mac.clearMotionHistory()
-            f.app.select(f.floats[0])
-            f.tessel.press("pin layer")
+            f.app.select(f.floats[1])
+            f.tessel.press("toggle layer")
             s.settle()
             s.expect("every hide transfers keyboard focus first", f.mac.visibilityChanges.allSatisfy { change in
                 change.showing || (change.focusedWindow.map { !change.windows.contains($0) } ?? true)
@@ -43,13 +43,13 @@ import Testing
     func failedFocusHandoffKeepsFloatVisible(_ order: WriteOrder) {
         requireLayer(Scenario.run("failed focus handoff with unpublished float focus \(order.rawValue)", writes: order) { s in
             let f = LayerFixture(s)
-            f.enter(.pinnedRails)
+            f.enter(.shown)
             f.mac.clearMotionHistory()
-            f.app.select(f.floats[0])
+            f.app.select(f.floats[1])
             f.app.hang()
-            f.tessel.press("pin layer")
+            f.tessel.press("toggle layer")
             s.settle()
-            f.focus(f.floats[0])
+            f.focus(f.floats[1])
             s.expect("a failed focus request never hides the native selection", f.mac.visibilityChanges.allSatisfy { change in
                 change.showing || (change.focusedWindow.map { !change.windows.contains($0) } ?? true)
             })

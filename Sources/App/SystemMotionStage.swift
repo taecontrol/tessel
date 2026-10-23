@@ -87,7 +87,6 @@ final class SystemMotionStage: MotionStagePort {
     /// The longest the stage waits for WindowServer to draw the overlay.
     private static let drawLimit = 0.15
     private var standIns: [UInt32: StandIn] = [:]
-    private var stacking: [UInt32: CGFloat] = [:]
     private enum CaptureError: Error { case unreadable }
     /// One window's capture, measured once.
     private final class Capture: @unchecked Sendable {
@@ -212,13 +211,6 @@ final class SystemMotionStage: MotionStagePort {
         guard let main = NSScreen.screens.first else { return .zero }
         let menu = main.frame.maxY - main.visibleFrame.maxY
         return CGRect(x: main.frame.minX, y: menu, width: main.frame.width, height: main.frame.height - menu)
-    }
-
-    func order(_ windows: [UInt32]) {
-        stacking = Dictionary(uniqueKeysWithValues: windows.enumerated().map { ($0.element, CGFloat(windows.count - $0.offset)) })
-        CATransaction.begin(); CATransaction.setDisableActions(true)
-        for (id, standIn) in standIns { standIn.container.zPosition = stacking[id] ?? 1 }
-        CATransaction.commit()
     }
 
     func capture(_ windows: Set<UInt32>, background excluding: Set<UInt32>?) {
@@ -372,7 +364,7 @@ final class SystemMotionStage: MotionStagePort {
         check()
     }
 
-    func reveal(_ frames: [UInt32: CGRect], hidden: Set<UInt32>, willReveal: @escaping @MainActor @Sendable () -> Void,
+    func reveal(_ frames: [UInt32: CGRect], hidden: Set<UInt32>,
                 revealed: @escaping @MainActor @Sendable () -> Void) {
         revealing += 1
         let token = revealing, session = self.session
@@ -391,7 +383,6 @@ final class SystemMotionStage: MotionStagePort {
             // The stage fades into the real windows, now in place under it:
             // the curve's last points, the shadows and the focus look change
             // over a few frames instead of in one.
-            willReveal()
             CATransaction.begin(); CATransaction.setDisableActions(true)
             CATransaction.setCompletionBlock {
                 MainActor.assumeIsolated { if token == self.revealing, session == self.session { revealed() } }
@@ -457,7 +448,6 @@ final class SystemMotionStage: MotionStagePort {
         retried.removeAll()
         unreadable.removeAll()
         undrawn.removeAll()
-        stacking.removeAll()
         background?.cancel(); background = nil
         lastMove = nil
         revealing += 1
@@ -567,8 +557,6 @@ final class SystemMotionStage: MotionStagePort {
         }
         guard token == session, let content, let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) else { return nil }
         let floating = Int(CGWindowLevelForKey(.floatingWindow))
-        // The policy excludes normal-level pinned floats as well as tiles;
-        // their stand-ins share the at-rest stacking order above this backdrop.
         let excluded = content.windows.filter {
             excluding.contains($0.windowID) || $0.owningApplication?.processID == getpid() || $0.windowLayer >= floating
         }
@@ -667,7 +655,6 @@ final class SystemMotionStage: MotionStagePort {
 
     private func place(_ id: UInt32, image: Capture, at rect: CGRect) {
         let standIn = standIns[id] ?? StandIn()
-        standIn.container.zPosition = stacking[id] ?? 1
         standIn.rect = rect
         standIn.path = nil
         standIn.container.frame = rect

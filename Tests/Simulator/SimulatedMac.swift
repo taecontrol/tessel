@@ -80,6 +80,7 @@ package struct SimulatedApp: Sendable {
         if !held { mac.pointerUp() }
     }
     @MainActor package func resizeFromApplication(_ window: UInt32, to size: CGSize) { mac.resize(window, size: size) }
+    @MainActor package func moveFromApplication(_ window: UInt32, to point: CGPoint) { mac.move(window, to: point) }
     @MainActor package func groupTabs(_ windows: [UInt32], selected: UInt32) { mac.groupTabs(windows, selected: selected) }
     @MainActor package func selectTab(_ window: UInt32) { mac.selectTab(window) }
     @MainActor package func detachTab(_ window: UInt32) { mac.detachTab(window) }
@@ -131,7 +132,6 @@ package final class SimulatedMac: @unchecked Sendable {
         var deferredActivations = 0
         var activationPending = false
         var activationCompletion = DeferredActivationCompletion.focusWrite
-        var activationOrderDelay = 0
         var keyRestorationDelay = 0
         var enhancedUserInterface = false
         var pendingEnhancedSizes: [UInt32: CGSize] = [:]
@@ -321,6 +321,12 @@ package final class SimulatedMac: @unchecked Sendable {
         assume(.axSizeConstraints)
         action("resize window \(id) to \(size.width),\(size.height)")
         applySize(id, size)
+    }
+    /// The app moves its own window, as AppKit's setFrame does.
+    @MainActor func move(_ id: UInt32, to point: CGPoint) {
+        assume(.axNotifications)
+        action("window \(id) moves itself to \(point.x),\(point.y)")
+        applyPosition(id, point)
     }
     @MainActor func publishWindowLists(_ pid: Int32, _ replies: [WindowListReply]) {
         assume(.transientWindowLists)

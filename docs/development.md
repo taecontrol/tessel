@@ -492,9 +492,44 @@ Instant presentation computes one layout. It prepares returning windows while
 hidden, shows them at their final frames, places visible windows, transfers
 focus only to a visible destination, then hides departing windows once their
 replacements are ready. At every point the top visible managed window must be
-the old or final owner; shared tile coverage must never expose desktop. AX writes
+the old or final owner. tessel's own ordering never exposes the desktop; an
+external change during a handoff exposes what it would expose at rest, and the
+exposure ends with the render its snapshot triggers (#33 E18). AX writes
 temporarily disable an app's enhanced UI flag and restore its value. No stage or
 capture is involved. Busy writes retain their bounded retries.
+
+A replacement is ready when it is in place: tessel has no write of its own
+outstanding for it, and its last observed frame is within one point of its
+target on each of x, y, width and height. The presenter uses the same
+tolerance to decide that a window needs no placement, so a tile it leaves
+alone is never waiting for a placement that will not come. A scheduled window
+is judged only when its own placement ends, because its cached frame can
+predate an earlier write of tessel's that has not been confirmed; such a write
+stays pending until a readback succeeds, so the next render schedules the
+window again. A placement that returns a frame makes its window ready. One
+that ends without a frame says why:
+
+- It found the window withdrawn: minimized, hidden, fullscreen, behind another
+  native tab, or gone. The window is not in place, whatever its cached frame.
+  The withdrawal's own event starts the snapshot that renders the next layout,
+  and departing windows over the window stay visible until that layout covers
+  them.
+- Its app did not answer through every retry, about 1.5 s of backoff plus five
+  rounds of 50 ms timeouts. The last observation decides. This is the one
+  place where coverage rests on geometry that may be stale: if that app moved
+  the window before it stopped answering, a departing window over the target
+  hides and exposes desktop there until a later render places the window.
+- A newer render, or its app's hide or quit, superseded it. The request is
+  checked again as it ends, so a cancellation that arrives during any AX call,
+  the readback or the last unanswered attempt included, still supersedes it.
+  It carries no frame and decides nothing; whatever superseded it decides.
+
+A window still in the closet is never in place, so the old view stays until its
+replacement returns. A tile under a departing window whose last observation
+is more than a point from its target position, such as one its app moved,
+gets a position placement, so its own placement decides the handoff. Layer
+exits, workspace switches, rail handoffs and placement under the stage share
+this rule; focus and closet guards still apply.
 
 Quitting returns managed windows inside the desktop. Crash recovery uses the
 same closet boundary without persisted membership.
@@ -602,7 +637,7 @@ it with the accepted prototype; generating the recording does not accept it.
 
 Each workspace has a floating layer. Existing floats start hidden in the closet while the rail keeps
 focus. If startup focus is already on a float, tessel enters the whole layer.
-The layer's visibility and pinning belong to its workspace; switching away
+The layer's visibility belongs to its workspace; switching away
 hides all its windows and returning restores its selection.
 
 Option+Z (`toggle layer`) shows the workspace's floats and selects the most
@@ -612,11 +647,7 @@ their geometry and scroll position. Inside the layer, Option+H/K cycles backward
 and Option+L/J forward in arrival order, wrapping at either end. Option+R and
 Option+Shift+H/J/K/L do nothing there.
 
-Option+Shift+Z (`pin layer`) keeps the floats visible while rail
-navigation continues. Option+Z still enters and leaves the layer. Unpinning on
-the rails hides it; unpinning inside leaves it shown.
-
-A pinned or shown layer raises its visible background-app floats with AXRaise
+A shown layer raises its visible background-app floats with AXRaise
 alone, serially from least to most recently used. Untouched floats favor the
 first arrival. The raise changes neither AXMain nor activation. The pass is a
 function of observed state rather than of the render that preceded it: one is
@@ -653,32 +684,34 @@ tiles, but the frontmost app's focused window can remain above another app's
 float. [`ax-raise-across-applications`](../Tests/Acceptance/ContractsMotion.swift)
 pins this limit; `ax-frontmost-activation` in the same file pins activation
 bringing the app's windows forward. CG on-screen membership (`visible`) includes
-covered windows; it cannot prove stacking. The supplementary E7/E9 spec-gap
+covered windows; it cannot prove stacking. The supplementary #19 E7 and #38 E6
 scenarios check the simulator's front-to-back `cg-on-screen-order` list and
 keyboard focus instead. A seeded sweep replays command sequences under
 deferred activation and stage retargets and checks that rule after each settle.
 It and a second sweep, of superseded activations, native selections and
 geometry-only relayouts, also check that no passive float raise moves
 keyboard focus into the float's app.
+The randomized order sweep excludes only floats whose app still has a native
+activation request pending in the simulator; the safety guard deliberately
+declines those raises. All other callers retain the full order rule. The
+activation-resolution scenarios separately require the deferred pass to run
+once that request resolves. Both sweeps print their comparison counts and
+retain their existing coverage thresholds.
 
-During rail motion the stage captures each visible pinned float once, excludes
-it from the background, and draws stand-ins in their at-rest stacking order:
-above every tile macOS lets them cover (background apps' tiles), below the
-frontmost app's windows they will sit under. Retargets update stand-in order
-without extra captures. Visible stand-ins retain CG's observed order, including
-native panels and failed raises. A destination tile still in the closet gets a
-provisional slot until it is placed. The stage waits for the serial raise pass
-and reads CG order again when WindowServer confirms placement, immediately
-before the existing reveal fade. ADR-0006's capture and placement method is unchanged.
-No layer animation, polling or recurring timer is added.
+Rail motion with a shown layer retains the ordinary tile and background
+captures, and waits for the serial background raise pass before revealing the
+placed windows. The stage carries no float stand-ins or ordering API.
+ADR-0006's capture and placement method is unchanged. No layer animation,
+polling or recurring timer is added.
 
-E11 remains an opt-in pixel recording. Its panels belong to a different signed
-fixture app from both apps in its mixed-app rail, so the movie shows them above
-background tiles and below the frontmost focused tile, without a pop as the
-stage clears. Same-app floats keep their native order because tessel skips their
-raise. E30 runs all seven prototype walkthroughs for U1 B, U2 B, U3 B and U4 A,
-plus four-direction wrap, remembered-tile return while pinned, and a 0.62-area
-width that must return at two-thirds rather than half. It posts real keys and
+Pinning was rejected in #38 because the owner did not use its best-effort
+result. Its command, shortcut and state are removed; Option+Shift+Z is unbound.
+Existing configs that name the removed command receive the usual line-numbered
+unknown-command error.
+
+E30 runs the surviving prototype walkthroughs for U1 B, U2 B, U3 B and U4 A,
+plus four-direction wrap and a 0.62-area width that must return at two-thirds
+rather than half. It posts real keys and
 uses signed fixture selection for the prototype's external focus actions. It
 writes frames as fractions of the usable area, focus, layer state and visibility
 to `.work/captures/layer/E30-fidelity.md`, retaining the last observation and
@@ -690,12 +723,11 @@ TESSEL_CAPTURE_LAYER=1 scripts/verify captureOwnerPrototypeComparison
 
 A new float takes focus and, when the layer was hidden, appears alone. Another
 new float replaces that single view. Closing it or pressing Option+Z returns to
-the rails; directional navigation expands to the whole layer, and pinning shows
-it all while retaining float focus. In an entered layer, closing focus selects
-the surviving most recently used float; the final close returns to the rails.
+the rails; directional navigation expands to the whole layer. In an entered
+layer, closing focus selects the surviving most recently used float; the final close returns to the rails.
 Sheets stay with their parent and do not enter the layer independently. External
 focus on a hidden float enters the whole layer; external tile focus leaves it,
-hiding floats unless pinned. Focus moves away before a float enters the closet.
+hiding its floats. Focus moves away before a float enters the closet.
 A hidden modal can leave its app waiting until the dialog is shown again.
 
 Option+F (`toggle float`) moves a tile to the layer, centered at half the area's
@@ -712,11 +744,11 @@ A fixed-size float bounces and stays floating. Manual choices last for that
 window's lifetime, including catalog refreshes, and reset on restart. Sending a
 float with Option+Shift+N follows it into the destination workspace's layer.
 
-The three commands are always registered and rebindable through `[keys]`.
+The two commands are always registered and rebindable through `[keys]`.
 Toggling an empty layer does nothing. Removing a config restores defaults;
 quitting returns all floats. `status --json` reports
 `workspaces.layer: {"state":"hidden","focused":false}`. State is `hidden`,
-`single`, `shown`, or `pinned`; `focused` says whether focus is in the layer.
+`single`, or `shown`; `focused` says whether focus is in the layer.
 Hidden floats retain `state: "floats"`, workspace membership, null `rail` and
 `slot`, and `visible: false` in `windows --json`. Manual classifications report
 `floats` / `moved to the layer` or `tiled` / `moved to a rail`.
@@ -732,6 +764,11 @@ appearance or removal changes neither focus history nor layouts. Native
 fullscreen remains detected through `AXFullScreen`, including a transient
 `AXUnknown` fullscreen root. The catalog reads CG levels only for the IDs it
 inspects, alongside their other facts.
+
+The pin-only #19 E9/E10 scenarios and E11 capture are retired by #38. Surviving
+raise-pass and deferred-activation scenarios now use the shown layer and are
+tagged #38 E6. The hidden-float capture case is #38 E4. E30 no longer contains
+pinning or remembered-tile return while pinned; its 0.62-area width check stays.
 
 ## Journeys and latency (#24)
 
@@ -840,6 +877,31 @@ visible-before-focus assertions are retained. The matrix covers fourteen
 operations in all three schedulers, each with one app, two apps, and delays to
 either app's AX replies (168 scenarios); its gap-change cases require reply
 completion to reorder when the delayed app changes.
+#38 amended E18 a fourth time. Its shared-coverage clause had read as if no
+external change could expose desktop during a handoff, but no observation can
+outrun a change made after it: an app can minimize a window just after tessel
+read it. The clause now reads: tessel's own ordering never exposes the desktop;
+an external change during a handoff exposes what it would expose at rest, and
+the exposure ends with the render its snapshot triggers. The oracle above
+judges tessel's own ordering, and its close case already removes the window
+the app destroys from the start view. The layer's external-change scenarios
+check the other half: an app's minimize, close, hide or resize during a layer
+exit may expose a point only until the render its snapshot triggers, as the
+same change does at rest. Each change runs during the exit and at rest. The
+render is identified without looking at coverage: each arm runs until tessel
+receives the change's snapshot, the app's first snapshot read that starts after
+the change, and the main-lane job that delivers it runs the render. That
+render's own work never waits for time to pass, so the exposure must end, with
+the successor covering the point, before any timer scheduled from that job on
+comes due. The job and the timers come from the scheduler's trace, and an
+arm in which either is missing or malformed fails instead of checking less.
+The handoff arm may expose the point no longer than the at-rest
+arm; a change that exposes the point by itself is measured from the change. A
+repair delayed by a timer, or a dropped render, fails them. A change
+tessel has already observed is not external: a tile it read as moved gets a
+placement, and a placement that finds its window withdrawn never counts the
+window in place. A placement cancelled at any point, its readback or last
+attempt included, is superseded and carries no frame.
 E20 retains its pixel rule for workspace, rail, width, stop and close, without
 an exception for AX geometry bursts.
 Its recorder starts close comparison at the first frame excluding the destroyed
@@ -881,7 +943,7 @@ hidden-layer Given; a live new panel would enter its single-window layer.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2, #19, #26, #33 and #36.
+This table is the maintained example-to-layer map for issues #1, #2, #19, #26, #33, #36 and #38.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -968,9 +1030,6 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #19 E6 | P |
 | #19 E7 | P |
 | #19 E8 | P |
-| #19 E9 | P |
-| #19 E10 | P |
-| #19 E11 | X |
 | #19 E12 | P |
 | #19 E13 | P |
 | #19 E14 | P |
@@ -1049,6 +1108,15 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #36 E6 | J |
 | #36 E7 | J |
 | #36 E8 | X |
+| #38 E1 | P |
+| #38 E2 | P |
+| #38 E3 | P |
+| #38 E4 | P |
+| #38 E5 | P |
+| #38 E6 | P |
+| #38 E7 | T |
+| #38 E8 | X |
+| #38 E9 | T |
 <!-- Pending capture: #33 E20 -->
 <!-- Pending capture: #36 E8 -->
 

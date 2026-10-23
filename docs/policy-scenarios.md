@@ -86,7 +86,7 @@ example's assigned layer in `docs/development.md`.
 
 The simulator exposes app/user actions: opening, closing, selecting, native
 tabs, sheets via `WindowSpec.parent`, hide/unhide, minimize/restore,
-fullscreen, drag/resize (including held pointer down/up), app hang/resume or temporary busy state, launch and
+fullscreen, drag/resize (including held pointer down/up), app-initiated moves and resizes, app hang/resume or temporary busy state, launch and
 termination. Window-list choice sequences represent native omissions, zero
 IDs, failed/non-array reads and retained closed handles. They do not publish
 catalog rows or decide workspace membership. The production catalog must

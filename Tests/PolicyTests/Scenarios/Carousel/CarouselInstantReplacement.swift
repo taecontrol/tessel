@@ -5,6 +5,40 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct CarouselInstantReplacement {
+    @Test("#33 E18: a departing window stays visible while its replacement's unpublished placement is elsewhere", arguments: WriteOrder.allCases, [true, false])
+    func departingWindowStaysVisibleUntilReplacementPlacementIsPublished(_ writes: WriteOrder, _ fractional: Bool) {
+        let width = fractional ? "fractional" : "exact"
+        let result = Scenario.run("reverse before a replacement placement publishes / \(width)", writes: writes) { s in
+            let f = CarouselFixture(s, duration: 0, minimumFractions: fractional ? [1: 849.5 / 1708] : [:], appCount: 2)
+            let a = f.ids[0], b = f.ids[1], c = f.ids[2]
+            if fractional { f.apps[1].resize(b, to: CGSize(width: 849.5, height: f.area.height)); s.settle() }
+            f.select(a)
+            let before = f.snapshot(), sharedPoint = CGPoint(x: 1000, y: 100)
+            // An exact cached frame is just as stale as a fractional one.
+            s.expect("the replacement's accepted size is \(width)", f.frame(b).width == f.width(0.5) + (fractional ? 0.5 : 0))
+            s.expect("the replacement initially covers the shared point", f.mac.isVisible(b) && f.frame(b).contains(sharedPoint))
+            f.press("focus right")
+            f.tessel.press("focus right")
+            // The real window has moved, but its new position has not reached
+            // Policy. Reverse while that app's AX lane remains held.
+            let held = f.mac.pause(after: .call("AccessibilityPort.copy AXPosition window \(b) \(f.apps[1].alias)"))
+            if case .paused = held {} else { s.expect("the replacement's position read is held: \(held)", false) }
+            s.expect("the unpublished placement moved the replacement to the left edge", f.frame(b).minX == f.area.minX && before[b]!.minX != f.area.minX)
+            f.tessel.press("focus left")
+            f.tessel.press("focus left")
+            let pending = f.mac.scheduler.run()
+            if case .paused = pending {} else { s.expect("the replacement's lane remains held: \(pending)", false) }
+            s.expect("the replacement is still away from the shared point", f.frame(b).minX == f.area.minX && !f.frame(b).contains(sharedPoint))
+            s.expect("the departing window stays visible while its replacement is elsewhere", f.mac.isVisible(c))
+            s.expect("shared tile coverage never exposes desktop", f.ids.contains { f.mac.isVisible($0) && f.frame($0).contains(sharedPoint) })
+            s.settle()
+            f.focus(a)
+            f.near(f.frame(b).minX, before[b]!.minX, "the replacement eventually returns")
+            s.expect("the replacement covers the shared point after the departure hides", f.mac.isVisible(b) && f.frame(b).contains(sharedPoint) && !f.mac.isVisible(c))
+        }
+        requireCarousel(result)
+    }
+
     @Test("#33 E18: a transient focus-only timeout finishes the visibility handoff without replaying geometry")
     func focusTimeoutRetriesTheVisibilityHandoff() {
         requireCarousel(Scenario.run("focus timeout after hidden geometry lands") { s in
@@ -88,6 +122,7 @@ import Testing
                 case "close":
                     f.app.close(a, selecting: c)
                     // The app has destroyed this window before policy can react.
+                    // Its area is the app's to expose, not tessel's (#33 E18).
                     before[a] = nil
                 case "send": t.press("send 2")
                 case "layer-show", "layer-hide": t.press("toggle layer")

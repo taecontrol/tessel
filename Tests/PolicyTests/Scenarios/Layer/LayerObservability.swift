@@ -36,9 +36,7 @@ import Testing
             f.press("toggle layer"); status("hidden", false)
             row(single, state: "floats", reason: "AXDialog", visible: false)
             f.press("toggle layer"); status("shown", true)
-            f.press("pin layer"); status("pinned", true)
-            f.press("toggle layer"); status("pinned", false)
-            f.press("pin layer"); status("hidden", false)
+            f.press("toggle layer"); status("hidden", false)
             f.press("toggle float"); status("shown", true)
             row(f.tiles[0], state: "floats", reason: "moved to the layer", visible: true)
             f.press("toggle float"); status("hidden", false)
@@ -72,10 +70,10 @@ import Testing
                 ignored.append(f.app.open(WindowSpec(subrole: "AXUnknown", popupParent: f.tiles[0]), background: true))
                 ignored.append(f.app.open(WindowSpec(subrole: "AXSystemDialog", cgLayer: 21), background: true))
             }
-            safe("enter \(mode.rawValue)", entering: mode == .shown || mode == .pinnedLayer) { f.enter(mode) }
+            safe("enter \(mode.rawValue)", entering: mode == .shown) { f.enter(mode) }
             // Toggling enters from rails and exits from every focused layer row.
-            safe("toggle from \(mode.rawValue)", entering: mode == .hidden || mode == .pinnedRails) { f.tessel.press("toggle layer") }
-            safe("toggle back", entering: mode != .hidden && mode != .pinnedRails) { f.tessel.press("toggle layer") }
+            safe("toggle from \(mode.rawValue)", entering: mode == .hidden) { f.tessel.press("toggle layer") }
+            safe("toggle back", entering: mode != .hidden) { f.tessel.press("toggle layer") }
             safe("external tile selection", entering: false) { f.app.select(f.tiles[0]) }
             safe("external hidden float selection", entering: true) { f.app.select(f.floats[0]) }
             safe("hide a focused modal layer", entering: false) { f.tessel.press("toggle layer") }

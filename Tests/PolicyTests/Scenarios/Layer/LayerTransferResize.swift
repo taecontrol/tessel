@@ -106,9 +106,9 @@ import Testing
         })
     }
 
-    @Test("#19 E21: a newer pin decision cancels a captured width read before its publication", arguments: WriteOrder.allCases)
-    func pinSupersedesCapturedFrame(_ writes: WriteOrder) {
-        requireLayer(Scenario.run("pin after transfer width capture / \(writes)", writes: writes) { s in
+    @Test("#19 E21: a newer layer-exit decision cancels a captured width read before its publication", arguments: WriteOrder.allCases)
+    func layerExitSupersedesCapturedFrame(_ writes: WriteOrder) {
+        requireLayer(Scenario.run("layer exit after transfer width capture / \(writes)", writes: writes) { s in
             let f = LayerFixture(s), target = f.tiles[1]
             f.select(target); f.press("toggle float")
             f.tessel.press("toggle float")
@@ -116,9 +116,9 @@ import Testing
             guard case .paused = outcome else {
                 s.expect("the transfer's frame is captured before publication: \(outcome)", false); return
             }
-            f.tessel.press("pin layer"); s.settle()
+            f.tessel.press("toggle layer"); s.settle()
             f.classification(target, "floats", "moved to the layer")
-            f.state("pinned", focused: true); f.focus(target)
+            f.state("hidden", focused: false); f.focus(f.tiles[0])
             s.expect("the older transfer does not insert a tile", f.row(target)?.rail == nil)
         })
     }

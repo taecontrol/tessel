@@ -572,9 +572,6 @@ final class Workspaces {
                 layer.entry = .all
                 render(focusing: next, relayout: false, instant: true)
             }
-        case .pinLayer:
-            layer.togglePin()
-            render(focusing: focused, relayout: false, takeFocus: false, instant: true)
         case .toggleFloat:
             toggleFloat()
         case .workspace(let number):
@@ -914,7 +911,7 @@ final class Workspaces {
         }.map(\.element)
     }
 
-    private var layerNeedsRaises: Bool { layer.pinned || layer.entry == .all }
+    private var layerNeedsRaises: Bool { layer.entry == .all }
 
     /// One idempotent pass, computed from the current frontmost app and the
     /// current visible floats. It is owed after each placement and whenever
@@ -968,7 +965,6 @@ final class Workspaces {
             // The frontmost app can change while the pass runs.
             restackLayer()
             guard !layerRestackPending else { return }
-            orderStage()
             finishStage()
             return
         }
@@ -979,22 +975,6 @@ final class Workspaces {
             if result == .awaitingActivation, self.layerRestack == .running(token) { self.restackAwaitingActivation.insert(entry.pid) }
             self.raiseLayerFloats(ids.dropFirst(), token: token, front: front)
         }
-    }
-
-    /// Visible windows keep their observed relative order, including native
-    /// panels and failed raises. Only an unseen destination tile needs a
-    /// provisional slot until placement: before the currently visible tiles,
-    /// preserving floats already above those tiles. Reveal reads CG again.
-    private func orderStage() {
-        guard layer.pinned, let staging, let stage else { return }
-        let ids = Set(staging.rects.keys)
-        var order = windowOrder.onScreenOrder()
-        if let focused, ids.contains(focused), !order.contains(focused), carousel.location(focused) != nil {
-            let index = order.firstIndex { carousel.location($0) != nil } ?? order.endIndex
-            order.insert(focused, at: index)
-        }
-        order.append(contentsOf: ids.subtracting(order).sorted())
-        stage.order(order.filter { ids.contains($0) })
     }
 
     private func reconcileLayer(in workspace: Int) {
@@ -1188,14 +1168,6 @@ final class Workspaces {
         return configuration.animation.duration
     }
 
-    private var pinnedFrames: [UInt32: CGRect] {
-        guard layer.pinned else { return [:] }
-        return Dictionary(uniqueKeysWithValues: floatingOrder(in: status.active).compactMap { id in
-            guard !closeted.contains(id), let entry = entries[id] else { return nil }
-            return (id, entry.observation.frame)
-        })
-    }
-
     /// Animated carousel changes run on the stage: captures of the windows that
     /// are seen move in tessel's overlay while the ordinary presenter places the
     /// real windows underneath, once each. The stage clears when the motion has
@@ -1220,11 +1192,9 @@ final class Workspaces {
             if staging == nil { bounceStage(bounce, frames: previous.frames, bounds: bounds, duration: duration) }
             return
         }
-        let tiles = carousel.frames(status.active, area: area)
-        let pinned = pinnedFrames
-        let target = tiles.merging(pinned) { _, float in float }
+        let target = carousel.frames(status.active, area: area)
         let rail = carousel.current(status.active)?.identity, index = carousel.workspaces[status.active]?.current ?? 0
-        if staging == nil, previous.frames == tiles, previous.rail == rail, previous.pending.isEmpty {
+        if staging == nil, previous.frames == target, previous.rail == rail, previous.pending.isEmpty {
             renderCarouselInstant(focusing: selection, activateDesktop: activateDesktop, takeFocus: takeFocus)
             return
         }
@@ -1241,7 +1211,7 @@ final class Workspaces {
             // A stand-in starts exactly where its window is, which can differ
             // from the layout after the user moved it. Parked and closeted
             // windows start at their unclamped strip position.
-            var rects = previous.frames.merging(pinned) { _, float in float }
+            var rects = previous.frames
             for (id, rect) in previous.frames where !closeted.contains(id) {
                 if let observed = entries[id]?.observation.frame, observed != rect, observed.intersection(bounds).width > 1 { rects[id] = observed }
             }
@@ -1262,7 +1232,7 @@ final class Workspaces {
         // A window new to the rail starts where it opened.
         for (id, rect) in target where stagingNow.rects[id] == nil {
             let opened = entries[id].map(\.observation.frame).flatMap { Self.onScreen($0, bounds) ? $0 : nil }
-            entering[id] = pinned[id] ?? (vertical ? rect.offsetBy(dx: 0, dy: shift) : previous.frames[id] ?? opened ?? rect)
+            entering[id] = vertical ? rect.offsetBy(dx: 0, dy: shift) : previous.frames[id] ?? opened ?? rect
         }
         let starts = stagingNow.rects.merging(entering) { current, _ in current }
         stagingNow.starts.merge(entering) { current, _ in current }
@@ -1288,7 +1258,6 @@ final class Workspaces {
         if first || !toCapture.isEmpty {
             stage.capture(toCapture, background: first ? Set(starts.keys).union(to.keys) : nil)
         }
-        orderStage()
         expectedFocus = takeFocus ? focused : nil
         let shown = starts.filter { seen.contains($0.key) }
         if first {
@@ -1355,10 +1324,7 @@ final class Workspaces {
         let generation = staging.generation, revision = staging.revision
         let placed = staging.placed.filter { !closeted.contains($0.key) }
         let hidden = Set(staging.rects.keys).intersection(closeted)
-        stage.reveal(placed, hidden: hidden, willReveal: { [weak self] in
-            guard let self, self.staging?.generation == generation, self.staging?.revision == revision else { return }
-            self.orderStage()
-        }) { [weak self] in
+        stage.reveal(placed, hidden: hidden) { [weak self] in
             guard let self, self.staging?.generation == generation, self.staging?.revision == revision else { return }
             self.clearStage()
             self.publish()
@@ -1375,19 +1341,16 @@ final class Workspaces {
     /// and back; the real windows do not move.
     private func bounceStage(_ wall: CGPoint, frames: [UInt32: CGRect], bounds: CGRect, duration: Int) {
         guard let stage else { return }
-        let pinned = pinnedFrames
-        let all = frames.merging(pinned) { original, _ in original }
-        let seen = all.filter { Self.onScreen($0.value, bounds) && available($0.key) }
+        let seen = frames.filter { Self.onScreen($0.value, bounds) && available($0.key) }
         guard !seen.isEmpty else { return }
         stageGeneration += 1
         let generation = stageGeneration
-        staging = Staging(generation: generation, rects: all, rail: carouselPresentation?.rail, railIndex: carouselPresentation?.railIndex ?? 0)
+        staging = Staging(generation: generation, rects: frames, rail: carouselPresentation?.rail, railIndex: carouselPresentation?.railIndex ?? 0)
         staging?.requestedCaptures = Set(seen.keys)
         let offset = Dictionary(uniqueKeysWithValues: seen.map { id, rect in
-            (id, frames[id] == nil ? rect : rect.offsetBy(dx: wall.x * area.width * 0.03, dy: wall.y * area.height * 0.03))
+            (id, rect.offsetBy(dx: wall.x * area.width * 0.03, dy: wall.y * area.height * 0.03))
         })
-        stage.capture(Set(seen.keys), background: Set(all.keys))
-        orderStage()
+        stage.capture(Set(seen.keys), background: Set(frames.keys))
         // A command during the bounce retargets it like any motion.
         func bouncing() -> Bool { staging?.generation == generation && staging?.revision == 0 }
         stage.show(seen) { [weak self] ok in
@@ -1427,6 +1390,11 @@ final class Workspaces {
     /// position and macOS later pull the window back to show 40 points.
     private static func onScreen(_ frame: CGRect, _ bounds: CGRect) -> Bool { frame.intersection(bounds).width >= 1 }
 
+    /// AX and native rounding can leave an accepted value up to a point from
+    /// the requested one. The presenter uses this one tolerance both to decide
+    /// that a window needs no placement and that it is in place.
+    private static func near(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) <= 1 }
+
     /// Places every window at once. Under the stage it runs once per motion
     /// change and keeps the focus the stage already requested.
     private func renderCarouselInstant(focusing selection: UInt32?, activateDesktop: Bool, takeFocus: Bool,
@@ -1463,8 +1431,7 @@ final class Workspaces {
             guard let frame = frames[id] else { continue }
             // Use the same one-point tolerance as width-limit learning. A
             // fractional accepted size must stay stable on focus-only input.
-            if let accepted = carouselSizes[id], abs(accepted.width - frame.width) <= 1,
-               abs(accepted.height - frame.height) <= 1 { continue }
+            if let accepted = carouselSizes[id], Self.near(accepted.width, frame.width), Self.near(accepted.height, frame.height) { continue }
             if carouselPresentation?.frames[id] == frame, !newlyShown.contains(id),
                frame.minX < bounds.minX || frame.maxX > bounds.maxX { continue }
             carouselSizing.insert(id)
@@ -1473,6 +1440,15 @@ final class Workspaces {
         let redraw = carouselPresentation?.workspace != status.active || carouselPresentation?.rail != rail || carouselPresentation?.frames != frames
         var positions = redraw ? Set(frames.keys).intersection(show) : (carouselPresentation?.pending.intersection(show) ?? [])
         positions.formUnion(newlyShown.intersection(frames.keys))
+        // A departing window waits on the tiles under it. A tile last observed
+        // away from its target, such as one its app moved, gets a position, so
+        // its own placement decides the handoff.
+        let departing = newlyHidden.compactMap { entries[$0]?.observation.frame.intersection(bounds) }
+        positions.formUnion(show.filter { id in
+            guard let target = frames[id], pointerFrames[id] == nil, !closeted.contains(id), let seen = entries[id]?.observation.frame,
+                  departing.contains(where: { target.intersects($0) }) else { return false }
+            return !Self.near(target.minX, seen.minX) || !Self.near(target.minY, seen.minY)
+        })
         carouselPresentation = CarouselPresentation(workspace: status.active, rail: rail, railIndex: carousel.workspaces[status.active]?.current ?? 0, frames: frames, pending: positions)
         if let focused, takeFocus { expectedFocus = focused }
         // Resolve the whole placement before writing. Hidden destinations are
@@ -1532,9 +1508,18 @@ final class Workspaces {
         let targets = Dictionary(uniqueKeysWithValues: show.compactMap { id in
             entries[id].map { (id, frames[id] ?? layerPlacements[id] ?? $0.observation.frame) }
         })
-        var ready = Set(show.filter { id in
-            pointerFrames[id] == nil && !closeted.contains(id) && targets[id] == entries[id]?.observation.frame
-        })
+        // A window is in place when tessel has no write of its own outstanding
+        // for it and its last observation is within the tolerance of its
+        // target. A scheduled window is judged only when its own placement
+        // ends: its cached frame can predate an earlier, unconfirmed write.
+        func inPlace(_ id: UInt32) -> Bool {
+            guard self.pointerFrames[id] == nil, !self.closeted.contains(id), let target = targets[id],
+                  let seen = self.entries[id]?.observation.frame else { return false }
+            return Self.near(target.minX, seen.minX) && Self.near(target.minY, seen.minY)
+                && Self.near(target.width, seen.width) && Self.near(target.height, seen.height)
+        }
+        let scheduled = Set(placements.map(\.id))
+        var ready = Set(show.filter { !scheduled.contains($0) && inPlace($0) })
         func commitVisibility() {
             guard self.transition == token, self.status.enabled, !self.pointerHeld, focusReady else { return }
             // A busy app must not delay an independent destination's focus.
@@ -1630,6 +1615,13 @@ final class Workspaces {
                                                  learnBounds: target.minX >= bounds.minX && target.maxX <= bounds.maxX)
                             if abs(accepted.width - target.width) > 1 || abs(accepted.height - target.height) > 1 { changedBounds = true }
                         }
+                    } else if result.outcome == .unanswered, inPlace(p.id) {
+                        // No write of tessel's is outstanding any more, so the
+                        // last observation decides, as for an unscheduled
+                        // window. A withdrawn window is not in place, whatever
+                        // its cached frame: its own snapshot renders the next
+                        // layout. A superseded request decides nothing.
+                        ready.insert(p.id)
                     }
                     geometryReady = finishedPlacements == placements.count
                     if p.id == self.focused {

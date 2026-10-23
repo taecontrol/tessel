@@ -5,7 +5,7 @@ import Testing
 @testable import Policy
 
 enum LayerMode: String, CaseIterable {
-    case hidden, single, shown, pinnedRails, pinnedLayer
+    case hidden, single, shown
 }
 
 /// Only app/user actions and published observations; no layer policy lives here.
@@ -99,8 +99,6 @@ enum LayerMode: String, CaseIterable {
         case .single:
             let id = open(); state("single", focused: true); return id
         case .shown: press("toggle layer"); state("shown", focused: true)
-        case .pinnedRails: press("pin layer"); state("pinned", focused: false)
-        case .pinnedLayer: press("pin layer"); press("toggle layer"); state("pinned", focused: true)
         }
         return mac.focusedWindow
     }

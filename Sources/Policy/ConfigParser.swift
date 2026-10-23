@@ -53,7 +53,7 @@ enum ConfigParser {
             case ("keys", _):
                 guard let chord = KeyChord(key) else { throw ConfigError(line: lineNumber, message: "Invalid key or modifier; use alt, shift, ctrl, cmd and a letter or digit") }
                 guard let command = string(value), command.isEmpty || WorkspaceCommand(command) != nil else {
-                    throw ConfigError(line: lineNumber, message: "Unknown command; use workspace 1…10, send 1…10, focus next|previous|left|right|up|down, move left|right|up|down, cycle width, toggle layer, pin layer, or toggle float")
+                    throw ConfigError(line: lineNumber, message: "Unknown command; use workspace 1…10, send 1…10, focus next|previous|left|right|up|down, move left|right|up|down, cycle width, toggle layer, or toggle float")
                 }
                 overrides[chord.name] = command
             default: throw ConfigError(line: lineNumber, message: "Unknown configuration key")

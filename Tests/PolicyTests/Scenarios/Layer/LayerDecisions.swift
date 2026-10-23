@@ -35,7 +35,7 @@ import Testing
         })
     }
 
-    @Test("#19 E12; #19 E14: terminating a float's app obeys single and entered-layer close selection", arguments: [LayerMode.single, .shown, .pinnedLayer])
+    @Test("#19 E12; #19 E14: terminating a float's app obeys single and entered-layer close selection", arguments: [LayerMode.single, .shown])
     func floatingAppTermination(_ mode: LayerMode) {
         requireLayer(Scenario.run("floating app termination in \(mode.rawValue)") { s in
             let f = LayerFixture(s), other = s.mac.launch()
@@ -45,7 +45,7 @@ import Testing
             other.terminate(activating: f.tiles[0], crash: true)
             s.settle()
             f.focus(mode == .single ? f.tiles[0] : f.floats[0])
-            f.state(mode == .single ? "hidden" : mode == .shown ? "shown" : "pinned", focused: mode != .single)
+            f.state(mode == .single ? "hidden" : "shown", focused: mode != .single)
             f.visible(f.floats, mode != .single)
         })
     }

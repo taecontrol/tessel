@@ -217,6 +217,11 @@ extension Acceptance.Contracts {
             sleep(seconds: 0.1)
             let geometry = try #require(try native("events").events)
             try #require(geometry.allSatisfy { ["AXWindowMoved", "AXWindowResized"].contains($0.name) }, "geometry echoes must remain distinct from layout/value state notifications")
+            // The app moving its own window notifies like an AX write.
+            try native("clearEvents")
+            let written = try window(id)
+            try fixture.command("move", ["key": kind, "frame": [written.frame[0] + 20, written.frame[1] + 20, written.frame[2], written.frame[3]]])
+            try expectEvent("AXWindowMoved", id: id)
             try native("clearEvents")
             try fixture.command("fullscreen", ["key": kind])
             var entered = true

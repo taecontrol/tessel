@@ -31,7 +31,7 @@ import Testing
         })
     }
 
-    @Test("#19 E13: a single float can hide, expand and navigate in every direction, or pin the whole layer", arguments: ["toggle layer", "focus left", "focus down", "focus up", "focus right", "pin layer"])
+    @Test("#19 E13: a single float can hide, expand and navigate in every direction", arguments: ["toggle layer", "focus left", "focus down", "focus up", "focus right"])
     func singleBecomesAFullEntryOrReturnsToRails(_ command: String) {
         requireLayer(Scenario.run("single float followed by \(command)") { s in
             let f = LayerFixture(s), modal = f.open(WindowSpec(subrole: "AXDialog", resizable: false))
@@ -41,8 +41,6 @@ import Testing
             case "toggle layer":
                 f.state("hidden", focused: false); f.focus(f.tiles[0]); f.visible(f.floats + [modal], false)
                 s.expect("the hidden dialog remains alive in the closet until requested again", f.app.windows.contains(modal))
-            case "pin layer":
-                f.state("pinned", focused: true); f.focus(modal); f.visible(f.floats + [modal], true)
             default:
                 f.state("shown", focused: true); f.visible(f.floats + [modal], true)
                 f.focus(command == "focus left" || command == "focus up" ? f.floats[1] : f.floats[0])
@@ -51,29 +49,26 @@ import Testing
         })
     }
 
-    @Test("#19 E16: external float focus enters the entire layer and external tile focus exits according to pinning", arguments: LayerMode.allCases)
+    @Test("#19 E16: external float focus enters the entire layer and external tile focus hides the layer on exit", arguments: LayerMode.allCases)
     func externalFocusAndVisibleArrivals(_ mode: LayerMode) {
         requireLayer(Scenario.run("external focus and new arrival in \(mode.rawValue)") { s in
             let f = LayerFixture(s)
             let single = f.enter(mode)
-            let pinned = mode == .pinnedRails || mode == .pinnedLayer
-            if mode == .hidden || mode == .single || mode == .pinnedRails {
+            if mode == .hidden || mode == .single {
                 f.select(f.floats[1]); f.focus(f.floats[1]); f.visible(f.floats, true)
                 if let single { f.visible([single], true) }
-                f.state(pinned ? "pinned" : "shown", focused: true)
+                f.state("shown", focused: true)
             }
-            // New floats in shown or either pinned state stay in the full layer.
-            // Return to pinned rails first to exercise that row separately.
-            if mode == .pinnedRails { f.select(f.tiles[0]); f.state("pinned", focused: false) }
+            // A new float stays in the shown layer.
             let new = f.open(background: true)
             f.focus(new); f.visible(f.floats + [new], true)
-            f.state(pinned ? "pinned" : "shown", focused: true)
+            f.state("shown", focused: true)
             f.select(f.tiles[1]); f.focus(f.tiles[1])
-            f.state(pinned ? "pinned" : "hidden", focused: false)
-            f.visible(f.floats + [new], pinned)
-            if let single, mode == .single { f.visible([single], pinned) }
-            // A further native tile selection stays in the rails in both rows.
-            f.select(f.tiles[0]); f.focus(f.tiles[0]); f.state(pinned ? "pinned" : "hidden", focused: false)
+            f.state("hidden", focused: false)
+            f.visible(f.floats + [new], false)
+            if let single, mode == .single { f.visible([single], false) }
+            // A further native tile selection stays in the rails in every remaining row.
+            f.select(f.tiles[0]); f.focus(f.tiles[0]); f.state("hidden", focused: false)
         })
         requireLayer(Scenario.run("external tile focus exits single without entering the rest") { s in
             let f = LayerFixture(s), single = f.open()
