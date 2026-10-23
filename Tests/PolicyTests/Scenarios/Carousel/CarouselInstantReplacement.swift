@@ -5,15 +5,17 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct CarouselInstantReplacement {
-    @Test("#33 E18: a departing window stays visible while its replacement's unpublished placement is elsewhere", arguments: WriteOrder.allCases)
-    func departingWindowStaysVisibleUntilReplacementPlacementIsPublished(_ writes: WriteOrder) {
-        let result = Scenario.run("reverse before a fractional replacement placement publishes", writes: writes) { s in
-            let f = CarouselFixture(s, duration: 0, minimumFractions: [1: 849.5 / 1708], appCount: 2)
+    @Test("#33 E18: a departing window stays visible while its replacement's unpublished placement is elsewhere", arguments: WriteOrder.allCases, [true, false])
+    func departingWindowStaysVisibleUntilReplacementPlacementIsPublished(_ writes: WriteOrder, _ fractional: Bool) {
+        let width = fractional ? "fractional" : "exact"
+        let result = Scenario.run("reverse before a replacement placement publishes / \(width)", writes: writes) { s in
+            let f = CarouselFixture(s, duration: 0, minimumFractions: fractional ? [1: 849.5 / 1708] : [:], appCount: 2)
             let a = f.ids[0], b = f.ids[1], c = f.ids[2]
-            f.apps[1].resize(b, to: CGSize(width: 849.5, height: f.area.height)); s.settle()
+            if fractional { f.apps[1].resize(b, to: CGSize(width: 849.5, height: f.area.height)); s.settle() }
             f.select(a)
             let before = f.snapshot(), sharedPoint = CGPoint(x: 1000, y: 100)
-            s.expect("the replacement has an accepted half-point size mismatch", f.frame(b).width == f.width(0.5) + 0.5)
+            // An exact cached frame is just as stale as a fractional one.
+            s.expect("the replacement's accepted size is \(width)", f.frame(b).width == f.width(0.5) + (fractional ? 0.5 : 0))
             s.expect("the replacement initially covers the shared point", f.mac.isVisible(b) && f.frame(b).contains(sharedPoint))
             f.press("focus right")
             f.tessel.press("focus right")
@@ -34,7 +36,9 @@ import Testing
             f.near(f.frame(b).minX, before[b]!.minX, "the replacement eventually returns")
             s.expect("the replacement covers the shared point after the departure hides", f.mac.isVisible(b) && f.frame(b).contains(sharedPoint) && !f.mac.isVisible(c))
         }
-        requireCarousel(result)
+        withKnownIssue("Readiness seeds a scheduled replacement from its exact cached frame while tessel's own write has moved it") {
+            requireCarousel(result)
+        } when: { !fractional }
     }
 
     @Test("#33 E18: a transient focus-only timeout finishes the visibility handoff without replaying geometry")
