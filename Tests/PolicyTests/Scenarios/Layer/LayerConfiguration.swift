@@ -4,23 +4,22 @@ import Testing
 
 @Suite @MainActor struct LayerConfiguration {
     @Test("#19 E5: the layer flag implies carousel and its default keys can be rebound or disabled")
-    func flagAndKeyBindings() {
+    func layerKeyBindings() {
         requireLayer(Scenario.run("layer flag and default keyboard commands") { s in
             let f = LayerFixture(s)
-            for (key, command) in [("alt-z", "toggle layer"), ("alt-shift-z", "pin layer"), ("alt-f", "toggle float")] {
+            for (key, command) in [("alt-z", "toggle layer"), ("alt-f", "toggle float")] {
                 s.expect("\(key) registers \(command)", f.tessel.status.keys[key] == command)
             }
             f.key("alt-z"); f.state("shown", focused: true); f.focus(f.floats[0])
             f.key("alt-z"); f.state("hidden", focused: false)
-            let overrides = "[keys]\nalt-z = ''\nalt-shift-z = ''\nalt-f = ''\nalt-a = 'toggle layer'\nalt-shift-a = 'pin layer'\nalt-c = 'toggle float'\n"
+            let overrides = "[keys]\nalt-z = ''\nalt-f = ''\nalt-a = 'toggle layer'\nalt-c = 'toggle float'\n"
             f.tessel.changeConfig(LayerFixture.config + overrides); s.settle()
-            s.expect("all three commands are valid key overrides", f.tessel.configuration.error == nil)
-            for (key, command) in [("alt-a", "toggle layer"), ("alt-shift-a", "pin layer"), ("alt-c", "toggle float")] {
+            s.expect("both commands are valid key overrides", f.tessel.configuration.error == nil)
+            for (key, command) in [("alt-a", "toggle layer"), ("alt-c", "toggle float")] {
                 s.expect("override \(key) registers \(command)", f.tessel.status.keys[key] == command)
             }
             f.key("alt-z"); f.state("hidden", focused: false)
             f.key("alt-a"); f.state("shown", focused: true)
-            f.key("alt-shift-a"); f.state("pinned", focused: true)
             f.key("alt-c"); f.classification(f.floats[0], "tiled", "moved to a rail")
         })
     }

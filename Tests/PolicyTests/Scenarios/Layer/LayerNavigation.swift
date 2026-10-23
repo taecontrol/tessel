@@ -22,7 +22,7 @@ import Testing
         })
     }
 
-    @Test("#19 E8: layer navigation wraps in arrival order and a moved tile becomes the newest arrival", arguments: [LayerMode.shown, .pinnedLayer])
+    @Test("#19 E8: layer navigation wraps in arrival order and a moved tile becomes the newest arrival", arguments: [LayerMode.shown])
     func stableCycleWithWrap(_ mode: LayerMode) {
         requireLayer(Scenario.run("layer arrival-order cycle \(mode.rawValue)") { s in
             let f = LayerFixture(s, floatSpecs: (0..<3).map { _ in WindowSpec(subrole: "AXFloatingWindow") })
@@ -45,31 +45,7 @@ import Testing
         })
     }
 
-    @Test("#19 E9: pinning preserves rail navigation and layer focus, while unpinning obeys focus")
-    func pinningAndUnpinning() {
-        requireLayer(Scenario.run("pin in rails, enter, leave and unpin") { s in
-            let f = LayerFixture(s)
-            f.select(f.tiles[2]); f.press("move down"); f.press("focus up"); f.press("focus left")
-            f.state("hidden", focused: false)
-            f.press("focus right"); f.focus(f.tiles[1])
-            f.press("focus down"); f.focus(f.tiles[2])
-            f.press("focus up"); f.focus(f.tiles[1])
-            f.press("focus left"); f.focus(f.tiles[0])
-            f.press("pin layer"); f.state("pinned", focused: false); f.visible(f.floats, true); f.focus(f.tiles[0])
-            f.press("focus right"); f.focus(f.tiles[1])
-            f.press("focus left"); f.focus(f.tiles[0])
-            f.press("focus down"); f.focus(f.tiles[2])
-            f.press("focus up"); f.focus(f.tiles[0])
-            f.press("toggle layer"); f.state("pinned", focused: true); f.focus(f.floats[0])
-            f.press("toggle layer"); f.state("pinned", focused: false); f.focus(f.tiles[0]); f.visible(f.floats, true)
-            f.press("pin layer"); f.state("hidden", focused: false); f.visible(f.floats, false)
-            f.press("toggle layer"); f.press("pin layer"); f.state("pinned", focused: true)
-            f.press("pin layer"); f.state("shown", focused: true); f.visible(f.floats, true); f.focus(f.floats[0])
-            f.press("toggle layer"); f.state("hidden", focused: false)
-        })
-    }
-
-    @Test("#19 E14: closing within an entered layer selects its surviving MRU and the last close returns to rails", arguments: [LayerMode.shown, .pinnedLayer])
+    @Test("#19 E14: closing within an entered layer selects its surviving MRU and the last close returns to rails", arguments: [LayerMode.shown])
     func closingUsesSurvivingMRU(_ mode: LayerMode) {
         requireLayer(Scenario.run("close floats in \(mode.rawValue)") { s in
             let f = LayerFixture(s, floatSpecs: (0..<4).map { _ in WindowSpec(subrole: "AXFloatingWindow") })
@@ -79,7 +55,7 @@ import Testing
             f.close(a); f.focus(c)
             s.expect("both non-MRU alternatives survive", Set(f.app.windows) == Set(f.tiles + [b, c, d]))
             f.visible([b, c, d], true)
-            f.state(mode == .shown ? "shown" : "pinned", focused: true)
+            f.state("shown", focused: true)
             f.close(b); f.focus(c)
             f.close(d); f.focus(c)
             f.close(c); f.state("hidden", focused: false); f.focus(f.tiles[0])
@@ -103,7 +79,7 @@ import Testing
         })
     }
 
-    @Test("#19 E19: rail resizing and reordering commands are inert inside every focused layer state", arguments: [LayerMode.single, .shown, .pinnedLayer])
+    @Test("#19 E19: rail resizing and reordering commands are inert inside every focused layer state", arguments: [LayerMode.single, .shown])
     func railCommandsAreInertInLayer(_ mode: LayerMode) {
         requireLayer(Scenario.run("rail-only commands in \(mode.rawValue)") { s in
             let f = LayerFixture(s, duration: 250)

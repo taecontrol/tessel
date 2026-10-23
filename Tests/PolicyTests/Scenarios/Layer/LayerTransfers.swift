@@ -4,14 +4,13 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct LayerTransfers {
-    @Test("#19 E20: moving a tile centers it in the full layer, closes its slot and remembers its left neighbor", arguments: [false, true])
-    func tileMovesToLayer(pinned: Bool) {
-        requireLayer(Scenario.run("tile to layer, pinned=\(pinned)") { s in
+    @Test("#19 E20: moving a tile centers it in the full layer, closes its slot and remembers its left neighbor")
+    func tileMovesToLayer() {
+        requireLayer(Scenario.run("tile to layer") { s in
             let f = LayerFixture(s), a = f.tiles[0], b = f.tiles[1], c = f.tiles[2]
-            if pinned { f.press("pin layer") }
             f.select(b); f.press("toggle float")
             f.classification(b, "floats", "moved to the layer")
-            f.state(pinned ? "pinned" : "shown", focused: true); f.focus(b); f.visible(f.floats + [b], true)
+            f.state("shown", focused: true); f.focus(b); f.visible(f.floats + [b], true)
             s.expect("a moved tile leaves its rail and slot", f.row(b)?.rail == nil && f.row(b)?.slot == nil && f.row(b)?.workspace == 1)
             f.order([a, c])
             let frame = f.frame(b)
@@ -30,7 +29,7 @@ import Testing
         })
     }
 
-    @Test("#19 E21: a resizable float inserts right of rail memory at its nearest width even when it cannot fill", arguments: [LayerMode.single, .shown, .pinnedLayer], [0, 1, 2, 3])
+    @Test("#19 E21: a resizable float inserts right of rail memory at its nearest width even when it cannot fill", arguments: [LayerMode.single, .shown], [0, 1, 2, 3])
     func floatMovesToRail(_ mode: LayerMode, width: Int) {
         requireLayer(Scenario.run("float to rail \(mode.rawValue), width choice \(width)") { s in
             let areaWidth = s.mac.screens.primaryScreen!.visibleFrame.width - 20
@@ -54,8 +53,8 @@ import Testing
             f.order(Array(f.tiles.prefix(3)))
             f.order([f.tiles[3], target, f.tiles[4]], rail: 2)
             s.expect("the float enters the current rail immediately right of memory", f.tessel.status.rail == 2 && f.row(target)?.rail == 2 && f.row(target)?.slot == 2)
-            f.state(mode == .pinnedLayer ? "pinned" : "hidden", focused: false)
-            f.visible([remaining], mode == .pinnedLayer)
+            f.state("hidden", focused: false)
+            f.visible([remaining], false)
             f.near(f.frame(target).width, presets[width] * (f.area.width + 10) - 10, "nearest nominal rail width")
             s.expect("the forced tile may stay shorter than the area", f.frame(target).height <= 300 && f.frame(target).height < f.area.height)
         })
@@ -69,7 +68,7 @@ import Testing
         })
     }
 
-    @Test("#19 E22: a fixed-size float bounces without moving or leaving its layer state", arguments: [LayerMode.single, .shown, .pinnedLayer])
+    @Test("#19 E22: a fixed-size float bounces without moving or leaving its layer state", arguments: [LayerMode.single, .shown])
     func fixedSizeCannotBecomeATile(_ mode: LayerMode) {
         requireLayer(Scenario.run("fixed-size float in \(mode.rawValue)") { s in
             let spec = WindowSpec(resizable: false)
@@ -80,7 +79,7 @@ import Testing
             let before = f.frames(f.tiles + [target]), railCount = f.tessel.status.railCount
             f.mac.clearMotionHistory()
             f.press("toggle float"); f.focus(target); f.unchanged(before)
-            f.state(mode == .pinnedLayer ? "pinned" : mode.rawValue, focused: true)
+            f.state(mode.rawValue, focused: true)
             f.classification(target, "floats", "fixed size")
             s.expect("fixed-size transfer changes no rail", f.tessel.status.railCount == railCount && f.row(target)?.rail == nil)
             s.expect("fixed-size transfer performs no real geometry writes", f.mac.geometryWrites.isEmpty)

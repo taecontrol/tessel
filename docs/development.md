@@ -602,7 +602,7 @@ it with the accepted prototype; generating the recording does not accept it.
 
 Each workspace has a floating layer. Existing floats start hidden in the closet while the rail keeps
 focus. If startup focus is already on a float, tessel enters the whole layer.
-The layer's visibility and pinning belong to its workspace; switching away
+The layer's visibility belongs to its workspace; switching away
 hides all its windows and returning restores its selection.
 
 Option+Z (`toggle layer`) shows the workspace's floats and selects the most
@@ -612,11 +612,7 @@ their geometry and scroll position. Inside the layer, Option+H/K cycles backward
 and Option+L/J forward in arrival order, wrapping at either end. Option+R and
 Option+Shift+H/J/K/L do nothing there.
 
-Option+Shift+Z (`pin layer`) keeps the floats visible while rail
-navigation continues. Option+Z still enters and leaves the layer. Unpinning on
-the rails hides it; unpinning inside leaves it shown.
-
-A pinned or shown layer raises its visible background-app floats with AXRaise
+A shown layer raises its visible background-app floats with AXRaise
 alone, serially from least to most recently used. Untouched floats favor the
 first arrival. The raise changes neither AXMain nor activation. The pass is a
 function of observed state rather than of the render that preceded it: one is
@@ -653,32 +649,34 @@ tiles, but the frontmost app's focused window can remain above another app's
 float. [`ax-raise-across-applications`](../Tests/Acceptance/ContractsMotion.swift)
 pins this limit; `ax-frontmost-activation` in the same file pins activation
 bringing the app's windows forward. CG on-screen membership (`visible`) includes
-covered windows; it cannot prove stacking. The supplementary E7/E9 spec-gap
+covered windows; it cannot prove stacking. The supplementary #19 E7 and #38 E6
 scenarios check the simulator's front-to-back `cg-on-screen-order` list and
 keyboard focus instead. A seeded sweep replays command sequences under
 deferred activation and stage retargets and checks that rule after each settle.
 It and a second sweep, of superseded activations, native selections and
 geometry-only relayouts, also check that no passive float raise moves
 keyboard focus into the float's app.
+The randomized order sweep excludes only floats whose app still has a native
+activation request pending in the simulator; the safety guard deliberately
+declines those raises. All other callers retain the full order rule. The
+activation-resolution scenarios separately require the deferred pass to run
+once that request resolves. Both sweeps print their comparison counts and
+retain their existing coverage thresholds.
 
-During rail motion the stage captures each visible pinned float once, excludes
-it from the background, and draws stand-ins in their at-rest stacking order:
-above every tile macOS lets them cover (background apps' tiles), below the
-frontmost app's windows they will sit under. Retargets update stand-in order
-without extra captures. Visible stand-ins retain CG's observed order, including
-native panels and failed raises. A destination tile still in the closet gets a
-provisional slot until it is placed. The stage waits for the serial raise pass
-and reads CG order again when WindowServer confirms placement, immediately
-before the existing reveal fade. ADR-0006's capture and placement method is unchanged.
-No layer animation, polling or recurring timer is added.
+Rail motion with a shown layer retains the ordinary tile and background
+captures, and waits for the serial background raise pass before revealing the
+placed windows. The stage carries no float stand-ins or ordering API.
+ADR-0006's capture and placement method is unchanged. No layer animation,
+polling or recurring timer is added.
 
-E11 remains an opt-in pixel recording. Its panels belong to a different signed
-fixture app from both apps in its mixed-app rail, so the movie shows them above
-background tiles and below the frontmost focused tile, without a pop as the
-stage clears. Same-app floats keep their native order because tessel skips their
-raise. E30 runs all seven prototype walkthroughs for U1 B, U2 B, U3 B and U4 A,
-plus four-direction wrap, remembered-tile return while pinned, and a 0.62-area
-width that must return at two-thirds rather than half. It posts real keys and
+Pinning was rejected in #38 because the owner did not use its best-effort
+result. Its command, shortcut and state are removed; Option+Shift+Z is unbound.
+Existing configs that name the removed command receive the usual line-numbered
+unknown-command error.
+
+E30 runs the surviving prototype walkthroughs for U1 B, U2 B, U3 B and U4 A,
+plus four-direction wrap and a 0.62-area width that must return at two-thirds
+rather than half. It posts real keys and
 uses signed fixture selection for the prototype's external focus actions. It
 writes frames as fractions of the usable area, focus, layer state and visibility
 to `.work/captures/layer/E30-fidelity.md`, retaining the last observation and
@@ -690,12 +688,11 @@ TESSEL_CAPTURE_LAYER=1 scripts/verify captureOwnerPrototypeComparison
 
 A new float takes focus and, when the layer was hidden, appears alone. Another
 new float replaces that single view. Closing it or pressing Option+Z returns to
-the rails; directional navigation expands to the whole layer, and pinning shows
-it all while retaining float focus. In an entered layer, closing focus selects
-the surviving most recently used float; the final close returns to the rails.
+the rails; directional navigation expands to the whole layer. In an entered
+layer, closing focus selects the surviving most recently used float; the final close returns to the rails.
 Sheets stay with their parent and do not enter the layer independently. External
 focus on a hidden float enters the whole layer; external tile focus leaves it,
-hiding floats unless pinned. Focus moves away before a float enters the closet.
+hiding its floats. Focus moves away before a float enters the closet.
 A hidden modal can leave its app waiting until the dialog is shown again.
 
 Option+F (`toggle float`) moves a tile to the layer, centered at half the area's
@@ -712,11 +709,11 @@ A fixed-size float bounces and stays floating. Manual choices last for that
 window's lifetime, including catalog refreshes, and reset on restart. Sending a
 float with Option+Shift+N follows it into the destination workspace's layer.
 
-The three commands are always registered and rebindable through `[keys]`.
+The two commands are always registered and rebindable through `[keys]`.
 Toggling an empty layer does nothing. Removing a config restores defaults;
 quitting returns all floats. `status --json` reports
 `workspaces.layer: {"state":"hidden","focused":false}`. State is `hidden`,
-`single`, `shown`, or `pinned`; `focused` says whether focus is in the layer.
+`single`, or `shown`; `focused` says whether focus is in the layer.
 Hidden floats retain `state: "floats"`, workspace membership, null `rail` and
 `slot`, and `visible: false` in `windows --json`. Manual classifications report
 `floats` / `moved to the layer` or `tiled` / `moved to a rail`.
@@ -732,6 +729,11 @@ appearance or removal changes neither focus history nor layouts. Native
 fullscreen remains detected through `AXFullScreen`, including a transient
 `AXUnknown` fullscreen root. The catalog reads CG levels only for the IDs it
 inspects, alongside their other facts.
+
+The pin-only #19 E9/E10 scenarios and E11 capture are retired by #38. Surviving
+raise-pass and deferred-activation scenarios now use the shown layer and are
+tagged #38 E6. The hidden-float capture case is #38 E4. E30 no longer contains
+pinning or remembered-tile return while pinned; its 0.62-area width check stays.
 
 ## Journeys and latency (#24)
 
@@ -968,9 +970,6 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #19 E6 | P |
 | #19 E7 | P |
 | #19 E8 | P |
-| #19 E9 | P |
-| #19 E10 | P |
-| #19 E11 | X |
 | #19 E12 | P |
 | #19 E13 | P |
 | #19 E14 | P |

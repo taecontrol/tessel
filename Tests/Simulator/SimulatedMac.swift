@@ -131,7 +131,6 @@ package final class SimulatedMac: @unchecked Sendable {
         var deferredActivations = 0
         var activationPending = false
         var activationCompletion = DeferredActivationCompletion.focusWrite
-        var activationOrderDelay = 0
         var keyRestorationDelay = 0
         var enhancedUserInterface = false
         var pendingEnhancedSizes: [UInt32: CGSize] = [:]

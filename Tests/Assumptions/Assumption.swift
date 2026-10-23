@@ -110,7 +110,7 @@ package enum Assumption: String, CaseIterable, Sendable {
         case .deferredAXActivation: "AX can accept activation before the app becomes active; pending activation may complete asynchronously, on a main or raise write, or on another activation request."
         case .activationKeyRestoration: "An AX activation can finish after the AXMain and AXRaise that follow it; when the selected window is in the closet, the app's previous key window becomes key again, and AXMain and AXRaise after the activation select the requested window."
         case .minimizeFocusInterruption: "AX main or raise can cancel pending minimization; after completion main leaves it minimized, while raise restores it and may return cannotComplete before the restore finishes."
-        case .axFrontmostActivation: "AXFrontmost activation orders every window of the app above other apps' windows; CG can apply that order after AX already reports the app frontmost and its focused window."
+        case .axFrontmostActivation: "AXFrontmost activation orders every window of the app above other apps' windows."
         }
     }
 }

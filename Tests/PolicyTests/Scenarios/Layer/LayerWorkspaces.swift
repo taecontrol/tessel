@@ -3,7 +3,7 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct LayerWorkspaces {
-    @Test("#19 E17: each workspace retains its pin, entered state and remembered float without leaking visibility", arguments: LayerMode.allCases)
+    @Test("#19 E17: each workspace retains its entered state and remembered float without leaking visibility", arguments: LayerMode.allCases)
     func workspaceStateReturns(_ mode: LayerMode) {
         requireLayer(Scenario.run("workspace layer memory \(mode.rawValue)") { s in
             let f = LayerFixture(s)
@@ -13,20 +13,20 @@ import Testing
             let tile3 = f.open(WindowSpec())
             f.focus(tile3)
             let float3 = f.open()
-            f.press("pin layer"); f.state("pinned", focused: true)
+            f.press("focus right"); f.select(float3); f.state("shown", focused: true)
             f.press("workspace 1")
             s.expect("workspace one restores its exact focus", f.mac.focusedWindow == focus)
-            f.state(mode == .pinnedLayer || mode == .pinnedRails ? "pinned" : mode.rawValue,
-                    focused: mode != .hidden && mode != .pinnedRails)
-            f.visible(f.floats, mode == .shown || mode == .pinnedRails || mode == .pinnedLayer)
+            f.state(mode.rawValue,
+                    focused: mode != .hidden)
+            f.visible(f.floats, mode == .shown)
             if !extra.isEmpty { f.visible(extra, true) }
             s.expect("workspace three never leaks its float into workspace one", !f.mac.isVisible(float3) && f.mac.isInCloset(float3))
-            f.press("workspace 3"); f.state("pinned", focused: true); f.focus(float3)
+            f.press("workspace 3"); f.state("shown", focused: true); f.focus(float3)
             f.visible(f.floats + extra, false)
         })
     }
 
-    @Test("#19 E18: sending from any focused layer state follows the float into the destination layer", arguments: [LayerMode.single, .shown, .pinnedLayer])
+    @Test("#19 E18: sending from any focused layer state follows the float into the destination layer", arguments: [LayerMode.single, .shown])
     func sendFollowsFloat(_ mode: LayerMode) {
         requireLayer(Scenario.run("send layer member from \(mode.rawValue)") { s in
             let f = LayerFixture(s)

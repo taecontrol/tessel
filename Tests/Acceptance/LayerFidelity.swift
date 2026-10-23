@@ -19,8 +19,8 @@ struct LayerFidelity {
     is one point; final states use the harness's shared 5 s margin.
     All layer/navigation/transfer actions use real keys. The prototype's external
     Cmd-Tab/click actions use signed fixture focus selection. No owner is needed.
-    Wrap in all four directions, pinning a transferred tile, returning to its
-    remembered neighbor, and a non-half nearest-width case extend the scripts.
+    Wrap in all four directions and a non-half nearest-width case extend the
+    surviving walkthroughs.
 
     | Walkthrough / action | Focus expected → observed | Layer expected → observed | Visible floats expected → observed | Frames expected → observed | Result |
     | --- | --- | --- | --- | --- | --- |
@@ -185,7 +185,6 @@ struct LayerFidelity {
         do {
             try visitLayer()
             try dialogs()
-            try pinLayer()
             try transfer()
             try externalFocusAndFixedSize()
             report += "\nAll scripted walkthroughs and selected-variant extensions passed.\n"
@@ -232,19 +231,6 @@ struct LayerFidelity {
         try check("Dialog then explore / alt-z", scene, focus: "w0", state: "hidden", inLayer: false, visible: [], floating: floats, frames: frames)
     }
 
-    private mutating func pinLayer() throws {
-        let scene = try prepare()
-        try desktop.post(kVK_ANSI_Z, shift: true)
-        try check("Pin / alt-shift-z", scene, focus: "w0", state: "pinned", inLayer: false, visible: scene.floats)
-        for (code, label, target, entered) in [(kVK_ANSI_L, "alt-l", "w1", false), (kVK_ANSI_L, "alt-l", "w2", false),
-                                               (kVK_ANSI_Z, "alt-z enters", "f0", true), (kVK_ANSI_Z, "alt-z returns", "w2", false)] {
-            try desktop.post(code)
-            try check("Pin / \(label)", scene, focus: target, state: "pinned", inLayer: entered, visible: scene.floats)
-        }
-        try desktop.post(kVK_ANSI_Z, shift: true)
-        try check("Pin / alt-shift-z hides", scene, focus: "w2", state: "hidden", inLayer: false, visible: [])
-    }
-
     private mutating func transfer() throws {
         let scene = try prepare(), center = [0.25, 1.0 / 6, 0.5, 2.0 / 3]
         let floats = scene.floats.union(["w2"]), centered = scene.floatFrames.merging(["w2": center]) { _, value in value }
@@ -254,14 +240,6 @@ struct LayerFidelity {
         try check("Transfer / second alt-l", scene, focus: "w2", state: "hidden", inLayer: false, visible: [])
         try desktop.post(kVK_ANSI_F)
         try check("Transfer / alt-f centers at half × two-thirds", scene, focus: "w2", state: "shown", inLayer: true, visible: floats, floating: floats, frames: centered)
-        try desktop.post(kVK_ANSI_Z, shift: true)
-        try check("Transfer / alt-shift-z pins, does not move", scene, focus: "w2", state: "pinned", inLayer: true, visible: floats, floating: floats, frames: centered)
-        try desktop.post(kVK_ANSI_Z)
-        try check("Transfer / alt-z returns to left neighbor", scene, focus: "w1", state: "pinned", inLayer: false, visible: floats, floating: floats, frames: centered)
-        try desktop.post(kVK_ANSI_Z)
-        try check("Transfer / alt-z recalls moved float", scene, focus: "w2", state: "pinned", inLayer: true, visible: floats, floating: floats, frames: centered)
-        try desktop.post(kVK_ANSI_Z, shift: true)
-        try check("Transfer / unpin stays entered", scene, focus: "w2", state: "shown", inLayer: true, visible: floats, floating: floats, frames: centered)
         try desktop.post(kVK_ANSI_F)
         try check("Transfer / alt-f returns at nearest half", scene, focus: "w2", state: "hidden", inLayer: false, visible: [],
                   frames: scene.floatFrames.merging(["w2": scene.returning(0.5)]) { _, value in value }, returned: "w2")

@@ -2,14 +2,13 @@ import Foundation
 
 enum WorkspaceCommand: Sendable {
     case workspace(Int), send(Int), next, previous, focus(Direction), move(Direction), cycleWidth
-    case toggleLayer, pinLayer, toggleFloat
+    case toggleLayer, toggleFloat
 
     enum Direction: String, Sendable { case left, right, up, down }
 
     init?(_ text: String) {
         switch text {
         case "toggle layer": self = .toggleLayer
-        case "pin layer": self = .pinLayer
         case "toggle float": self = .toggleFloat
         case "cycle width": self = .cycleWidth
         case "focus next": self = .next
@@ -65,7 +64,7 @@ struct KeyChord: Sendable {
     }
 
     static var layerDefaults: [String:String] {
-        carouselDefaults.merging(["alt-z": "toggle layer", "alt-shift-z": "pin layer", "alt-f": "toggle float"]) { _, new in new }
+        carouselDefaults.merging(["alt-z": "toggle layer", "alt-f": "toggle float"]) { _, new in new }
     }
 
     static let defaults: [String: String] = {

@@ -5,7 +5,6 @@ import Ports
 extension SimulatedMac {
     package enum StageEventKind: Sendable, Equatable {
         case capture(UInt32)
-        case order([UInt32])
         case background
         case show([UInt32: CGRect])
         case move([UInt32: CGRect], duration: Int)
@@ -118,11 +117,6 @@ extension SimulatedMac {
             }
         }
 
-        func order(_ windows: [UInt32]) {
-            mac.scheduler.call("MotionStagePort.order")
-            mac.recordStage(.order(windows))
-        }
-
         func capture(_ windows: Set<UInt32>, background excluding: Set<UInt32>?) {
             mac.assume(.stageWholeWindowCapture)
             mac.stageState.captureRequests.append(StageCaptureRequest(at: mac.scheduler.now, windows: windows,
@@ -193,7 +187,7 @@ extension SimulatedMac {
             }
         }
 
-        func reveal(_ frames: [UInt32: CGRect], hidden: Set<UInt32>, willReveal: @escaping @MainActor @Sendable () -> Void,
+        func reveal(_ frames: [UInt32: CGRect], hidden: Set<UInt32>,
                     revealed: @escaping @MainActor @Sendable () -> Void) {
             mac.assume(.stageOverlay)
             mac.scheduler.call("MotionStagePort.reveal")
@@ -201,7 +195,6 @@ extension SimulatedMac {
             let motion = mac.stageState.motion
             // The simulated WindowServer shows an accepted placement at once;
             // the stage then fades into it.
-            willReveal()
             mac.scheduler.main.after(milliseconds: 40) { [mac] in
                 guard mac.stageState.motion == motion else { return }
                 mac.recordStage(.revealed)
