@@ -31,7 +31,8 @@ struct RailPresentationResult: Sendable {
     /// is. A withdrawn window was read as minimized, hidden, fullscreen, behind
     /// another native tab or gone, and its own event's snapshot says so to
     /// Policy. An unanswered app timed out through every retry. A superseded
-    /// request was cancelled by a newer render, its app's hide or quit.
+    /// request was cancelled by a newer render, its app's hide or quit, at any
+    /// point before it ended; it carries no frame.
     enum Outcome: Sendable { case presented, withdrawn, unanswered, superseded }
     var outcome: Outcome
     var frame: CGRect?
@@ -700,7 +701,11 @@ private final class AppWindows: @unchecked Sendable {
         var outcome = RailPresentationResult.Outcome.superseded
         defer {
             if !retrying {
-                let result = RailPresentationResult(outcome: accepted == nil ? outcome : .presented, frame: accepted, focus: observedFocus)
+                // A cancellation can arrive during any AX call, the last one
+                // included. Whatever the request read by then decides nothing.
+                let cancelled = presentationLock.withLock { presentation != token }
+                let final: RailPresentationResult.Outcome = cancelled ? .superseded : accepted == nil ? outcome : .presented
+                let result = RailPresentationResult(outcome: final, frame: final == .presented ? accepted : nil, focus: observedFocus)
                 scheduler.main.async { completion(result) }
             }
         }

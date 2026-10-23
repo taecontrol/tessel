@@ -519,8 +519,10 @@ that ends without a frame says why:
   place where coverage rests on geometry that may be stale: if that app moved
   the window before it stopped answering, a departing window over the target
   hides and exposes desktop there until a later render places the window.
-- A newer render, or its app's hide or quit, superseded it. It decides nothing;
-  whatever superseded it decides.
+- A newer render, or its app's hide or quit, superseded it. The request is
+  checked again as it ends, so a cancellation that arrives during any AX call,
+  the readback or the last unanswered attempt included, still supersedes it.
+  It carries no frame and decides nothing; whatever superseded it decides.
 
 A window still in the closet is never in place, so the old view stays until its
 replacement returns. A tile under a departing window whose last observation

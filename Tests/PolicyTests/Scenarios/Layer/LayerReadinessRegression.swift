@@ -157,54 +157,48 @@ import Testing
             s.expect("the hide renders the next layout, whose tile covers the point", f.mac.isVisible(next) && f.frame(next).contains(point))
             s.expect("the float leaves the desktop once the next tile covers it", f.mac.isInCloset(float) && !f.mac.isVisible(float))
         }
-        withKnownIssue("A placement its app's hide cancelled during the readback counts the frame it read, so the float hides before the next tile shows") {
-            requireLayer(result)
-        }
+        requireLayer(result)
     }
 
     @Test("#19 E7: a placement cancelled during its readback reports superseded, without a frame", arguments: WriteOrder.allCases)
     func placementCancelledDuringReadbackIsSuperseded(_ writes: WriteOrder) {
-        withKnownIssue("A placement cancelled during its readback reports the frame it read as presented") {
-            requireLayer(Scenario.run("an app hide cancels a placement during its readback / \(writes)", writes: writes) { s in
-                let f = CarouselFixture(s, duration: 0, appCount: 2)
-                let b = f.ids[1], app = f.apps[1], answer = PlacementAnswer()
-                f.tessel.catalog.presentRail(pid: app.pid, id: b, frame: f.frame(b), position: true, resize: false, focus: false,
-                                             screenRight: f.mac.screens.primaryScreen!.frame.maxX) { answer.result = $0 }
-                let held = f.mac.pause(after: .call("AccessibilityPort.copy AXSize window \(b) \(app.alias)"))
-                if case .paused = held {} else { s.expect("the placement readback is held: \(held)", false) }
-                app.hide()
-                let hidden = f.mac.scheduler.run()
-                if case .paused = hidden {} else { s.expect("the hide is delivered while the readback is held: \(hidden)", false) }
-                s.settle()
-                s.expect("the cancelled placement reports superseded: \(String(describing: answer.result?.outcome))", answer.result?.outcome == .superseded)
-                s.expect("the cancelled placement carries no frame: \(String(describing: answer.result?.frame))", answer.result != nil && answer.result?.frame == nil)
-            })
-        }
+        requireLayer(Scenario.run("an app hide cancels a placement during its readback / \(writes)", writes: writes) { s in
+            let f = CarouselFixture(s, duration: 0, appCount: 2)
+            let b = f.ids[1], app = f.apps[1], answer = PlacementAnswer()
+            f.tessel.catalog.presentRail(pid: app.pid, id: b, frame: f.frame(b), position: true, resize: false, focus: false,
+                                         screenRight: f.mac.screens.primaryScreen!.frame.maxX) { answer.result = $0 }
+            let held = f.mac.pause(after: .call("AccessibilityPort.copy AXSize window \(b) \(app.alias)"))
+            if case .paused = held {} else { s.expect("the placement readback is held: \(held)", false) }
+            app.hide()
+            let hidden = f.mac.scheduler.run()
+            if case .paused = hidden {} else { s.expect("the hide is delivered while the readback is held: \(hidden)", false) }
+            s.settle()
+            s.expect("the cancelled placement reports superseded: \(String(describing: answer.result?.outcome))", answer.result?.outcome == .superseded)
+            s.expect("the cancelled placement carries no frame: \(String(describing: answer.result?.frame))", answer.result != nil && answer.result?.frame == nil)
+        })
     }
 
     @Test("#19 E7: a placement cancelled during its last unanswered attempt reports superseded, not unanswered", arguments: WriteOrder.allCases)
     func placementCancelledDuringLastAttemptIsSuperseded(_ writes: WriteOrder) {
-        withKnownIssue("A placement cancelled during its last attempt reports unanswered") {
-            requireLayer(Scenario.run("an app hide cancels a hung app's last placement attempt / \(writes)", writes: writes) { s in
-                let f = CarouselFixture(s, duration: 0, appCount: 2)
-                let b = f.ids[1], app = f.apps[1], answer = PlacementAnswer()
-                app.hang()
-                f.tessel.catalog.presentRail(pid: app.pid, id: b, frame: f.frame(b), position: true, resize: false, focus: false,
-                                             screenRight: f.mac.screens.primaryScreen!.frame.maxX) { answer.result = $0 }
-                // The initial attempt and four retries each time out on their
-                // first presentability read. The hide arrives during the last.
-                for attempt in 0..<5 {
-                    if attempt > 0 { f.mac.scheduler.resume() }
-                    let held = f.mac.pause(after: .call("AccessibilityPort.copy AXHidden \(app.alias) pid=\(app.pid)"))
-                    if case .paused = held {} else { s.expect("attempt \(attempt) is held: \(held)", false) }
-                }
-                app.hide()
-                let hidden = f.mac.scheduler.run()
-                if case .paused = hidden {} else { s.expect("the hide is delivered during the last attempt: \(hidden)", false) }
-                s.settle()
-                s.expect("the cancelled attempt reports superseded: \(String(describing: answer.result?.outcome))", answer.result?.outcome == .superseded)
-            })
-        }
+        requireLayer(Scenario.run("an app hide cancels a hung app's last placement attempt / \(writes)", writes: writes) { s in
+            let f = CarouselFixture(s, duration: 0, appCount: 2)
+            let b = f.ids[1], app = f.apps[1], answer = PlacementAnswer()
+            app.hang()
+            f.tessel.catalog.presentRail(pid: app.pid, id: b, frame: f.frame(b), position: true, resize: false, focus: false,
+                                         screenRight: f.mac.screens.primaryScreen!.frame.maxX) { answer.result = $0 }
+            // The initial attempt and four retries each time out on their
+            // first presentability read. The hide arrives during the last.
+            for attempt in 0..<5 {
+                if attempt > 0 { f.mac.scheduler.resume() }
+                let held = f.mac.pause(after: .call("AccessibilityPort.copy AXHidden \(app.alias) pid=\(app.pid)"))
+                if case .paused = held {} else { s.expect("attempt \(attempt) is held: \(held)", false) }
+            }
+            app.hide()
+            let hidden = f.mac.scheduler.run()
+            if case .paused = hidden {} else { s.expect("the hide is delivered during the last attempt: \(hidden)", false) }
+            s.settle()
+            s.expect("the cancelled attempt reports superseded: \(String(describing: answer.result?.outcome))", answer.result?.outcome == .superseded)
+        })
     }
 
     @Test("#19 E7: a focus request that reads its window minimized reports withdrawn",
