@@ -887,9 +887,19 @@ judges tessel's own ordering, and its close case already removes the window
 the app destroys from the start view. The layer's external-change scenarios
 check the other half: an app's minimize, close, hide or resize during a layer
 exit may expose a point only until the render its snapshot triggers, as the
-same change does at rest. A change tessel has already observed is not
-external: a tile it read as moved gets a placement, and a placement that finds
-its window withdrawn never counts the window in place.
+same change does at rest. Each change runs during the exit and at rest. The
+render is identified without looking at coverage: each arm runs until tessel
+receives the change's snapshot, the app's first snapshot read that starts after
+the change, and the main-lane job that delivers it runs the render. That
+render's own work never waits for time to pass, so the exposure must end, with
+the successor covering the point, before any timer scheduled from that job on
+comes due. The handoff arm may expose the point no longer than the at-rest
+arm; a change that exposes the point by itself is measured from the change. A
+repair delayed by a timer, or left to a later render, fails them. A change
+tessel has already observed is not external: a tile it read as moved gets a
+placement, and a placement that finds its window withdrawn never counts the
+window in place. A placement cancelled at any point, its readback or last
+attempt included, is superseded and carries no frame.
 E20 retains its pixel rule for workspace, rail, width, stop and close, without
 an exception for AX geometry bursts.
 Its recorder starts close comparison at the first frame excluding the destroyed

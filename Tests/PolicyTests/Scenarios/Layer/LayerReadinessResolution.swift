@@ -3,8 +3,10 @@ import Simulator
 import Testing
 @testable import Policy
 
-/// A presentation's readiness stays with it, and every window it waits on is
-/// decided within bounded time, without waiting for an app's next event.
+/// A presentation's readiness stays with it. Under a hung sibling, a held or
+/// exhausted read, a stream of native moves, or a quit, the windows it waits on
+/// are decided within bounded time, without waiting for an app's next event.
+/// Handoffs a failed placement can strand are #41's.
 @Suite @MainActor struct LayerReadinessResolution {
     private static let floatFrame = CGRect(x: 1000, y: 100, width: 200, height: 200)
     private static let target = CGRect(x: 869, y: 43, width: 849, height: 1064)
