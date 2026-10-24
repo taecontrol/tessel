@@ -5,6 +5,57 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct WindowServerHandoff {
+    @Test("#33 E18: visible sweep dependencies wait for their own app commits", arguments: WriteOrder.allCases, ["left", "right"])
+    func visibleSweepWaitsForCommittedPredecessors(_ writes: WriteOrder, _ direction: String) {
+        requireCarousel(Scenario.run("three visible columns sweep \(direction) with unequal commits", writes: writes) { s in
+            let f = CarouselFixture(s, presets: Array(repeating: 1.0 / 3, count: 4), duration: 0, appCount: 2)
+            if direction == "left" { f.select(f.ids[3]); f.select(f.ids[1]) }
+            else { f.select(f.ids[2]) }
+            f.apps[0].delayCommits(milliseconds: direction == "right" ? 20 : 4)
+            f.apps[1].delayCommits(milliseconds: direction == "right" ? 4 : 20)
+            let before = Dictionary(uniqueKeysWithValues: f.ids.filter { f.mac.isVisible($0) }.map { ($0, f.mac.servedFrame($0)!) })
+            let startOrder = f.mac.visibleOrder
+            s.expect("three columns start visible", before.count == 3)
+            f.mac.clearMotionHistory(); f.mac.beginPresentationTrace()
+            f.tessel.press("focus \(direction)"); s.settle()
+            let final = Dictionary(uniqueKeysWithValues: f.ids.filter { f.mac.isVisible($0) }.map { ($0, f.mac.servedFrame($0)!) })
+            let oracle = InstantHandoffOracle(area: f.area, ids: Set(f.ids), before: before, startOrder: startOrder, final: final, endOrder: f.mac.visibleOrder)
+            var previousVisible = Set(before.keys)
+            for state in f.mac.presentationStates {
+                let visible = Set(state.frames.keys)
+                let showing = state.operation == "show" ? visible.subtracting(previousVisible) : []
+                for failure in oracle.violations(frames: state.frames, order: state.order, inProgress: state.uncommitted, showing: showing) {
+                    s.expect("at \(state.at) \(state.operation): \(failure)", false)
+                }
+                previousVisible = visible
+            }
+            s.expect("the sweep reaches its terminal state", !placementPending(f.tessel))
+        })
+    }
+
+    @Test("#40 E11: overlapping returns from ten apps keep each wait within its read budget", arguments: WriteOrder.allCases)
+    func manyWorkspaceReturnsRespectListingBudget(_ writes: WriteOrder) {
+        requireCarousel(Scenario.run("ten returns with missing listings", writes: writes) { s in
+            let f = CarouselFixture(s, presets: Array(repeating: 0.1, count: 10), duration: 0, appCount: 10)
+            for id in f.ids { f.select(id); f.press("send 2") }
+            f.press("workspace 1")
+            f.mac.omitListings(of: Set(f.ids)); f.mac.clearMotionHistory()
+            let first = f.mac.listingReads.count
+            f.tessel.press("workspace 2"); s.settle()
+            let reads = Array(f.mac.listingReads.dropFirst(first))
+            let counts = f.ids.map { id in reads.filter { $0.windows.contains(id) }.count }
+            s.expect("each returning window gets at most 26 listing reads: \(counts)", counts.allSatisfy { $0 > 0 && $0 <= 26 })
+            var queried = Set<UInt32>()
+            let rechecks = reads.filter { read in
+                let initial = !read.windows.isSubset(of: queried)
+                queried.formUnion(read.windows)
+                return !initial
+            }
+            s.expect("return rechecks remain at least 4 ms apart: \(rechecks.map(\.at))", zip(rechecks, rechecks.dropFirst()).allSatisfy { $1.at - $0.at >= 4 })
+            s.expect("missing return listings cannot strand the handoff", !placementPending(f.tessel))
+        })
+    }
+
     @Test("#40 E1: a fast visible replacement cannot vacate coverage before a slow return shows", arguments: WriteOrder.allCases)
     func returningVisibilityHoldsSweepDependencies(_ writes: WriteOrder) {
         requireCarousel(Scenario.run("slow return beside a fast app commit", writes: writes) { s in
