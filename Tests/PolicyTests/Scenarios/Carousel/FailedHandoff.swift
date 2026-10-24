@@ -183,6 +183,144 @@ import Testing
         })
     }
 
+    @Test("#41 E7: a failed placement waits for independent active and startable placements before releasing restacking",
+          arguments: WriteOrder.allCases, ["active", "pending"])
+    func placementWorkKeepsRestackingHeld(_ writes: WriteOrder, _ remaining: String) {
+        requireLayer(Scenario.run("#41 wait for \(remaining) placement / \(writes)", writes: writes) { s in
+            let f = LayerStackingFixture(s)
+            f.press("toggle layer")
+            let background = f.floats[2]
+            f.apps[0].hang()
+            if remaining == "active" { f.apps[1].delayAXReplies(milliseconds: 500) }
+            let start = f.mac.scheduler.trace.count
+            f.mac.clearMotionHistory()
+            f.tessel.changeConfig(LayerFixture.config + "[animation]\nduration = 0\n[gaps]\nouter = 20\n")
+            s.after(milliseconds: remaining == "active" ? 4_000 : 2_000, "a placement still owns the handoff") {
+                let attempts = hiddenTimeouts(in: f.mac, app: f.apps[0], since: start)
+                s.expect("one independent placement has exhausted before observing restacking", attempts >= 5)
+                if remaining == "pending" {
+                    s.expect("the second same-app placement has started but has not exhausted", attempts < 10)
+                } else {
+                    s.expect("both same-app placements have exhausted while the other app is delayed", attempts == 10)
+                }
+                s.expect("background floats wait for all placement requests to finish", !f.raises(since: start).contains(background))
+                if remaining == "active" { f.apps[1].delayAXReplies(milliseconds: 0) }
+            }
+            s.settle()
+            s.expect("both failed placements exhaust their own retries", hiddenTimeouts(in: f.mac, app: f.apps[0], since: start) == 10)
+            s.expect("the responsive background float restacks after the remaining work finishes", f.raises(since: start).contains(background))
+            s.expect("restacking preserves the selected float", f.mac.focusedWindow == f.floats[0])
+        })
+    }
+
+    @Test("#41 E7: confirmed native selection still waits for an outstanding focus retry", arguments: WriteOrder.allCases)
+    func outstandingFocusKeepsRestackingHeld(_ writes: WriteOrder) {
+        requireLayer(Scenario.run("#41 wait for outstanding focus / \(writes)", writes: writes) { s in
+            let f = LayerStackingFixture(s)
+            // Leave only one independent placement owned by the app that hangs.
+            f.press("focus right"); f.press("send 2"); f.press("workspace 1")
+            f.press("toggle layer")
+            let app = f.apps[1], target = f.floats[1], background = f.floats[2]
+            f.apps[0].hang()
+            let start = f.mac.scheduler.trace.count
+            f.tessel.changeConfig(LayerFixture.config + "[animation]\nduration = 0\n[gaps]\nouter = 20\n")
+            s.after(milliseconds: 40, "request the other float while geometry is pending") { f.tessel.press("focus right") }
+            var held = f.mac.pause(after: .call("AccessibilityPort.set AXMain=true window \(target) \(app.alias)"))
+            if case .paused = held {} else { s.expect("the focus write is held: \(held)", false) }
+            // Delay only this accepted write. Its native selection changes now;
+            // a timeout in the following check leaves the focus request retrying.
+            app.delayAXReplies(milliseconds: 1_500)
+            f.mac.scheduler.resume()
+            held = f.mac.pause(after: .call("AccessibilityPort.copy AXMinimized window \(target) \(app.alias)"))
+            if case .paused = held {} else { s.expect("the focus readback is held: \(held)", false) }
+            s.expect("native selection changed before the readback timeout", f.mac.focusedWindow == target)
+            app.delayAXReplies(milliseconds: 0); app.busy(forMilliseconds: 1)
+            held = f.mac.deliver(app)
+            if case .paused = held {} else { s.expect("a notification confirms focus during retry backoff: \(held)", false) }
+            s.expect("the focus request encountered a transient timeout after selecting its target", f.mac.scheduler.trace.dropFirst(start).contains {
+                $0.contains("AccessibilityPort.copy AXMinimized reply window \(target) \(app.alias) cannotComplete")
+            })
+            app.delayAXReplies(milliseconds: 100)
+            s.after(milliseconds: 500, "independent geometry exhausts while focus is still outstanding") {
+                s.expect("the independent placement has exhausted", hiddenTimeouts(in: f.mac, app: f.apps[0], since: start) >= 5)
+                s.expect("native selection remains confirmed", f.mac.focusedWindow == target)
+                s.expect("background raises wait for the focus request to finish", !f.raises(since: start).contains(background))
+                app.delayAXReplies(milliseconds: 0)
+            }
+            s.settle()
+            s.expect("restacking resumes after focus finishes", f.raises(since: start).contains(background))
+            s.expect("the responsive float retains keyboard focus", f.mac.focusedWindow == target)
+        })
+    }
+
+    @Test("#41 E2: a failed returning tile releases restacking through transitive blocked placements", arguments: WriteOrder.allCases)
+    func transitiveFailureReleasesRestacking(_ writes: WriteOrder) {
+        requireCarousel(Scenario.run("#41 transitive placement failure / \(writes)", writes: writes) { s in
+            let f = CarouselFixture(s, presets: [1.0 / 3, 1.0 / 3, 1.0 / 3, 1.0 / 3], duration: 0, appCount: 4)
+            let background = showLayerWithBackgroundFloat(f)
+            let a = f.ids[0], b = f.ids[1], c = f.ids[2], d = f.ids[3]
+            s.expect("setup: three tiles are visible and the returning tile is parked", [a, b, c].allSatisfy(f.mac.isVisible) && f.mac.isInCloset(d))
+            let before = f.snapshot([b, c])
+            f.apps[3].hang(); f.mac.clearMotionHistory()
+            let start = f.mac.scheduler.trace.count
+            f.app.close(a); s.settle()
+            s.expect("the returning tile exhausts its retries", hiddenTimeouts(f, app: f.apps[3], since: start) == 5)
+            s.expect("neither transitive dependent receives a geometry write", f.mac.geometryWrites.allSatisfy { ![b, c].contains($0.window) })
+            f.unchanged(before)
+            s.expect("the failed returning tile remains parked", f.mac.isInCloset(d))
+            s.expect("the terminal geometry failure releases background restacking", raises(of: background, in: f.mac, since: start) > 0)
+            enabledWithoutDesktopActivation(f, since: start)
+        })
+    }
+
+    @Test("#41 E8: a successful placement after motion settles reveals the stage before linger", arguments: WriteOrder.allCases)
+    func successAfterMotionRevealsStage(_ writes: WriteOrder) {
+        requireCarousel(Scenario.run("#41 successful placement after motion / \(writes)", writes: writes) { s in
+            let f = CarouselFixture(s, duration: 250)
+            f.select(f.ids[1])
+            f.mac.clearMotionHistory()
+            // Successful AX replies put the final placement after the 250 ms
+            // motion, with ample time left before its 300 ms linger expires.
+            f.app.delayAXReplies(milliseconds: 2)
+            let start = f.mac.scheduler.trace.count
+            f.press("focus right")
+            s.expect("all requests succeeded", !f.mac.scheduler.trace.dropFirst(start).contains { $0.contains("cannotComplete") })
+            guard let settled = f.mac.stageEvents.first(where: { $0.kind == .settled })?.at,
+                  let lastWrite = f.mac.geometryWrites.map(\.at).max() else {
+                s.expect("the stage settles and real placement runs", false); return
+            }
+            let revealed = f.mac.stageEvents.first { $0.kind == .revealed }?.at
+            s.expect("final geometry lands after motion settles and before linger", lastWrite > settled && lastWrite < settled + 300)
+            s.expect("success reveals the real layout promptly after placement", revealed.map { $0 >= lastWrite && $0 < settled + 300 } == true)
+            f.pair(f.ids[1], f.ids[2], focused: f.ids[2])
+        })
+    }
+
+    @Test("#41 E6: the next key retries failed dependency and focus handoffs", arguments: WriteOrder.allCases, ["dependency", "focus"])
+    func nextKeyRetriesDependencyAndFocus(_ writes: WriteOrder, _ failure: String) {
+        requireCarousel(Scenario.run("#41 next key after \(failure) failure / \(writes)", writes: writes) { s in
+            let f = CarouselFixture(s, duration: 0, appCount: failure == "dependency" ? 2 : 1)
+            if failure == "dependency" {
+                prepareDependency(f)
+                f.app.hang(); f.press("focus right"); f.app.resume(); s.settle()
+            } else {
+                prepareRail(f); exhaustFocus(f)
+            }
+            s.expect("recovery without an event keeps the outgoing pair visible", f.ids.prefix(2).allSatisfy(f.mac.isVisible) && f.mac.focusedWindow == f.ids[failure == "dependency" ? 1 : 0])
+            f.mac.clearMotionHistory()
+            f.press("focus left")
+            if failure == "dependency" {
+                f.pair(f.ids[1], f.ids[2], focused: f.ids[1])
+                s.expect("the next key retries the parked destination", f.mac.geometryWrites.contains { $0.window == f.ids[2] })
+            } else {
+                f.focus(f.ids[2])
+                s.expect("the next key retries focus", f.mac.focusRequests.contains { $0.window == f.ids[2] })
+                s.expect("the completed focus handoff retires both outgoing tiles", f.ids.prefix(2).allSatisfy(f.mac.isInCloset))
+            }
+            s.expect("the next render retires the old cover", f.mac.isInCloset(f.ids[0]))
+        })
+    }
+
     @Test("#41 E7: accepted deferred activation without a failure keeps waiting", arguments: WriteOrder.allCases)
     func deferredActivationKeepsWaiting(_ writes: WriteOrder) {
         requireCarousel(Scenario.run("#41 accepted activation keeps waiting / \(writes)", writes: writes) { s in
@@ -279,8 +417,29 @@ import Testing
     }
 
     private func hiddenTimeouts(_ f: CarouselFixture, app: SimulatedApp, since start: Int) -> Int {
-        f.mac.scheduler.trace.dropFirst(start).filter {
+        hiddenTimeouts(in: f.mac, app: app, since: start)
+    }
+
+    private func hiddenTimeouts(in mac: SimulatedMac, app: SimulatedApp, since start: Int) -> Int {
+        mac.scheduler.trace.dropFirst(start).filter {
             $0.contains("AccessibilityPort.copy AXHidden reply \(app.alias) pid=\(app.pid) cannotComplete")
+        }.count
+    }
+
+    private func showLayerWithBackgroundFloat(_ f: CarouselFixture) -> UInt32 {
+        let foreground = f.mac.launch(), background = f.mac.launch()
+        let selected = foreground.open(WindowSpec(subrole: "AXDialog"), background: true)
+        let observed = background.open(WindowSpec(subrole: "AXDialog"), background: true)
+        f.s.settle()
+        f.tessel.changeConfig(LayerFixture.config + "[animation]\nduration = 0\n"); f.s.settle()
+        foreground.select(selected); f.s.settle()
+        f.s.expect("setup: the shown layer includes a responsive background float", f.mac.isVisible(selected) && f.mac.isVisible(observed) && f.mac.focusedWindow == selected)
+        return observed
+    }
+
+    private func raises(of id: UInt32, in mac: SimulatedMac, since start: Int) -> Int {
+        mac.scheduler.trace.dropFirst(start).filter {
+            $0.contains("AccessibilityPort.perform AXRaise window \(id) ")
         }.count
     }
 
