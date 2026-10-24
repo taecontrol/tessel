@@ -241,8 +241,9 @@ import Testing
         guard let render else { return nil }
         do {
             let endTime = try RenderBoundary.time(trace, before: states[end].traceIndex)
+            let boundaryTime = try RenderBoundary.time(trace[render])
             s.expect("the exposure ends with the render the change's snapshot triggers, at \(endTime) ms, not after the first timer following its app commit",
-                     states[end].traceIndex <= render)
+                     endTime <= boundaryTime)
             // A change that exposes the point by itself records no state.
             return endTime - (first == 0 ? changed.time : try RenderBoundary.time(trace, before: states[first].traceIndex))
         } catch {

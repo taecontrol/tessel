@@ -193,13 +193,25 @@ extension SimulatedMac {
             mac.scheduler.call("MotionStagePort.reveal")
             mac.stageState.motion += 1
             let motion = mac.stageState.motion
-            // The simulated WindowServer shows an accepted placement at once;
-            // the stage then fades into it.
-            mac.scheduler.main.after(milliseconds: 40) { [mac] in
+            func check() {
                 guard mac.stageState.motion == motion else { return }
-                mac.recordStage(.revealed)
-                revealed()
+                let visible = Set(mac.visibleIDs())
+                let waiting = frames.contains { id, accepted in
+                    guard mac.windows[id]?.closed == false, let served = mac.serverFrame(id) else { return false }
+                    return !visible.contains(id) || [served.minX - accepted.minX, served.minY - accepted.minY,
+                        served.width - accepted.width, served.height - accepted.height].contains { abs($0) >= 1 }
+                } || !hidden.isDisjoint(with: visible)
+                if waiting {
+                    mac.scheduler.main.after(milliseconds: 4) { check() }
+                    return
+                }
+                mac.scheduler.main.after(milliseconds: 40) { [mac] in
+                    guard mac.stageState.motion == motion else { return }
+                    mac.recordStage(.revealed)
+                    revealed()
+                }
             }
+            check()
         }
 
         func refresh(_ window: UInt32) {

@@ -22,7 +22,7 @@ package enum WriteOrder: String, CaseIterable, Sendable {
 }
 
 package enum PausePoint: Equatable, Sendable {
-    case read(Int32), delivery(Int32), call(String)
+    case read(Int32), delivery(Int32), call(String), laneCall(String, lane: String)
 }
 
 /// Only the baton holder touches state. Semaphore handoffs establish the
@@ -36,6 +36,11 @@ package final class BatonScheduler: SchedulingPort, @unchecked Sendable {
     package private(set) var trace: [String] = []
     package private(set) var failure: RunOutcome?
     package var isActive: Bool { failure == nil && !stopped }
+    package var pendingMainDelays: [Int] {
+        timers.compactMap { timer in
+            if case .main(let job) = timer.target, job.cancellation?.cancelled != true { timer.delay } else { nil }
+        }
+    }
     package var currentJobID: Int? {
         if case .lane(let id) = context { lanes[id].current?.id } else { nil }
     }
@@ -71,7 +76,7 @@ package final class BatonScheduler: SchedulingPort, @unchecked Sendable {
         let cancellation: Cancellation?
     }
     private enum Target { case lane(Int, Job), main(MainJob), native(Job) }
-    private struct Timer { let due: Int; let id: Int; let target: Target }
+    private struct Timer { let due: Int; let delay: Int; let id: Int; let target: Target }
     private enum Choice { case lane(Int), main, advance(Int) }
     private final class SyncBox: @unchecked Sendable {
         var body: (@Sendable () -> Void)?
@@ -141,7 +146,8 @@ package final class BatonScheduler: SchedulingPort, @unchecked Sendable {
     package func call(_ label: String) {
         guard failure == nil, !stopped else { return }
         note(label)
-        checkpoint(.call(label), label: label)
+        if pauseTarget == .laneCall(label, lane: contextName) { checkpoint(pauseTarget, label: label) }
+        else { checkpoint(.call(label), label: label) }
         if context == .main, writeOrder != .readsFirst, failure == nil,
            case .lane = choice(allowMain: false, allowTimers: false) {
             _ = step(allowMain: false, allowTimers: false)
@@ -362,7 +368,9 @@ package final class BatonScheduler: SchedulingPort, @unchecked Sendable {
             pid = lanes[id].capturedRead
             lanes[id].capturedRead = nil
         }
-        mainQueue.append(MainJob(id: nextID(), origin: pid, body: work, cancellation: nil))
+        let id = nextID()
+        mainQueue.append(MainJob(id: id, origin: pid, body: work, cancellation: nil))
+        note("main enqueued #\(id)")
     }
     package func nativeEvent(_ work: @escaping @MainActor @Sendable () -> Void) { enqueueMain(work, event: true) }
     /// App-side timed work, independent of tessel's main lane and its timers.
@@ -370,7 +378,7 @@ package final class BatonScheduler: SchedulingPort, @unchecked Sendable {
         guard failure == nil, !stopped else { return }
         note("native after +\(milliseconds)ms")
         let id = nextID()
-        timers.append(Timer(due: now + max(0, milliseconds), id: id,
+        timers.append(Timer(due: now + max(0, milliseconds), delay: milliseconds, id: id,
                             target: .native(Job(id: id, body: work, cancellation: nil))))
         timers.sort { ($0.due, $0.id) < ($1.due, $1.id) }
     }
@@ -378,7 +386,7 @@ package final class BatonScheduler: SchedulingPort, @unchecked Sendable {
     private func after(_ ms: Int, target: Target, cancellation: Cancellation) -> any ScheduledWork {
         call("SchedulingPort.after +\(ms)ms")
         guard failure == nil, !stopped else { return cancellation }
-        let timer = Timer(due: now + max(0, ms), id: nextID(), target: target)
+        let timer = Timer(due: now + max(0, ms), delay: ms, id: nextID(), target: target)
         timers.append(timer)
         timers.sort { ($0.due, $0.id) < ($1.due, $1.id) }
         return cancellation

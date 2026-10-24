@@ -280,7 +280,7 @@ import Testing
             s.settle(); f.select(f.ids[1]); other.hang()
             let start = f.mac.scheduler.trace.count
             f.tessel.press("focus right")
-            let result = f.mac.pause(after: .call("SchedulingPort.after +100ms"))
+            let result = f.mac.pause(after: .laneCall("SchedulingPort.after +100ms", lane: "tessel.ax.\(other.pid)"))
             if case .paused = result {} else { s.expect("first rail retry is pending: \(result)", false) }
             f.tessel.press("workspace 2"); s.settle()
             let attempts = f.mac.scheduler.trace.dropFirst(start).filter { $0.contains("tessel.ax.\(other.pid) AccessibilityPort.copy AXHidden \(other.alias) ") }

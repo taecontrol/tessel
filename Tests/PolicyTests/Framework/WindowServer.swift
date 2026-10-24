@@ -30,6 +30,21 @@ import Testing
         #expect(mac.windowOrder.listings([id]).isEmpty)
     }
 
+    @Test("the stage waits for the served frame before its reveal fade")
+    func stageRevealWaitsForCommit() throws {
+        let mac = SimulatedMac(); defer { mac.shutdown() }
+        let app = mac.launch(windows: 1), id = app.windows[0]
+        app.delayCommits(milliseconds: 20)
+        let ax = mac.ax, element = try #require(ax.copy(.windows, of: ax.application(app.pid)).value?.elements?.first)
+        let target = try #require(mac.frame(id)).offsetBy(dx: 70, dy: 0)
+        #expect(ax.set(.position, of: element, to: .point(target.origin)) == .success)
+        var revealed: Int?
+        mac.stage.reveal([id: target], hidden: []) { revealed = mac.scheduler.now }
+        #expect(mac.settle() == .settled)
+        let commit = try #require(mac.windowServerCommits.last?.at), finished = try #require(revealed)
+        #expect(finished >= commit + 40 && finished <= commit + 44)
+    }
+
     @Test("native tab members commit together in the closet and app moves commit immediately")
     func tabsAndNativeMoves() throws {
         let mac = SimulatedMac(); defer { mac.shutdown() }

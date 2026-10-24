@@ -5,6 +5,23 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct WindowServerHandoff {
+    @Test("#40 E1: a fast visible replacement cannot vacate coverage before a slow return shows", arguments: WriteOrder.allCases)
+    func returningVisibilityHoldsSweepDependencies(_ writes: WriteOrder) {
+        requireCarousel(Scenario.run("slow return beside a fast app commit", writes: writes) { s in
+            let f = CarouselFixture(s, duration: 0, appCount: 2), b = f.ids[1], c = f.ids[2]
+            f.select(b)
+            f.apps[0].delayCommits(milliseconds: 20); f.apps[1].delayCommits(milliseconds: 0)
+            f.mac.clearMotionHistory(); f.mac.beginPresentationTrace()
+            f.tessel.press("focus right"); s.settle()
+            let point = CGPoint(x: 1000, y: 100)
+            let exposed = f.mac.presentationStates.filter { !$0.frames.values.contains { $0.contains(point) } }
+            s.expect("shared coverage stays intact across unequal app commits: \(exposed.map(\.operation))", exposed.isEmpty)
+            let shown = f.mac.visibilityChanges.first { $0.showing && $0.windows.contains(c) }?.at
+            let placed = f.mac.geometryWrites.first { $0.window == b }?.at
+            s.expect("the return shows before the covering tile vacates its old area", shown != nil && placed != nil && shown! <= placed!)
+        })
+    }
+
     @Test("#40 E2: a departure waits for the covering tile's app commit and the first recheck", arguments: WriteOrder.allCases)
     func departureWaitsForListing(_ writes: WriteOrder) {
         requireCarousel(Scenario.run("departure waits for WindowServer", writes: writes) { s in
@@ -27,13 +44,14 @@ import Testing
     @Test("#40 E5: an app that stops after answering cannot retain a departure beyond 100 ms", arguments: WriteOrder.allCases)
     func departureHasAHundredMillisecondLimit(_ writes: WriteOrder) {
         requireCarousel(Scenario.run("departure with an uncommitted, stopped replacement", writes: writes) { s in
-            let exit = heldExit(s), f = exit.fixture, acceptedAt = f.mac.scheduler.now + 1
+            let exit = heldExit(s), f = exit.fixture, publication = f.mac.scheduler.trace.count
             s.after(milliseconds: 1, "the tile app stops after answering AXSize") { f.apps[1].hang() }
             s.after(milliseconds: 100, "one millisecond before the listing limit") {
                 s.expect("the departure remains visible for the full 100 ms wait", f.mac.isVisible(exit.float))
             }
             s.settle()
             let hidden = f.mac.visibilityChanges.first { !$0.showing && $0.windows.contains(exit.float) }?.at
+            let acceptedAt = completionTime(f, since: publication)
             s.expect("the departure hides exactly at the 100 ms limit (accepted \(acceptedAt), hidden \(String(describing: hidden)))", hidden == acceptedAt + 100)
             s.expect("the bounded handoff reaches its terminal state", !placementPending(f.tessel))
             s.expect("the app remains stopped with its old served frame", f.mac.servedFrame(exit.tile)?.minX == 1100)
@@ -45,13 +63,14 @@ import Testing
     @Test("#40 E6; #40 E7: an uncommitted returning tile shows at 100 ms and focus targets only visible windows", arguments: WriteOrder.allCases)
     func returningWindowHasAHundredMillisecondLimit(_ writes: WriteOrder) {
         requireCarousel(Scenario.run("return with an uncommitted, stopped app", writes: writes) { s in
-            let f = returningWorkspace(s), returning = f.ids[1], acceptedAt = f.mac.scheduler.now + 1
+            let f = returningWorkspace(s), returning = f.ids[1], publication = f.mac.scheduler.trace.count
             s.after(milliseconds: 1, "the returning app stops after its readback") { f.apps[1].hang() }
             s.after(milliseconds: 100, "one millisecond before the return limit") {
                 s.expect("the unconfirmed return stays in the closet for 100 ms", f.mac.isInCloset(returning) && !f.mac.isVisible(returning))
             }
             s.settle()
             let shown = f.mac.visibilityChanges.first { $0.showing && $0.windows.contains(returning) }?.at
+            let acceptedAt = completionTime(f, since: publication)
             s.expect("the return shows exactly at the 100 ms limit (accepted \(acceptedAt), shown \(String(describing: shown)))", shown == acceptedAt + 100)
             s.expect("the returning handoff reaches its terminal state", !placementPending(f.tessel))
             s.expect("native focus is never requested in the closet", f.mac.focusRequests.allSatisfy { !$0.hidden })
@@ -85,6 +104,71 @@ import Testing
         })
     }
 
+    @Test("#40 E2: confirmation compares the clamped AX frame rather than the request", arguments: WriteOrder.allCases)
+    func clampedAcceptanceIsConfirmedBeforeTheLimit(_ writes: WriteOrder) {
+        requireCarousel(Scenario.run("confirm a clamped accepted size", writes: writes) { s in
+            let f = CarouselFixture(s, duration: 0, appCount: 2), b = f.ids[1]
+            f.select(b); f.press("send 2"); f.press("workspace 1")
+            f.apps[1].limitSize(b, maximum: CGSize(width: 600, height: 100_000))
+            f.tessel.changeConfig("[animation]\nduration = 0\n[gaps]\nouter = 0\n"); s.settle()
+            f.apps[1].delayCommits(milliseconds: 20)
+            f.mac.clearMotionHistory(); f.tessel.press("workspace 2"); s.settle()
+            let size = f.mac.geometryWrites.first { $0.window == b && $0.attribute == .size }
+            s.expect("AX clamps the requested width by more than the listing tolerance", size.map { abs(($0.requested.size?.width ?? 0) - $0.accepted.width) > 1 } == true)
+            let shown = f.mac.visibilityChanges.first { $0.showing && $0.windows.contains(b) }?.at
+            s.expect("the accepted frame confirms without waiting for the limit", shown != nil && size != nil && shown! < size!.at + 100)
+        })
+    }
+
+    enum Difference: String, CaseIterable { case x, y, width, height }
+
+    @Test("#40 E2: listing confirmation uses an inclusive one-point tolerance on every component", arguments: WriteOrder.allCases, Difference.allCases)
+    func acceptedFrameTolerance(_ writes: WriteOrder, _ component: Difference) {
+        for delta in [0.5, 1, 1.5] {
+            requireCarousel(Scenario.run("listing difference \(component.rawValue) \(delta)pt", writes: writes) { s in
+                let exit = heldExit(s), f = exit.fixture, publication = f.mac.scheduler.trace.count
+                let accepted = f.frame(exit.tile)
+                s.after(milliseconds: 1, "the app commits a nearby native frame then stops") {
+                    switch component {
+                    case .x: f.apps[1].moveFromApplication(exit.tile, to: CGPoint(x: accepted.minX + delta, y: accepted.minY))
+                    case .y: f.apps[1].moveFromApplication(exit.tile, to: CGPoint(x: accepted.minX, y: accepted.minY + delta))
+                    case .width: f.apps[1].resizeFromApplication(exit.tile, to: CGSize(width: accepted.width + delta, height: accepted.height))
+                    case .height: f.apps[1].resizeFromApplication(exit.tile, to: CGSize(width: accepted.width, height: accepted.height + delta))
+                    }
+                    f.apps[1].hang()
+                }
+                s.settle()
+                let acceptedAt = completionTime(f, since: publication)
+                let hidden = f.mac.visibilityChanges.first { !$0.showing && $0.windows.contains(exit.float) }?.at
+                if delta <= 1 {
+                    s.expect("a listing within one point confirms before the limit", hidden != nil && hidden! < acceptedAt + 100)
+                } else {
+                    s.expect("a listing beyond one point waits for the limit", hidden == acceptedAt + 100)
+                }
+            })
+        }
+    }
+
+    @Test("#40 E2: an accepted frame listed off screen does not release a departure", arguments: WriteOrder.allCases)
+    func aReplacementMustBeListedOnScreen(_ writes: WriteOrder) {
+        requireCarousel(Scenario.run("a replacement commits but leaves the screen before its result arrives", writes: writes) { s in
+            let exit = heldExit(s), f = exit.fixture, publication = f.mac.scheduler.trace.count
+            let accepted = f.frame(exit.tile)
+            s.after(milliseconds: 1, "the app commits, minimizes its window and stops") {
+                f.apps[1].moveFromApplication(exit.tile, to: accepted.origin)
+                f.apps[1].minimize(exit.tile)
+                f.apps[1].hang()
+            }
+            s.after(milliseconds: 80, "a matching off-screen frame is not confirmation") {
+                s.expect("the departure remains visible over an off-screen replacement", f.mac.isVisible(exit.float))
+            }
+            s.settle()
+            let acceptedAt = completionTime(f, since: publication)
+            let hidden = f.mac.visibilityChanges.first { !$0.showing && $0.windows.contains(exit.float) }?.at
+            s.expect("an off-screen listing releases only at the limit", hidden == acceptedAt + 100)
+        })
+    }
+
     @Test("#40 E8: a current WindowServer view preserves the zero-delay effect order without rechecks", arguments: WriteOrder.allCases)
     func immediateCommitsPreserveOrdering(_ writes: WriteOrder) {
         requireCarousel(Scenario.run("zero-delay WindowServer", writes: writes) { s in
@@ -111,7 +195,7 @@ import Testing
         requireCarousel(Scenario.run("cancel a listing wait with \(action)", writes: writes) { s in
             let exit = heldExit(s, commit: 80), f = exit.fixture
             let before = f.mac.listingReads.count, cancelled = CancellationObservation()
-            s.after(milliseconds: 2, "cancel the listing wait") {
+            s.after(milliseconds: 10, "cancel the listing wait") {
                 s.expect("the old transition was waiting on a listing", f.mac.listingReads.count > before)
                 switch action {
                 case "transition": f.tessel.press("toggle layer")
@@ -119,6 +203,7 @@ import Testing
                 default: f.tessel.workspaces.disable(reason: "test interruption")
                 }
                 cancelled.reads = f.mac.listingReads.count
+                s.expect("cancellation leaves no live listing recheck or deadline", !f.mac.scheduler.pendingMainDelays.contains(4) && !f.mac.scheduler.pendingMainDelays.contains(100))
             }
             s.settle()
             s.expect("cancelled listing waits do no more reads", f.mac.listingReads.count == cancelled.reads)
@@ -133,11 +218,12 @@ import Testing
     @Test("#40 E10; #40 E11: a missing listing is bounded and reads only its waiting replacement", arguments: WriteOrder.allCases)
     func missingListingsCannotStrandDepartures(_ writes: WriteOrder) {
         requireCarousel(Scenario.run("a replacement that WindowServer never lists", writes: writes) { s in
-            let exit = heldExit(s), f = exit.fixture, acceptedAt = f.mac.scheduler.now + 1
+            let exit = heldExit(s), f = exit.fixture, publication = f.mac.scheduler.trace.count
             f.mac.omitListings(of: [exit.tile])
             let first = f.mac.listingReads.count, start = f.mac.scheduler.trace.count
             s.settle()
             let hidden = f.mac.visibilityChanges.first { !$0.showing && $0.windows.contains(exit.float) }?.at
+            let acceptedAt = completionTime(f, since: publication)
             s.expect("a missing listing retires the departure at 100 ms", hidden == acceptedAt + 100)
             s.expect("a missing listing cannot strand the handoff", !placementPending(f.tessel))
             let reads = Array(f.mac.listingReads.dropFirst(first))
@@ -152,12 +238,31 @@ import Testing
         })
     }
 
+    @Test("#40 E11: rechecks stop asking for a return once it is confirmed", arguments: WriteOrder.allCases)
+    func listingReadsDropConfirmedWindows(_ writes: WriteOrder) {
+        requireCarousel(Scenario.run("one confirmed return beside one missing listing", writes: writes) { s in
+            let f = CarouselFixture(s, duration: 0, appCount: 2), b = f.ids[1], c = f.ids[2]
+            f.select(b)
+            f.apps[0].delayCommits(milliseconds: 20); f.apps[1].delayCommits(milliseconds: 0)
+            f.mac.omitListings(of: [b]); f.mac.clearMotionHistory()
+            let first = f.mac.listingReads.count
+            f.tessel.press("focus right"); s.settle()
+            guard let shown = f.mac.visibilityChanges.first(where: { $0.showing && $0.windows.contains(c) })?.at else {
+                s.expect("the independent return is confirmed and shown", false); return
+            }
+            let reads = f.mac.listingReads.dropFirst(first).filter { $0.at > shown }
+            s.expect("later queries ask only for the still-waiting replacement", !reads.isEmpty && reads.allSatisfy { $0.windows == [b] })
+            s.expect("the remaining wait stays within its read budget", reads.count <= 26)
+        })
+    }
+
     @Test("#40 E10: a missing listing cannot leave a returning window in the closet", arguments: WriteOrder.allCases)
     func missingListingsCannotStrandReturns(_ writes: WriteOrder) {
         requireCarousel(Scenario.run("a return that WindowServer never lists", writes: writes) { s in
-            let f = returningWorkspace(s), returning = f.ids[1], acceptedAt = f.mac.scheduler.now + 1
+            let f = returningWorkspace(s), returning = f.ids[1], publication = f.mac.scheduler.trace.count
             f.mac.omitListings(of: [returning]); s.settle()
             let shown = f.mac.visibilityChanges.first { $0.showing && $0.windows.contains(returning) }?.at
+            let acceptedAt = completionTime(f, since: publication)
             s.expect("a missing listing shows the return at 100 ms", shown == acceptedAt + 100)
             s.expect("a missing return listing cannot strand the handoff", !placementPending(f.tessel))
         })
@@ -187,6 +292,7 @@ import Testing
         let f = CarouselFixture(s, duration: 0, appCount: 2), a = f.ids[0], b = f.ids[1]
         f.select(b); f.press("send 2"); f.press("workspace 1")
         f.select(a); f.press("send 2"); f.press("workspace 1")
+        f.apps[1].moveFromApplication(b, to: CGPoint(x: 1100, y: 43)); s.settle()
         f.apps[1].delayCommits(milliseconds: 20)
         f.mac.clearMotionHistory(); f.mac.beginPresentationTrace()
         f.tessel.press("workspace 2")
@@ -196,6 +302,22 @@ import Testing
         let answered = f.mac.pause(after: .read(f.apps[1]))
         if case .paused = answered {} else { s.expect("the returning placement has captured its final publication: \(answered)", false) }
         return f
+    }
+
+    /// A placement publishes its captured snapshot, then its result. Measure
+    /// from the job that delivers the result, independently of the gate's timers.
+    private func completionTime(_ f: CarouselFixture, since start: Int) -> Int {
+        let trace = f.mac.scheduler.trace
+        let enqueued = trace.dropFirst(start).compactMap { line -> Int? in
+            guard line.contains(" tessel.ax.\(f.apps[1].pid) main enqueued #"), let id = line.split(separator: "#").last.flatMap({ Int($0) }) else { return nil }
+            return id
+        }
+        guard enqueued.count >= 2, let delivery = trace.first(where: { $0.hasSuffix(" main main begin #\(enqueued[1])") }),
+              let at = try? RenderBoundary.time(delivery) else {
+            f.s.expect("the placement completion has an independently identified delivery job", false)
+            return -1
+        }
+        return at
     }
 
     private func placementPending(_ tessel: Tessel) -> Bool {
