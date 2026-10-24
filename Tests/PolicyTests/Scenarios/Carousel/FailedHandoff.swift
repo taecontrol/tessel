@@ -187,10 +187,27 @@ import Testing
         })
     }
 
-    @Test("#41 E8: a failed ending keeps covers, management and idle behavior", arguments: WriteOrder.allCases, ["replacement", "dependency", "focus"])
+    @Test("#41 E8: a failed ending keeps covers, management and idle behavior", arguments: WriteOrder.allCases, ["replacement", "dependency", "focus", "independent"])
     func failureNeverPretendsSuccess(_ writes: WriteOrder, _ failure: String) {
         requireCarousel(Scenario.run("#41 failed ending invariants / \(failure) / \(writes)", writes: writes) { s in
             let f = CarouselFixture(s, duration: 0, appCount: failure == "focus" ? 1 : 2)
+            if failure == "independent" {
+                prepareWorkspace(f)
+                f.press("workspace 2"); f.select(f.ids[1]); f.press("workspace 1")
+                f.apps[1].limitSize(f.ids[1], maximum: CGSize(width: 749, height: 100_000))
+                f.apps[0].hang()
+                f.tessel.changeConfig("[animation]\nduration = 0\n[gaps]\nouter = 20\n"); s.settle()
+                f.apps[1].delayAXReplies(milliseconds: 250)
+                f.mac.clearMotionHistory()
+                let start = f.mac.scheduler.trace.count
+                f.press("workspace 2")
+                s.expect("an independent failed placement is not retried by accepted-size learning", hiddenTimeouts(f, app: f.apps[0], since: start) == 5)
+                for attribute in [AXAttribute.size, .position] {
+                    s.expect("the prepared tile receives only one geometry burst", f.mac.geometryWrites.filter { $0.window == f.ids[1] && $0.attribute == attribute }.count == 1)
+                }
+                enabledWithoutDesktopActivation(f, since: start)
+                return
+            }
             if failure == "replacement" { prepareWorkspace(f) }
             else if failure == "dependency" { prepareDependency(f) }
             else { prepareRail(f) }
