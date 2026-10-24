@@ -16,18 +16,24 @@ listing before being shown.
 Instant presentation used AX acceptance to retire departing windows and show
 returning ones in the same main-queue turn. Closet visibility changed before
 the replacement's geometry commit, exposing desktop or an old frame for one
-or two display frames. The simulator hid this gap by serving AX geometry
-immediately. An 8 ms app commit exposed stop, close and layer-exit handoffs.
+or two display frames. Releasing a visible sweep's dependent placement on AX
+acceptance has the same problem: a faster app can vacate coverage before its
+predecessor commits, even when that predecessor covers no departing window.
+The simulator hid this gap by serving AX geometry immediately. An 8 ms app
+commit exposed stop, close and layer-exit handoffs.
 WindowServer drawing what it lists on its next frame is already the stage's
 working assumption in [ADR-0006](0006-move-carousel-windows-through-captures-on-a-stage.md).
 
 ## Decision
 
 Keep AX readiness and add a bounded WindowServer confirmation before changing
-visibility. A departure waits for every covering replacement to be in place
-and listed on screen within one point of its AX-accepted frame. A return waits
+visibility or releasing a placement that depends on another window's coverage.
+A departure waits for every covering replacement to be in place and listed on
+screen within one point of its AX-accepted frame. A return waits
 for the same geometry confirmation on any Space, including the closet.
 Unchanged returns follow the same rule. Focus follows the show.
+A sweep predecessor must be in place and confirmed on screen before its
+dependent placement starts, whether or not it also covers a departing window.
 
 Recheck only waiting windows, in one batch every 4 ms, and release each wait
 at 100 ms even if the listing is missing or stale. The limit accommodates
@@ -46,13 +52,16 @@ AX position and size writes can each commit while the window is visible, and
 
 - Stop crossings, close and layer exit no longer retire their covering view
   merely because AX answered. Returns can be prepared and confirmed hidden.
-- A normal handoff adds at most the next 4 ms recheck after an app commit;
-  a noncommitting app pays the 100 ms limit. Existing latency and idle resource
-  budgets remain unchanged.
+- Each coverage-dependent link serializes one app commit and up to the next
+  4 ms recheck; a sweep can add several such waits. Disjoint placements stay
+  parallel. A noncommitting predecessor pays its own 100 ms limit. Existing
+  latency and idle resource budgets remain unchanged.
 - A single window wait costs at most 26 batched listing rechecks; serial
-  placement dependencies can require more in one transition. There is no public
-  notification for this WindowServer state, so bounded polling follows the
-  stage's precedent rather than introducing a private notification dependency.
+  placement dependencies can require more in one transition. Coinciding
+  deadlines must not reread the remaining waits or reset the shared cadence.
+  There is no public notification for this WindowServer state, so bounded
+  polling follows the stage's precedent rather than introducing a private
+  notification dependency.
 - The simulator must maintain an app-committed view separately from AX facts.
   Its default 8 ms commit, 0/20 ms variants and hung/busy deferral are pinned by
   the `window-server-listing` signed native contract, following

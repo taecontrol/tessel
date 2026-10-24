@@ -289,7 +289,7 @@ import Testing
         })
     }
 
-    @Test("#40 E11: rechecks stop asking for a return once it is confirmed", arguments: WriteOrder.allCases)
+    @Test("#40 E11: rechecks stop asking for a return once it is confirmed on screen", arguments: WriteOrder.allCases)
     func listingReadsDropConfirmedWindows(_ writes: WriteOrder) {
         requireCarousel(Scenario.run("one confirmed return beside one missing listing", writes: writes) { s in
             let f = CarouselFixture(s, duration: 0, appCount: 2), b = f.ids[1], c = f.ids[2]
@@ -301,7 +301,11 @@ import Testing
             guard let shown = f.mac.visibilityChanges.first(where: { $0.showing && $0.windows.contains(c) })?.at else {
                 s.expect("the independent return is confirmed and shown", false); return
             }
-            let reads = f.mac.listingReads.dropFirst(first).filter { $0.at > shown }
+            // A hidden listing confirms showing, but a sweep predecessor also
+            // needs an on-screen listing on the next shared recheck.
+            let screenChecks = f.mac.listingReads.dropFirst(first).filter { $0.at > shown && $0.windows.contains(c) }
+            s.expect("the shown predecessor needs at most one on-screen recheck", screenChecks.count <= 1 && screenChecks.allSatisfy { $0.at <= shown + 4 })
+            let reads = f.mac.listingReads.dropFirst(first).filter { $0.at > shown + 4 }
             s.expect("later queries ask only for the still-waiting replacement", !reads.isEmpty && reads.allSatisfy { $0.windows == [b] })
             s.expect("the remaining wait stays within its read budget", reads.count <= 26)
         })

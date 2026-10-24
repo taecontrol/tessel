@@ -534,17 +534,26 @@ comparison uses the accepted frame rather than the requested one because AX
 can clamp geometry. A departure waits for every covering replacement to be in
 place and confirmed; a return waits for confirmation before showing, and focus
 waits for the show. Prepared returns also hold their existing sweep dependencies
-until shown.
+until shown. A dependent visible placement also waits for every predecessor to
+be in place and confirmed on screen, even when that predecessor covers no
+departing window. This preserves shared coverage across apps with unequal
+commit delays throughout a sweep, rather than just at its visibility changes.
 
 The listing wait starts when policy receives the accepted frame, or tracks the
 last observation of an unchanged or unanswered window. One gate owns each
-transition's 4 ms recheck and each window's 100 ms limit, batching waiting IDs
-into at most one listing read per recheck. A single wait needs at most 26
-rechecks (100 / 4 + 1). A new transition, pointer press, disable or quit cancels
-it; completion leaves no listing timer or query at rest. The gate runs under
-the stage too. Normal latency gains at most the next 4 ms recheck after commit;
-the latency suite already ends at final WindowServer geometry. Its 200 ms p95
-and all resource limits are unchanged.
+transition's shared recheck, at most once every 4 ms while any window waits,
+and each window's independent 100 ms limit. Each recheck batches waiting IDs
+into at most one listing read. A newly accepted wait gets its initial read
+without rereading existing waits; coinciding expiries release together without
+reading the other windows or restarting their polling cadence. A single wait
+needs at most 26 rechecks (100 / 4 + 1); the budget is per wait, so serial waits
+can require more in one handoff. A new transition, pointer press, disable or
+quit cancels it; completion leaves no listing timer or query at rest. The gate
+runs under the stage too. A coverage dependency serializes one app commit per
+dependent link, plus up to 4 ms to confirm it; disjoint placements remain
+parallel. Latency can therefore grow by more than one recheck over a whole
+sweep. The latency suite ends at final WindowServer geometry; its 200 ms p95
+and all resource limits remain unchanged.
 
 The `window-server-listing` assumption and signed contract (#40 E12) pin the
 separate views: a stopped app keeps its old listing after accepting AX, an app

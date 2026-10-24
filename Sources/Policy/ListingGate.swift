@@ -22,6 +22,7 @@ import Ports
     private var tick: (any ScheduledWork)?
     private var recheck: (@MainActor () -> Void)?
     private var batch: [UInt32: WindowListing]?
+    private var expiryPending = false
     private var cancelled = false
 
     init(order: any WindowOrderPort, scheduler: any SchedulingPort) {
@@ -38,8 +39,16 @@ import Ports
                 self.frames[id]?.expired = true
                 self.frames[id]?.limit = nil
                 guard self.waiting.remove(id) != nil else { return }
-                self.tick?.cancel(); self.tick = nil
-                self.check()
+                if self.waiting.isEmpty { self.tick?.cancel(); self.tick = nil }
+                // Release expired waits together, without reading other waits
+                // or restarting their shared polling cadence.
+                guard !self.expiryPending else { return }
+                self.expiryPending = true
+                self.scheduler.main.async { [weak self] in
+                    guard let self, !self.cancelled else { return }
+                    self.expiryPending = false
+                    self.check(reading: false)
+                }
             }
         }
     }
@@ -53,9 +62,11 @@ import Ports
             return !frame.expired && !(frame.listed && (!onScreen || frame.onScreen))
         }
         if !pending.isEmpty {
+            let joined = pending.subtracting(waiting)
             waiting.formUnion(pending)
             // A recheck shares one read across returning and covering windows.
-            let live = batch ?? order.listings(waiting)
+            // Between ticks, only a newly joined wait gets its initial read.
+            let live = batch ?? (joined.isEmpty ? [:] : order.listings(joined))
             for id in pending {
                 guard let listed = live[id], let accepted = frames[id]?.frame,
                       abs(listed.frame.minX - accepted.minX) <= 1, abs(listed.frame.minY - accepted.minY) <= 1,
@@ -86,12 +97,12 @@ import Ports
         tick = scheduler.main.after(milliseconds: Self.interval) { [weak self] in
             guard let self, !self.cancelled else { return }
             self.tick = nil
-            self.check()
+            self.check(reading: true)
         }
     }
 
-    private func check() {
-        batch = waiting.isEmpty ? [:] : order.listings(waiting)
+    private func check(reading: Bool) {
+        batch = reading && !waiting.isEmpty ? order.listings(waiting) : [:]
         recheck?()
         batch = nil
     }

@@ -1530,6 +1530,7 @@ final class Workspaces {
         let covering = Set(targets.filter { _, rect in
             hiddenRoots.contains { id in entries[id].map { rect.intersects($0.observation.frame.intersection(bounds)) } == true }
         }.keys)
+        let needsConfirmation = covering.union(dependencies.reduce(into: Set<UInt32>()) { $0.formUnion($1) })
         // A window is in place when tessel has no write of its own outstanding
         // for it and its last observation is within the tolerance of its
         // target. A scheduled window is judged only when its own placement
@@ -1563,7 +1564,7 @@ final class Workspaces {
             self.publish()
             return true
         }
-        gate.track(Dictionary(uniqueKeysWithValues: ready.intersection(covering).compactMap { id in entries[id].map { (id, $0.observation.frame) } }))
+        gate.track(Dictionary(uniqueKeysWithValues: ready.intersection(needsConfirmation).compactMap { id in entries[id].map { (id, $0.observation.frame) } }))
         func showSettled() {
             let shown = gate.settled(pendingShows.intersection(ready), onScreen: false).sorted()
             guard !shown.isEmpty else { return }
@@ -1663,6 +1664,7 @@ final class Workspaces {
             for index in placements.indices where pendingPlacements.contains(index) {
                 let p = placements[index]
                 guard !activePIDs.contains(p.pid), dependencies[index].isSubset(of: ready), dependencies[index].isDisjoint(with: pendingShows) else { continue }
+                guard gate.settled(dependencies[index], onScreen: true) == dependencies[index] else { continue }
                 pendingPlacements.remove(index)
                 activePIDs.insert(p.pid)
                 catalog.presentRail(pid: p.pid, id: p.id, frame: p.target, position: p.position, resize: p.resize, focus: false, screenRight: self.screenRight) { [weak self] result in
@@ -1673,7 +1675,7 @@ final class Workspaces {
                         self.carouselPresentation?.pending.remove(p.id)
                         ready.insert(p.id)
                         if newlyShown.contains(p.id) { pendingShows.insert(p.id) }
-                        if covering.contains(p.id) || newlyShown.contains(p.id) { gate.track([p.id: accepted]) }
+                        if needsConfirmation.contains(p.id) || newlyShown.contains(p.id) { gate.track([p.id: accepted]) }
                         showSettled()
                         if p.float { self.layerPlacements[p.id] = nil }
                         if underStage { self.staging?.placed[p.id] = accepted }
@@ -1692,7 +1694,7 @@ final class Workspaces {
                         // its cached frame: its own snapshot renders the next
                         // layout. A superseded request decides nothing.
                         ready.insert(p.id)
-                        if covering.contains(p.id), let seen = self.entries[p.id]?.observation.frame { gate.track([p.id: seen]) }
+                        if needsConfirmation.contains(p.id), let seen = self.entries[p.id]?.observation.frame { gate.track([p.id: seen]) }
                     }
                     if !ready.contains(p.id), result.outcome == .unanswered || result.outcome == .withdrawn {
                         failedPlacements.insert(p.id)
