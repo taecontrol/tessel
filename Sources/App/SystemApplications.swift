@@ -54,6 +54,8 @@ struct SystemScreen: ScreenPort {
 
 @MainActor
 struct SystemWindowOrder: WindowOrderPort {
+    nonisolated func listings(_ windows: Set<UInt32>) -> [UInt32: WindowListing] { WindowServerListings.read(windows) }
+
     nonisolated func windowLevels(_ windows: Set<UInt32>) -> [UInt32: Int] {
         guard !windows.isEmpty else { return [:] }
         return autoreleasepool {
@@ -73,6 +75,26 @@ struct SystemWindowOrder: WindowOrderPort {
         autoreleasepool {
             (CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? [])
                 .compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value }
+        }
+    }
+}
+
+/// Shared by instant presentation and the stage's reveal/capture checks.
+enum WindowServerListings {
+    nonisolated static func read(_ windows: Set<UInt32>) -> [UInt32: WindowListing] {
+        guard !windows.isEmpty else { return [:] }
+        return autoreleasepool {
+            var pointers: [UnsafeRawPointer?] = windows.sorted().map { UnsafeRawPointer(bitPattern: UInt($0)) }
+            let array = CFArrayCreate(nil, &pointers, pointers.count, nil)
+            let descriptions = CGWindowListCreateDescriptionFromArray(array) as? [[String: Any]] ?? []
+            var result: [UInt32: WindowListing] = [:]
+            for row in descriptions {
+                guard let id = row[kCGWindowNumber as String] as? UInt32,
+                      let bounds = row[kCGWindowBounds as String] as? NSDictionary,
+                      let frame = CGRect(dictionaryRepresentation: bounds) else { continue }
+                result[id] = WindowListing(frame: frame, onScreen: row[kCGWindowIsOnscreen as String] as? Bool ?? false)
+            }
+            return result
         }
     }
 }

@@ -372,8 +372,8 @@ final class SystemMotionStage: MotionStagePort {
             guard token == revealing, session == self.session else { return }
             let live = windowServer(Set(frames.keys).union(hidden))
             let waiting = frames.keys.filter { id in
-                guard let (bounds, onScreen) = live[id] else { return false }
-                return !onScreen || distance(bounds, frames[id]!) >= 1
+                guard let listed = live[id] else { return false }
+                return !listed.onScreen || distance(listed.frame, frames[id]!) >= 1
             } + hidden.filter { live[$0]?.onScreen == true }
             guard waiting.isEmpty else {
                 // Once a frame: WindowServer draws what it lists in its next frame.
@@ -476,23 +476,11 @@ final class SystemMotionStage: MotionStagePort {
         return content?.windows.first { $0.windowID == id }
     }
 
-    private func liveSize(_ id: UInt32) -> CGSize? { windowServer([id])[id]?.bounds.size }
+    private func liveSize(_ id: UInt32) -> CGSize? { windowServer([id])[id]?.frame.size }
 
     /// What WindowServer lists for each window: its bounds and whether it is
     /// on screen. A closed window is missing.
-    private func windowServer(_ ids: Set<UInt32>) -> [UInt32: (bounds: CGRect, onScreen: Bool)] {
-        guard !ids.isEmpty else { return [:] }
-        var pointers: [UnsafeRawPointer?] = ids.map { UnsafeRawPointer(bitPattern: UInt($0)) }
-        let array = CFArrayCreate(nil, &pointers, pointers.count, nil)
-        let list = CGWindowListCreateDescriptionFromArray(array) as? [[String: Any]] ?? []
-        var result: [UInt32: (bounds: CGRect, onScreen: Bool)] = [:]
-        for entry in list {
-            guard let id = entry[kCGWindowNumber as String] as? UInt32, let bounds = entry[kCGWindowBounds as String] as? NSDictionary,
-                  let rect = CGRect(dictionaryRepresentation: bounds) else { continue }
-            result[id] = (rect, entry[kCGWindowIsOnscreen as String] as? Bool ?? false)
-        }
-        return result
-    }
+    private func windowServer(_ ids: Set<UInt32>) -> [UInt32: WindowListing] { WindowServerListings.read(ids) }
 
     /// The whole window, sized from its live bounds: shareable content goes
     /// stale after a resize, and ScreenCaptureKit fits the window into the
@@ -511,7 +499,7 @@ final class SystemMotionStage: MotionStagePort {
             undrawn.insert(id); retried.insert(id)
             return nil
         }
-        let size = live.bounds.size
+        let size = live.frame.size
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let configuration = SCStreamConfiguration()
         let scale = CGFloat(filter.pointPixelScale)

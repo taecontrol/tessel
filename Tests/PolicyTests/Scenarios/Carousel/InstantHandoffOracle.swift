@@ -1,6 +1,7 @@
 import CoreGraphics
 
-/// A burst excuses only its own visible geometry and affected points. Other
+/// A burst excuses only its own listed intermediate geometry and affected points.
+/// Its start frame is never excused, including while an app commit is pending. Other
 /// windows and uncovered parts of the desktop remain observable throughout it.
 /// The oracle judges tessel's own ordering (#33 E18). A window an app removes
 /// leaves the start view; what its removal exposes is checked against the
@@ -34,7 +35,8 @@ struct InstantHandoffOracle {
             for (y0, y1) in zip(ys, ys.dropFirst()) where y1 > y0 {
                 let point = CGPoint(x: (x0 + x1) / 2, y: (y0 + y1) / 2)
                 let affected = inProgress.contains { id in
-                    frames[id] != nil && (before[id]?.contains(point) == true || final[id]?.contains(point) == true || frames[id]?.contains(point) == true)
+                    frames[id] != nil && frames[id] != before[id] && frames[id] != final[id]
+                        && (before[id]?.contains(point) == true || final[id]?.contains(point) == true || frames[id]?.contains(point) == true)
                 }
                 if affected { continue }
                 let old = owner(before, startOrder, at: point), new = owner(final, endOrder, at: point)

@@ -32,6 +32,7 @@ private final class Rows: WindowPublishing {
 
 @MainActor
 private final class EmptyDesktop: ApplicationPort, ScreenPort, WindowOrderPort, HotkeyInstalling, ClosetPort {
+    nonisolated func listings(_ windows: Set<UInt32>) -> [UInt32: WindowListing] { [:] }
     nonisolated func windowLevels(_ windows: Set<UInt32>) -> [UInt32: Int] { [:] }
     let ownPID: Int32 = 100
     let runningApplications = [RunningApplication(pid: 101, bundleID: "example.fixture", name: "Example",

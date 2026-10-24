@@ -489,16 +489,17 @@ limit releases that obsolete limit. Commands arriving during the release read
 are carried forward rather than lost.
 
 Instant presentation computes one layout. It prepares returning windows while
-hidden, shows them at their final frames, places visible windows, transfers
-focus only to a visible destination, then hides departing windows once their
-replacements are ready. At every point the top visible managed window must be
-the old or final owner. tessel's own ordering never exposes the desktop; an
-external change during a handoff exposes what it would expose at rest, and the
-exposure ends with the render its snapshot triggers (#33 E18). AX writes
-temporarily disable an app's enhanced UI flag and restore its value. No stage or
-capture is involved. Busy writes retain their bounded retries.
+hidden, shows them when WindowServer confirms their accepted frames, places
+visible windows, transfers focus only to a shown destination, then hides
+departing windows once their covering replacements are in place and confirmed.
+The oracle judges the app-committed view WindowServer lists, separately from
+AX acceptance (#33 E18). External changes expose what they would at rest; their
+exposure ends at the first recheck after the app commits the placements of the
+render their snapshot triggers. AX writes temporarily disable an app's enhanced
+UI flag and restore its value. No stage or capture is involved. Busy writes
+retain their bounded retries.
 
-A replacement is ready when it is in place: tessel has no write of its own
+A replacement is **in place** when tessel has no write of its own
 outstanding for it, and its last observed frame is within one point of its
 target on each of x, y, width and height. The presenter uses the same
 tolerance to decide that a window needs no placement, so a tile it leaves
@@ -506,8 +507,8 @@ alone is never waiting for a placement that will not come. A scheduled window
 is judged only when its own placement ends, because its cached frame can
 predate an earlier write of tessel's that has not been confirmed; such a write
 stays pending until a readback succeeds, so the next render schedules the
-window again. A placement that returns a frame makes its window ready. One
-that ends without a frame says why:
+window again. A placement that returns a frame supplies its accepted geometry.
+One that ends without a frame says why:
 
 - It found the window withdrawn: minimized, hidden, fullscreen, behind another
   native tab, or gone. The window is not in place, whatever its cached frame.
@@ -523,6 +524,45 @@ that ends without a frame says why:
   checked again as it ends, so a cancellation that arrives during any AX call,
   the readback or the last unanswered attempt included, still supersedes it.
   It carries no frame and decides nothing; whatever superseded it decides.
+
+A replacement is **confirmed** when WindowServer lists it on screen within one
+point of its AX-accepted frame on x, y, width and height, or its 100 ms limit has
+passed. A returning window uses the same comparison on any Space, so its frame
+can be confirmed while it is still in the closet. Unchanged returns use this
+gate too: their accepted frame can still await an earlier app commit. The
+comparison uses the accepted frame rather than the requested one because AX
+can clamp geometry. A departure waits for every covering replacement to be in
+place and confirmed; a return waits for confirmation before showing, and focus
+waits for the show. Prepared returns also hold their existing sweep dependencies
+until shown. A dependent visible placement also waits for every predecessor to
+be in place and confirmed on screen, even when that predecessor covers no
+departing window. This preserves shared coverage across apps with unequal
+commit delays throughout a sweep, rather than just at its visibility changes.
+
+The listing wait starts when policy receives the accepted frame, or tracks the
+last observation of an unchanged or unanswered window. One gate owns each
+transition's shared recheck, at most once every 4 ms while any window waits,
+and each window's independent 100 ms limit. Each recheck batches waiting IDs
+into at most one listing read. A newly accepted wait gets its initial read
+without rereading existing waits; coinciding expiries release together without
+reading the other windows or restarting their polling cadence. A single wait
+needs at most 26 rechecks (100 / 4 + 1); the budget is per wait, so serial waits
+can require more in one handoff. A new transition, pointer press, disable or
+quit cancels it; completion leaves no listing timer or query at rest. The gate
+runs under the stage too. A coverage dependency serializes one app commit per
+dependent link, plus up to 4 ms to confirm it; disjoint placements remain
+parallel. Latency can therefore grow by more than one recheck over a whole
+sweep. The latency suite ends at final WindowServer geometry; its 200 ms p95
+and all resource limits remain unchanged.
+
+The `window-server-listing` assumption and signed contract (#40 E12) pin the
+separate views: a stopped app keeps its old listing after accepting AX, an app
+commits a hidden window's new frame before it is shown, and a closet hide lists
+it off screen. Positive checks wait for final states within the harness margin;
+only the stopped-app negative samples a 200 ms interval. The simulator serves
+committed geometry with an 8 ms app commit by default, deferred while an app is
+hung or busy. Its 0 and 20 ms variants exercise current and slower views. App
+commits are native timed events, separate from tessel's scheduling timers.
 
 A window still in the closet is never in place, so the old view stays until its
 replacement returns. A tile under a departing window whose last observation
@@ -859,61 +899,62 @@ visibility. #1 E17 now starts managed, and #1 E7 no longer expects a new arrival
 to leave the old tile focused. The hung-app classification oracle excludes
 policy-owned visibility and membership fields.
 
-E18 was amended three times during delivery: blanket overlap prohibition conflicted
-with show-before-hide; consecutive show/hide then conflicted with scrolling
-and visible-before-focus. Finally, AX origin clamping requires a growing right
-tile (849 pt at x=869 to 1135 pt at x=582.7) to move before resizing; size-first
-is clamped and position-first temporarily exposes a 286 pt strip. The pointwise
-old/final ownership and shared-coverage assertions run after every port call,
-except at points affected by a window in its own in-progress geometry burst
-(its start, final or current frame). Every visible window must itself be at its
-start or final frame, or inside that window's own burst. Hidden writes are
-invisible; returning a window always requires its final frame, even while other
-apps have bursts in flight. Physical concurrency across apps, required so a hung
-neighbor cannot block an independent placement (first review finding 5), replaces
-the earlier global burst exclusion. Bursts remain serial within each app; the
-one-write limits, hidden preparation, replacement-before-retirement and
-visible-before-focus assertions are retained. The matrix covers fourteen
-operations in all three schedulers, each with one app, two apps, and delays to
-either app's AX replies (168 scenarios); its gap-change cases require reply
-completion to reorder when the delayed app changes.
-#38 amended E18 a fourth time. Its shared-coverage clause had read as if no
-external change could expose desktop during a handoff, but no observation can
-outrun a change made after it: an app can minimize a window just after tessel
-read it. The clause now reads: tessel's own ordering never exposes the desktop;
-an external change during a handoff exposes what it would expose at rest, and
-the exposure ends with the render its snapshot triggers. The oracle above
-judges tessel's own ordering, and its close case already removes the window
-the app destroys from the start view. The layer's external-change scenarios
-check the other half: an app's minimize, close, hide or resize during a layer
-exit may expose a point only until the render its snapshot triggers, as the
-same change does at rest. Each change runs during the exit and at rest. The
-render is identified without looking at coverage: each arm runs until tessel
-receives the change's snapshot, the app's first snapshot read that starts after
-the change, and the main-lane job that delivers it runs the render. That
-render's own work never waits for time to pass, so the exposure must end, with
-the successor covering the point, before any timer scheduled from that job on
-comes due. The job and the timers come from the scheduler's trace, and an
-arm in which either is missing or malformed fails instead of checking less.
-The handoff arm may expose the point no longer than the at-rest
-arm; a change that exposes the point by itself is measured from the change. A
-repair delayed by a timer, or a dropped render, fails them. A change
-tessel has already observed is not external: a tile it read as moved gets a
-placement, and a placement that finds its window withdrawn never counts the
-window in place. A placement cancelled at any point, its readback or last
-attempt included, is superseded and carries no frame.
-E20 retains its pixel rule for workspace, rail, width, stop and close, without
-an exception for AX geometry bursts.
-Its recorder starts close comparison at the first frame excluding the destroyed
-window, matching the trace's boundary after the app's native action. Opening
-keeps its original one-step criterion: only the native initial or final palette
-bounds, with no return to the initial bounds after landing, and no final tile
-overlap. Native birth geometry is retained beside each clip. Independent native
-geometry and palette centers reject a frozen or incorrectly filtered stream;
-pixel movement is measured from before the command, so a birth first recorded
-at its final frame is valid evidence.
-E20 still permits zero recorded intermediate or gap frames, including during
-AX geometry bursts; the capture reports left- and right-tile alt-r separately.
+E18 was amended during delivery to permit show-before-hide, scrolling and
+visible-before-focus. AX origin clamping requires a growing right tile to move
+before resizing: size-first is clamped, while position-first can list an
+intermediate frame. Independent apps may have geometry bursts in flight
+together, so a hung neighbor cannot block a responsive placement. Bursts stay
+serial within each app. Hidden preparation, one write per attribute,
+replacement-before-retirement and visible-before-focus remain required.
+
+#40/#35 amend #33 E18 with this accepted text:
+
+> Tessel's ordering never exposes the desktop, judged by what WindowServer
+> lists. Tessel retires a window only when WindowServer lists at its destination
+> every replacement covering its area, and shows a returning window only when
+> WindowServer lists it at its final frame; each wait lasts at most 100 ms. An
+> app that does not commit its accepted geometry within the limit exposes what
+> it would expose at rest, until its commit. A burst excuses only the
+> intermediate frames WindowServer lists for its own window, while it lists
+> them; never that window's initial frame.
+
+The pointwise old/final ownership and shared-coverage assertions run after every
+port call and app commit against the served view. Only a window's own listed
+intermediate frame excuses its geometry and affected points; its listed start
+frame never excuses a gap while a commit is pending. A returning window must
+be final when first shown. The matrix covers fourteen operations in all three
+schedulers, with one app, two apps, delayed AX replies to either app, and 0, 8
+and 20 ms commits (504 scenarios). Gap changes require reply completion to
+reorder when the delayed app changes.
+
+#38's external-change clause still compares minimize, close, hide and resize
+during a layer exit with the same change at rest. Their exposure ends at the
+first recheck after the app commits the placements of the render their snapshot
+triggers (#40 E13). The main-lane job that delivers that snapshot identifies the
+render independently of coverage; native app commit records and policy timer
+records identify its end. Missing or malformed evidence fails the arm. A
+recheck may finish in the main job its timer makes runnable. No later state may
+expose the point, and the handoff arm may expose it no longer than the at-rest
+arm. A change tessel has already observed is not external: a tile it read as
+moved gets a placement, and a withdrawn placement never counts as in place. A
+placement cancelled at any point, including readback or the last attempt,
+is superseded and carries no frame.
+
+E20 (#35) requires zero intermediate and gap frames for workspace, rail,
+left-tile `alt-r`, both stops (halves and mixed), and close. Right-tile `alt-r`
+and open report their residue without asserting zero. The accepted platform
+residue comes from independent AX position and size commits: AppKit does not
+accept an atomic `AXFrame` write. Waiting for the final listing prevents tessel
+from retiring or returning windows too early; it cannot remove an intermediate
+frame the app itself commits while visible. #35 accepts this residue.
+
+Close comparison starts at the first frame excluding the destroyed window.
+Opening still records native birth geometry, intermediate frames, returns to
+the initial bounds after landing, and final overlap; its intermediate count is
+reported. Final overlap remains an assertion. Independent native geometry,
+visible palette centers and pixel movement reject a frozen or incorrectly
+filtered recording. The capture reports left/right widths and both stops
+separately; AX bursts have no exception in the operations that require zero.
 
 The old #2 E16 failure-recovery assertion that immediately hid the outgoing
 window now retains the old view while a hung app cannot prepare its replacement
@@ -953,7 +994,7 @@ hidden-layer Given; a live new panel would enter its single-window layer.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2, #19, #26, #33, #36, #38 and #41.
+This table is the maintained example-to-layer map for issues #1, #2, #19, #26, #33, #36, #38, #40 and #41.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -1127,6 +1168,20 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #38 E7 | T |
 | #38 E8 | X |
 | #38 E9 | T |
+| #40 E1 | P |
+| #40 E2 | P |
+| #40 E3 | P |
+| #40 E4 | P |
+| #40 E5 | P |
+| #40 E6 | P |
+| #40 E7 | P |
+| #40 E8 | P |
+| #40 E9 | P |
+| #40 E10 | P |
+| #40 E11 | P |
+| #40 E12 | C |
+| #40 E13 | P |
+| #40 E14 | X |
 | #41 E1 | P |
 | #41 E2 | P |
 | #41 E3 | P |

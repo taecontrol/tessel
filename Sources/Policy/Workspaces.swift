@@ -92,6 +92,7 @@ final class Workspaces {
         var frames: [UInt32: CGRect]
         var pending: Set<UInt32>
     }
+    private var listingGate: ListingGate?
     private var placementToken: UInt64?
     private var carouselPresentation: CarouselPresentation?
     private var layers: [Int: FloatingLayer] = [:]
@@ -241,6 +242,7 @@ final class Workspaces {
         pendingFloatTransfer = nil
         layerRestack = .done(front: nil)
         clearStage()
+        cancelListingWait()
         transition += 1
         decisions += 1
         cancelFocusDecision()
@@ -266,6 +268,7 @@ final class Workspaces {
         pendingFloatTransfer = nil
         layerRestack = .done(front: nil)
         clearStage()
+        cancelListingWait()
         transition += 1
         decisions += 1
         cancelFocusDecision()
@@ -1078,6 +1081,7 @@ final class Workspaces {
         clearStage()
         catalog?.cancelPresentations()
         placementToken = nil
+        cancelListingWait()
         transition += 1
         decisions += 1
         expectedFocus = nil
@@ -1198,6 +1202,7 @@ final class Workspaces {
             renderCarouselInstant(focusing: selection, activateDesktop: activateDesktop, takeFocus: takeFocus)
             return
         }
+        cancelListingWait()
         let leavingFocus = applications.frontmostPID.flatMap { appFocus[$0] }
         cancelFocusDecision()
         // An old raise pass is superseded; the placement under the stage
@@ -1395,14 +1400,22 @@ final class Workspaces {
     /// that a window needs no placement and that it is in place.
     private static func near(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) <= 1 }
 
+    private func cancelListingWait() {
+        listingGate?.cancel()
+        listingGate = nil
+    }
+
     /// Places every window at once. Under the stage it runs once per motion
     /// change and keeps the focus the stage already requested.
     private func renderCarouselInstant(focusing selection: UInt32?, activateDesktop: Bool, takeFocus: Bool,
                                        keepFocus: Bool = false, underStage: Bool = false) {
         if !underStage { clearStage(); decisions += 1; cancelFocusDecision() }
         guard status.enabled, !quitting, let closet else { return }
+        cancelListingWait()
         transition += 1
         let token = transition
+        let gate = ListingGate(order: windowOrder, scheduler: scheduler)
+        listingGate = gate
         placementToken = token
         layerRestack = .owed
         if underStage { staging?.awaitsPlacement = false }
@@ -1510,9 +1523,14 @@ final class Workspaces {
         var activePIDs = Set<Int32>()
         var finishedPlacements = 0
         var remainingHides = Set(hiddenRoots)
+        var pendingShows = Set<UInt32>()
         let targets = Dictionary(uniqueKeysWithValues: show.compactMap { id in
             entries[id].map { (id, frames[id] ?? layerPlacements[id] ?? $0.observation.frame) }
         })
+        let covering = Set(targets.filter { _, rect in
+            hiddenRoots.contains { id in entries[id].map { rect.intersects($0.observation.frame.intersection(bounds)) } == true }
+        }.keys)
+        let needsConfirmation = covering.union(dependencies.reduce(into: Set<UInt32>()) { $0.formUnion($1) })
         // A window is in place when tessel has no write of its own outstanding
         // for it and its last observation is within the tolerance of its
         // target. A scheduled window is judged only when its own placement
@@ -1546,22 +1564,43 @@ final class Workspaces {
             self.publish()
             return true
         }
+        gate.track(Dictionary(uniqueKeysWithValues: ready.intersection(needsConfirmation).compactMap { id in entries[id].map { (id, $0.observation.frame) } }))
+        func showSettled() {
+            let shown = gate.settled(pendingShows.intersection(ready), onScreen: false).sorted()
+            guard !shown.isEmpty else { return }
+            closet.show(shown)
+            self.closeted.subtract(shown)
+            pendingShows.subtract(shown)
+        }
+        func recheckListing() {
+            guard self.transition == token, self.listingGate === gate, self.status.enabled, !self.pointerHeld else { return }
+            showSettled()
+            focusAndCommit()
+            commitVisibility()
+            placeReady()
+            gate.scheduleRecheck(recheckListing)
+        }
         func commitVisibility() {
-            guard self.transition == token, self.status.enabled, !self.pointerHeld, focusReady else { _ = finishFailed(); return }
+            guard self.transition == token, self.listingGate === gate, self.status.enabled, !self.pointerHeld, focusReady else { _ = finishFailed(); return }
             // A busy app must not delay an independent destination's focus.
             // Return windows as each is prepared; retire an old window only
             // when every destination covering its area is actually in place.
+            let confirmed = gate.settled(ready.intersection(covering), onScreen: true)
             let safe = remainingHides.filter { id in
                 guard let old = self.entries[id]?.observation.frame else { return true }
                 return targets.allSatisfy { replacement, rect in
-                    !rect.intersects(old.intersection(bounds)) || ready.contains(replacement)
+                    !rect.intersects(old.intersection(bounds)) || ready.contains(replacement) && confirmed.contains(replacement)
                 }
             }.sorted()
             closet.hide(safe)
             self.closeted.formUnion(safe)
             remainingHides.subtract(safe)
             if finishFailed() { return }
-            guard failedPlacements.isEmpty, geometryReady, remainingHides.isEmpty else { self.publish(); return }
+            guard failedPlacements.isEmpty, geometryReady, remainingHides.isEmpty, pendingShows.isEmpty else {
+                gate.scheduleRecheck(recheckListing)
+                self.publish(); return
+            }
+            self.cancelListingWait()
             self.layerHandoff = nil
             self.desktopFocusObservation = nil
             self.placementToken = nil
@@ -1583,8 +1622,8 @@ final class Workspaces {
             commitVisibility()
         }
         func focusAndCommit() {
-            guard self.transition == token, !focusStarted else { return }
-            if let focused = self.focused, self.closeted.contains(focused), !ready.contains(focused) { _ = finishFailed(); return }
+            guard self.transition == token, self.listingGate === gate, !focusStarted else { return }
+            if let focused = self.focused, self.closeted.contains(focused) || pendingShows.contains(focused) || scheduled.contains(focused) && !ready.contains(focused) { _ = finishFailed(); return }
             focusStarted = true
             let outgoingFront = self.applications.frontmostPID
             let handoff = hiddenRoots.contains { self.entries[$0]?.pid == outgoingFront && (self.floating($0) || $0 == outgoingSelection) }
@@ -1620,24 +1659,24 @@ final class Workspaces {
             }
         }
         func placeReady() {
-            guard self.transition == token, !self.pointerHeld else { return }
+            guard self.transition == token, self.listingGate === gate, !self.pointerHeld else { return }
             guard let catalog = self.catalog else { return }
             for index in placements.indices where pendingPlacements.contains(index) {
                 let p = placements[index]
-                guard !activePIDs.contains(p.pid), dependencies[index].isSubset(of: ready) else { continue }
+                guard !activePIDs.contains(p.pid), dependencies[index].isSubset(of: ready), dependencies[index].isDisjoint(with: pendingShows) else { continue }
+                guard gate.settled(dependencies[index], onScreen: true) == dependencies[index] else { continue }
                 pendingPlacements.remove(index)
                 activePIDs.insert(p.pid)
                 catalog.presentRail(pid: p.pid, id: p.id, frame: p.target, position: p.position, resize: p.resize, focus: false, screenRight: self.screenRight) { [weak self] result in
-                    guard let self, self.transition == token else { return }
+                    guard let self, self.transition == token, self.listingGate === gate else { return }
                     activePIDs.remove(p.pid)
                     finishedPlacements += 1
                     if let accepted = result.frame {
                         self.carouselPresentation?.pending.remove(p.id)
                         ready.insert(p.id)
-                        if newlyShown.contains(p.id) {
-                            closet.show([p.id])
-                            self.closeted.remove(p.id)
-                        }
+                        if newlyShown.contains(p.id) { pendingShows.insert(p.id) }
+                        if needsConfirmation.contains(p.id) || newlyShown.contains(p.id) { gate.track([p.id: accepted]) }
+                        showSettled()
                         if p.float { self.layerPlacements[p.id] = nil }
                         if underStage { self.staging?.placed[p.id] = accepted }
                         if p.resize, !p.float, let target = p.target {
@@ -1655,6 +1694,7 @@ final class Workspaces {
                         // its cached frame: its own snapshot renders the next
                         // layout. A superseded request decides nothing.
                         ready.insert(p.id)
+                        if needsConfirmation.contains(p.id), let seen = self.entries[p.id]?.observation.frame { gate.track([p.id: seen]) }
                     }
                     if !ready.contains(p.id), result.outcome == .unanswered || result.outcome == .withdrawn {
                         failedPlacements.insert(p.id)
@@ -1666,17 +1706,20 @@ final class Workspaces {
                     }
                     commitVisibility()
                     placeReady()
+                    gate.scheduleRecheck(recheckListing)
                 }
             }
         }
         let unchanged = shownRoots.filter { id in pointerFrames[id] == nil && !placements.contains { $0.id == id } }
-        closet.show(unchanged)
-        self.closeted.subtract(unchanged)
+        pendingShows.formUnion(unchanged)
         ready.formUnion(unchanged)
+        gate.track(Dictionary(uniqueKeysWithValues: unchanged.compactMap { id in entries[id].map { (id, $0.observation.frame) } }))
+        showSettled()
         geometryReady = placements.isEmpty
         if !placements.contains(where: { $0.id == self.focused }) { focusAndCommit() }
         placeReady()
         commitVisibility()
+        gate.scheduleRecheck(recheckListing)
     }
 
 }

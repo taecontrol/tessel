@@ -44,9 +44,9 @@ import Testing
         requireLayer(result)
     }
 
-    @Test("#19 E7: a layer exit places back a tile its app moved away, then hides the float over it", arguments: WriteOrder.allCases)
-    func layerExitPlacesBackATileItsAppMoved(_ writes: WriteOrder) {
-        let result = Scenario.run("layer exit over a tile whose app move was read / \(writes)", writes: writes) { s in
+    @Test("#19 E7; #40 E4: a layer exit places back a tile its app moved away, then hides the float over it", arguments: WriteOrder.allCases, [8, 20])
+    func layerExitPlacesBackATileItsAppMoved(_ writes: WriteOrder, _ commit: Int) {
+        let result = Scenario.run("layer exit over a tile whose app move was read / \(writes), commit \(commit)ms", writes: writes) { s in
             let f = CarouselFixture(s, duration: 0, appCount: 2)
             let a = f.ids[0], b = f.ids[1]
             let target = CGRect(x: 869, y: 43, width: 849, height: 1064), point = CGPoint(x: 1000, y: 100)
@@ -59,6 +59,7 @@ import Testing
             s.settle()
             // At rest tessel reads the move and leaves the tile there (#39).
             s.expect("the app's move is read and the tile stays where its app put it", f.frame(b).minX == 1100 && !f.frame(b).contains(point))
+            f.apps[1].delayCommits(milliseconds: commit)
             f.mac.beginPresentationTrace()
             f.press("toggle layer")
             let exposed = f.mac.presentationStates.filter { state in !state.frames.values.contains { $0.contains(point) } }

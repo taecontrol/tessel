@@ -70,6 +70,17 @@ extension SimulatedMac {
             mac.scheduler.call("WindowOrderPort.onScreenOrder")
             return mac.visibleIDs()
         }
+        nonisolated func listings(_ windows: Set<UInt32>) -> [UInt32: WindowListing] {
+            mac.assume(.windowServerListing)
+            mac.scheduler.call("WindowOrderPort.listings windows=\(windows.sorted())")
+            mac.listingHistory.append(ListingRead(at: mac.scheduler.now, windows: windows))
+            let visible = Set(mac.visibleIDs())
+            return Dictionary(uniqueKeysWithValues: windows.sorted().compactMap { id in
+                guard let window = mac.windows[id], !window.closed, !mac.unlisted.contains(id),
+                      let frame = mac.serverFrame(id) else { return nil }
+                return (id, WindowListing(frame: frame, onScreen: visible.contains(id)))
+            })
+        }
         nonisolated func windowLevels(_ windows: Set<UInt32>) -> [UInt32: Int] {
             mac.assume(.windowLevels)
             mac.scheduler.call("WindowOrderPort.windowLevels")

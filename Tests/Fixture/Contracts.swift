@@ -28,8 +28,8 @@ final class FixtureContracts: NSObject {
     private var knownProcesses = Set<pid_t>()
     private var knownApplications: [pid_t: NSRunningApplication] = [:]
     private var lifecycleCounts: [String: Int] = [:]
-    private var spaces: FixtureSpaces?
-    private var moved = Set<UInt32>()
+    var spaces: FixtureSpaces?
+    var moved = Set<UInt32>()
 
     func perform(_ command: [String: Any]) throws -> [String: Any] {
         let operation = command["operation"] as? String ?? "snapshot"
@@ -184,6 +184,12 @@ final class FixtureContracts: NSObject {
                 if let pointer { CGWarpMouseCursorPosition(pointer) }
             }
             return [:]
+        case "windowListing":
+            let window = try retained(command, pid: pid)
+            guard let listed = PlacementSampler.windowServer(id(window)) else { return [:] }
+            let frame = listed.bounds
+            return ["windowListing": ["frame": [frame.minX, frame.minY, frame.width, frame.height], "onScreen": listed.onScreen]]
+        case "placementGap": return try placementGap(command, application: application, pid: pid)
         case "snapshot": return snapshot(application, pid: pid)
         case "barOwner":
             guard let index = command["bar"] as? Int, bars.indices.contains(index) else { throw FixtureContractError("retain a native bar before reading its owner") }

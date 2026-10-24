@@ -77,14 +77,16 @@ import Testing
         })
     }
 
-    @Test("#33 E18: prepare once while hidden and preserve pointwise old-or-final ownership",
+    @Test("#33 E18; #40 E1; #40 E3; #40 E7: prepare once while hidden and preserve pointwise old-or-final ownership",
           arguments: ["workspace", "rail", "width", "width-right", "width-shrink", "stop", "stop-mixed", "stop-left", "open", "close", "send", "layer-show", "layer-hide", "gaps"], WriteOrder.allCases)
     func instantOperationsHaveAnOrderedHandoff(_ operation: String, _ writes: WriteOrder) {
+        for commit in [0, 8, 20] {
         for replies in HandoffReplies.allCases {
-            requireCarousel(Scenario.run("instant \(operation) handoff \(replies)", writes: writes) { s in
+            requireCarousel(Scenario.run("instant \(operation) handoff \(replies), commit \(commit)ms", writes: writes) { s in
                 let presets = operation == "stop-mixed" ? [0.5, 739.0 / 1718.0, 0.5] : [0.5, 0.5, 0.5]
                 let f = CarouselFixture(s, presets: presets, duration: 0, appCount: replies == .singleApp ? 1 : 2)
                 f.tessel.changeConfig("[experiments]\nlayer = true\n[animation]\nduration = 0\n"); s.settle()
+                for app in f.apps { app.delayCommits(milliseconds: commit) }
                 let t = f.tessel, a = f.ids[0], b = f.ids[1], c = f.ids[2]
                 var ids = Set(f.ids)
                 switch operation {
@@ -168,7 +170,7 @@ import Testing
                 let oracle = InstantHandoffOracle(area: f.area, ids: ids, before: before, startOrder: startCGOrder, final: final, endOrder: f.mac.visibleOrder)
                 var previousVisible = Set(before.keys)
                 for state in states {
-                    let inProgress = Set(bursts.filter { $0.value.contains(state.traceIndex) }.keys)
+                    let inProgress = Set(bursts.filter { $0.value.contains(state.traceIndex) }.keys).union(state.uncommitted)
                     let visible = Set(state.frames.keys)
                     let showing = state.operation == "show" ? visible.subtracting(previousVisible) : []
                     for failure in oracle.violations(frames: state.frames, order: state.order, inProgress: inProgress, showing: showing) {
@@ -188,6 +190,7 @@ import Testing
                 s.expect("instant operations make no stage", f.mac.stageEvents.isEmpty)
                 s.expect("the operation exercised real ports", f.mac.scheduler.trace.count > traceStart)
             })
+        }
         }
     }
 }

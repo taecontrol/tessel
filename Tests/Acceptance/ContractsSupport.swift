@@ -51,6 +51,30 @@ struct NativeContractReply: Codable {
         let key: Bool?
     }
     let stage: Stage?
+    /// #40: placements traced against WindowServer's listing.
+    struct PlacementGap: Codable {
+        let id: UInt32?
+        let results: [Int32]?
+        let writes: [String]?
+        let positionFirst: Bool?
+        let frameSettable: Bool?
+        let before: [Double]?
+        let accepted: [Double]?
+        let enhancedUI: Bool?
+        let writeMilliseconds: Double?
+        let restoreMilliseconds: Double?
+        let trace: [String: [[Double]]]
+        let listedMilliseconds: [String: Double?]
+        let listedAtCommit: [String: Bool]
+        let resumedListedMilliseconds: [String: Double?]
+        let traceStartMilliseconds: Double
+        let traceEndMilliseconds: Double
+        let samples: Int
+        let longestSampleGapMilliseconds: Double
+    }
+    struct WindowListing: Codable { let frame: [Double]; let onScreen: Bool }
+    let windowListing: WindowListing?
+    let placementGap: PlacementGap?
     let sampledAt: Double?
     struct Window: Codable {
         let id: UInt32

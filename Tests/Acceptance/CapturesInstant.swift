@@ -31,7 +31,7 @@ extension Acceptance {
             let finalArrival: [Double]?
         }
 
-        @Test("#33 E20: twelve fixture-only 120 Hz recordings per instant operation")
+        @Test("#33 E20; #40 E14: twelve fixture-only 120 Hz recordings per instant operation")
         func captureInstantOperations() throws {
             let directory = root.appending(path: ".work/captures/instant")
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -172,15 +172,19 @@ extension Acceptance {
                 let bad = rows.reduce(0) { $0 + $1.pixels.intermediateFrames }, gaps = rows.reduce(0) { $0 + $1.pixels.gapFrames }
                 let gapText = operation == "open" ? "n/a" : String(gaps)
                 print("| \(operation) | \(rows.count) | \(bad) | \(gapText) | \(rows.filter { !$0.nativePixelsAgree }.count) |")
-                if operation == "open" {
-                    #expect(bad == 0, "opening must occupy only its native initial or final frame in one step")
-                } else {
+                if ["workspace", "rail", "stop", "close"].contains(operation) {
                     #expect(bad == 0 && gaps == 0, "\(operation) must show only start/final content with uninterrupted shared coverage")
                 }
             }
-            for variant in ["left", "right"] {
-                let rows = results.filter { $0.operation == "width" && $0.variant == variant }
-                print("| alt-r \(variant) | \(rows.count) | \(rows.reduce(0) { $0 + $1.pixels.intermediateFrames }) | \(rows.reduce(0) { $0 + $1.pixels.gapFrames }) | \(rows.filter { !$0.nativePixelsAgree }.count) |")
+            for (operation, variants) in [("width", ["left", "right"]), ("stop", ["halves", "mixed"])] {
+                for variant in variants {
+                    let rows = results.filter { $0.operation == operation && $0.variant == variant }
+                    let bad = rows.reduce(0) { $0 + $1.pixels.intermediateFrames }, gaps = rows.reduce(0) { $0 + $1.pixels.gapFrames }
+                    print("| \(operation) \(variant) | \(rows.count) | \(bad) | \(gaps) | \(rows.filter { !$0.nativePixelsAgree }.count) |")
+                    if operation == "stop" || variant == "left" {
+                        #expect(bad == 0 && gaps == 0, "\(operation) \(variant) requires zero intermediate and gap frames")
+                    }
+                }
             }
         }
     }

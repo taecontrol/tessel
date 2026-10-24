@@ -44,6 +44,15 @@ import Testing
                 "a hidden window's preparation cannot mask the missing right tile")
     }
 
+    @Test("#33 E18: a pending app commit never excuses its listed start frame")
+    func startFramesNeverExcuseCoverage() {
+        let handoff = InstantHandoffOracle(area: oracle.area, ids: [1, 2],
+            before: [1: left, 2: right], startOrder: [1, 2],
+            final: [2: left], endOrder: [2])
+        #expect(!handoff.violations(frames: [2: right], order: [2], inProgress: [2]).isEmpty,
+                "excusing the pending window's start frame would hide the stop-crossing gap")
+    }
+
     @Test("#33 E18: a returning window must be final even during concurrent bursts")
     func showingAlwaysRequiresFinalGeometry() {
         let returning = InstantHandoffOracle(area: oracle.area, ids: [1, 2],
