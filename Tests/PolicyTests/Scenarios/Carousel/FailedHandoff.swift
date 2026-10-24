@@ -49,10 +49,30 @@ import Testing
         })
     }
 
-    @Test("#41 E3a: a click completes the failed focus handoff without replaying presentation", arguments: WriteOrder.allCases)
-    func clickCompletesFocus(_ writes: WriteOrder) {
-        requireCarousel(Scenario.run("#41 click after exhausted focus / \(writes)", writes: writes) { s in
-            let f = CarouselFixture(s, duration: 0)
+    @Test("#41 E3a: a click completes the failed focus handoff without replaying presentation", arguments: WriteOrder.allCases, [false, true])
+    func clickCompletesFocus(_ writes: WriteOrder, _ independentFailure: Bool) {
+        requireCarousel(Scenario.run("#41 click after exhausted focus / independent failure \(independentFailure) / \(writes)", writes: writes) { s in
+            let f = CarouselFixture(s, duration: 0, appCount: independentFailure ? 2 : 1)
+            if independentFailure {
+                let launcher = f.mac.launch()
+                let panel = launcher.open(WindowSpec(subrole: "AXSystemDialog", cgLayer: 8), background: true)
+                s.settle()
+                let activation = "ApplicationEvent.activated \(launcher.alias) pid=\(launcher.pid)"
+                let controlStart = f.mac.scheduler.trace.count
+                launcher.select(panel); s.settle()
+                let control = f.mac.scheduler.trace.dropFirst(controlStart).filter { $0.contains(activation) }.count
+                s.expect("the control delivers native activation", control > 0)
+                f.select(f.ids[0]); prepareWorkspace(f)
+                f.apps[1].hang()
+                exhaustFocus(f, command: "workspace 2")
+                f.app.select(f.ids[2]); s.settle()
+                s.expect("the click completes focus while keeping the unsafe cover", f.mac.focusedWindow == f.ids[2] && f.mac.isVisible(f.ids[0]) && f.mac.isInCloset(f.ids[1]))
+                let start = f.mac.scheduler.trace.count
+                launcher.select(panel); s.settle()
+                let delivered = f.mac.scheduler.trace.dropFirst(start).filter { $0.contains(activation) }.count
+                s.expect("completed focus retires its observer even while geometry remains failed", delivered == control)
+                return
+            }
             prepareRail(f); exhaustFocus(f)
             let c = f.ids[2], start = f.mac.scheduler.trace.count
             f.mac.clearMotionHistory()
@@ -249,8 +269,8 @@ import Testing
         f.s.expect("setup: the first rail owns focus and the destination is in the closet", f.mac.focusedWindow == f.ids[0] && f.mac.isInCloset(f.ids[2]))
     }
 
-    private func exhaustFocus(_ f: CarouselFixture) {
-        f.tessel.press("focus down")
+    private func exhaustFocus(_ f: CarouselFixture, command: String = "focus down") {
+        f.tessel.press(command)
         let held = f.mac.pause(after: .call("AccessibilityPort.set AXFrontmost=true \(f.app.alias) pid=\(f.app.pid)"))
         if case .paused = held {} else { f.s.expect("the focus-only activation is held: \(held)", false) }
         f.s.expect("the destination is already visible before focus starts", f.mac.isVisible(f.ids[2]))
