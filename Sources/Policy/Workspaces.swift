@@ -1576,7 +1576,12 @@ final class Workspaces {
                 else { self.publish() }
             }
         }
-        func finishFocus() { focusReady = true; commitVisibility() }
+        func finishFocus() {
+            focusReady = true
+            self.layerHandoff = nil
+            self.desktopFocusObservation = nil
+            commitVisibility()
+        }
         func focusAndCommit() {
             guard self.transition == token, !focusStarted else { return }
             if let focused = self.focused, self.closeted.contains(focused), !ready.contains(focused) { _ = finishFailed(); return }
