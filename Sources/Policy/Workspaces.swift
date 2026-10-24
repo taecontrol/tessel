@@ -85,6 +85,7 @@ final class Workspaces {
     private var carousel = Carousel()
     private var carouselSizing = Set<UInt32>()
     private var carouselSizes: [UInt32: CGSize] = [:]
+    private var expectedPositions = ExpectedPositions()
     private struct CarouselPresentation {
         var workspace: Int
         var rail: UInt64?
@@ -247,6 +248,7 @@ final class Workspaces {
         decisions += 1
         cancelFocusDecision()
         catalog?.cancelPresentations()
+        expectedPositions.cancelQueued()
         placementToken = nil
         hotkeys?.stop()
         hotkeys = nil
@@ -273,6 +275,7 @@ final class Workspaces {
         decisions += 1
         cancelFocusDecision()
         catalog?.cancelPresentations()
+        expectedPositions.cancelQueued()
         placementToken = nil
         hotkeys?.stop()
         hotkeys = nil
@@ -348,6 +351,7 @@ final class Workspaces {
         var newFloats: [UInt32] = []
         var enteredFullscreen = false
         var resizedRail = false
+        var movedRail = false
         for var observation in observations.sorted(by: { $0.record.id < $1.record.id }) {
             let id = observation.record.id
             let old = entries[id]
@@ -385,6 +389,13 @@ final class Workspaces {
                     carouselSizes[id] = observation.frame.size
                     carouselSizing.insert(id)
                     resizedRail = true
+                }
+                if !pointerHeld, !pointerReconciling, pointerFrames[id] == nil, !carouselSizing.contains(id), !closeted.contains(id),
+                   let target = carouselPresentation?.frames[id], let screen = screens.primaryScreen,
+                   CGRect(x: screen.frame.minX, y: 0, width: screen.frame.width, height: screen.frame.height).contains(target),
+                   expectedPositions.observe(id, at: observation.frame.origin) {
+                    carouselPresentation?.pending.insert(id)
+                    movedRail = true
                 }
             } else { carousel.remove(id, suspending: true) }
 
@@ -432,6 +443,10 @@ final class Workspaces {
             ?? restoredRoots.max { (entries[$0]?.recent ?? 0) < (entries[$1]?.recent ?? 0) }
         let initialEnumeration = firstSnapshot && initialApplications.contains(pid)
         if !initialEnumeration { newFloats += newWindows.filter { floating($0) } }
+        if movedRail, !needsRender, !resizedRail, !changedTiling {
+            let instant = staging == nil && expectedPositions.areCorrections(carouselPresentation?.pending ?? [])
+            render(focusing: focused ?? preferred(in: status.active), relayout: false, takeFocus: pendingFocus, instant: instant, keepFocusDecision: true)
+        }
         if let newFloat = newFloats.last, entries[newFloat]?.workspace == status.active {
             layer.arrive(newFloat)
             remember(newFloat)
@@ -691,11 +706,11 @@ final class Workspaces {
     }
 
     private func render(focusing selection: UInt32?, relayout: Bool, activateDesktop: Bool = true, takeFocus: Bool = true,
-                        layoutWindows: Set<UInt32> = [], instant: Bool = false) {
+                        layoutWindows: Set<UInt32> = [], instant: Bool = false, keepFocusDecision: Bool = false) {
         guard status.enabled, !quitting else { return }
         if pointerHeld || pointerReconciling { pointerNeedsRender = true; return }
         if let selection, carousel.location(selection) != nil { layer.entry = .rails }
-        renderCarousel(focusing: selection, activateDesktop: activateDesktop, takeFocus: takeFocus, instant: instant)
+        renderCarousel(focusing: selection, activateDesktop: activateDesktop, takeFocus: takeFocus, instant: instant, keepFocusDecision: keepFocusDecision)
     }
 
     private func activateFinderDesktop() {
@@ -753,6 +768,7 @@ final class Workspaces {
         if let frame = layerPlacements.removeValue(forKey: previous) { layerPlacements[id] = frame }
         if let frame = pointerFrames.removeValue(forKey: previous) { pointerFrames[id] = frame }
         carousel.replace(previous,with:id)
+        expectedPositions.replace(previous, with: id)
         if let frame = carouselPresentation?.frames.removeValue(forKey: previous) { carouselPresentation?.frames[id] = frame }
         if carouselPresentation?.pending.remove(previous) != nil { carouselPresentation?.pending.insert(id) }
         if carouselSizing.remove(previous) != nil { carouselSizing.insert(id) }
@@ -785,6 +801,7 @@ final class Workspaces {
     }
 
     private func forget(_ id: UInt32) {
+        expectedPositions.forget(id)
         carousel.forget(id)
         detach(id)
         entries.removeValue(forKey: id)
@@ -1080,6 +1097,7 @@ final class Workspaces {
     private func interruptCarousel() {
         clearStage()
         catalog?.cancelPresentations()
+        expectedPositions.cancelQueued()
         placementToken = nil
         cancelListingWait()
         transition += 1
@@ -1134,6 +1152,7 @@ final class Workspaces {
         for id in pointerFrames.keys.sorted() where entries[id]?.pid == pid {
             let pending = pointerFrames.removeValue(forKey: id)!
             guard carousel.location(id) != nil, let current = entries[id]?.observation.frame else { continue }
+            if current != pending.frame { expectedPositions.dragged(id, to: current.origin) }
             if abs(current.width - pending.frame.width) > 1 || abs(current.height - pending.frame.height) > 1 {
                 pointerNeedsRender = true
                 carouselSizing.remove(id)
@@ -1176,7 +1195,7 @@ final class Workspaces {
     /// are seen move in tessel's overlay while the ordinary presenter places the
     /// real windows underneath, once each. The stage clears when the motion has
     /// settled and the real windows are in place.
-    private func renderCarousel(focusing selection: UInt32?, activateDesktop: Bool, takeFocus: Bool, instant: Bool) {
+    private func renderCarousel(focusing selection: UInt32?, activateDesktop: Bool, takeFocus: Bool, instant: Bool, keepFocusDecision: Bool = false) {
         let bounce = wall, direction = cardDirection
         wall = nil; cardDirection = nil
         let duration = motionDuration
@@ -1188,7 +1207,7 @@ final class Workspaces {
         }
         guard let stage, !instant, duration > 0, let previous = carouselPresentation,
               previous.workspace == status.active, let screen = screens.primaryScreen else {
-            renderCarouselInstant(focusing: selection, activateDesktop: activateDesktop, takeFocus: takeFocus)
+            renderCarouselInstant(focusing: selection, activateDesktop: activateDesktop, takeFocus: takeFocus, keepFocusDecision: keepFocusDecision)
             return
         }
         let bounds = CGRect(x: screen.frame.minX, y: 0, width: screen.frame.width, height: screen.frame.height)
@@ -1198,17 +1217,20 @@ final class Workspaces {
         }
         let target = carousel.frames(status.active, area: area)
         let rail = carousel.current(status.active)?.identity, index = carousel.workspaces[status.active]?.current ?? 0
-        if staging == nil, previous.frames == target, previous.rail == rail, previous.pending.isEmpty {
-            renderCarouselInstant(focusing: selection, activateDesktop: activateDesktop, takeFocus: takeFocus)
+        // A focus follow-up can arrive before an instant correction finishes.
+        // Pending corrections need no motion, but unfinished layout placements
+        // still move under the stage even when their targets are unchanged.
+        if staging == nil, previous.frames == target, previous.rail == rail, expectedPositions.areCorrections(previous.pending) {
+            renderCarouselInstant(focusing: selection, activateDesktop: activateDesktop, takeFocus: takeFocus, keepFocusDecision: keepFocusDecision)
             return
         }
         cancelListingWait()
         let leavingFocus = applications.frontmostPID.flatMap { appFocus[$0] }
-        cancelFocusDecision()
+        if !keepFocusDecision { cancelFocusDecision() }
         // An old raise pass is superseded; the placement under the stage
         // owes a new one.
         layerRestack = .owed
-        decisions += 1
+        if !keepFocusDecision { decisions += 1 }
         if let selection, available(selection) { remember(selection) } else { focused = nil }
         let first = staging == nil
         if first {
@@ -1398,7 +1420,7 @@ final class Workspaces {
     /// AX and native rounding can leave an accepted value up to a point from
     /// the requested one. The presenter uses this one tolerance both to decide
     /// that a window needs no placement and that it is in place.
-    private static func near(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) <= 1 }
+    nonisolated static func near(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) <= 1 }
 
     private func cancelListingWait() {
         listingGate?.cancel()
@@ -1408,8 +1430,11 @@ final class Workspaces {
     /// Places every window at once. Under the stage it runs once per motion
     /// change and keeps the focus the stage already requested.
     private func renderCarouselInstant(focusing selection: UInt32?, activateDesktop: Bool, takeFocus: Bool,
-                                       keepFocus: Bool = false, underStage: Bool = false) {
-        if !underStage { clearStage(); decisions += 1; cancelFocusDecision() }
+                                       keepFocus: Bool = false, underStage: Bool = false, keepFocusDecision: Bool = false) {
+        if !underStage {
+            clearStage()
+            if !keepFocusDecision { decisions += 1; cancelFocusDecision() }
+        }
         guard status.enabled, !quitting, let closet else { return }
         cancelListingWait()
         transition += 1
@@ -1457,11 +1482,13 @@ final class Workspaces {
         // away from its target, such as one its app moved, gets a position, so
         // its own placement decides the handoff.
         let departing = newlyHidden.compactMap { entries[$0]?.observation.frame.intersection(bounds) }
-        positions.formUnion(show.filter { id in
+        let departingPositions = show.filter { id in
             guard let target = frames[id], pointerFrames[id] == nil, !closeted.contains(id), let seen = entries[id]?.observation.frame,
                   departing.contains(where: { target.intersects($0) }) else { return false }
             return !Self.near(target.minX, seen.minX) || !Self.near(target.minY, seen.minY)
-        })
+        }
+        positions.formUnion(departingPositions)
+        let layoutPositions = (redraw ? Set(frames.keys) : []).union(newlyShown).union(departingPositions)
         carouselPresentation = CarouselPresentation(workspace: status.active, rail: rail, railIndex: carousel.workspaces[status.active]?.current ?? 0, frames: frames, pending: positions)
         if let focused, takeFocus { expectedFocus = focused }
         // Resolve the whole placement before writing. Hidden destinations are
@@ -1480,8 +1507,10 @@ final class Workspaces {
             let floatTarget = layerPlacements[id]
             let resize = carouselSizing.contains(id) || floatTarget != nil
             let position = positions.contains(id) || resize
-            let target = floatTarget ?? (position ? frames[id] : nil)
-            if target != nil { remaining.append(Placement(id: id, pid: candidate.pid, target: target, resize: resize, position: position, float: floatTarget != nil)) }
+            if var target = floatTarget ?? (position ? frames[id] : nil) {
+                if floatTarget == nil, let correction = expectedPositions.queue(id, layoutReason: layoutPositions.contains(id) || resize) { target.origin = correction }
+                remaining.append(Placement(id: id, pid: candidate.pid, target: target, resize: resize, position: position, float: floatTarget != nil))
+            }
         }
         // Returning destinations cover the start view before any visible tile
         // vacates it. Sweep towards the motion: a leftward scroll places the
@@ -1658,6 +1687,7 @@ final class Workspaces {
                 _ = finishFailed()
             }
         }
+        expectedPositions.retainQueued(Set(placements.filter { !$0.float }.map(\.id)))
         func placeReady() {
             guard self.transition == token, self.listingGate === gate, !self.pointerHeld else { return }
             guard let catalog = self.catalog else { return }
@@ -1667,8 +1697,11 @@ final class Workspaces {
                 guard gate.settled(dependencies[index], onScreen: true) == dependencies[index] else { continue }
                 pendingPlacements.remove(index)
                 activePIDs.insert(p.pid)
+                let ticket = p.float ? nil : self.expectedPositions.writing(p.id)
                 catalog.presentRail(pid: p.pid, id: p.id, frame: p.target, position: p.position, resize: p.resize, focus: false, screenRight: self.screenRight) { [weak self] result in
-                    guard let self, self.transition == token, self.listingGate === gate else { return }
+                    guard let self else { return }
+                    if let ticket { self.expectedPositions.ended(ticket, accepted: result.frame) }
+                    guard self.transition == token, self.listingGate === gate else { return }
                     activePIDs.remove(p.pid)
                     finishedPlacements += 1
                     if let accepted = result.frame {

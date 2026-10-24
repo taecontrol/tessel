@@ -165,6 +165,26 @@ import Testing
         expectNoLongerThanAtRest(exposures)
     }
 
+    @Test("#33 E18 / #39 E2: a tile its app moves during a layer exit exposes no longer than at rest", arguments: WriteOrder.allCases)
+    func nativeMoveExposesNoLongerThanAtRest(_ writes: WriteOrder) {
+        var exposures = Exposures()
+        for moment in Moment.allCases { requireLayer(Scenario.run("a tile's app moves it \(moment.rawValue) / \(writes)", writes: writes) { s in
+            let f = CarouselFixture(s, duration: 0, appCount: 2)
+            let b = f.ids[1], app = f.apps[1]
+            let float = shownFloat(f)
+            if moment == .atRest { f.press("toggle layer") } else { renderExit(f, float) }
+            let changed = beginTrace(f)
+            app.moveFromApplication(b, to: CGPoint(x: 1100, y: 43))
+            if moment == .duringExit { holdSnapshot(f, app) }
+            let snapshot = deliverSnapshot(f, app, held: moment == .duringExit, since: changed)
+            s.settle()
+            exposures[moment] = expectExposureEndsWithRender(f, changed: changed, snapshot: snapshot, coveredBy: b)
+            s.expect("the tile is placed back at its target: \(f.frame(b))", f.frame(b) == Self.target)
+            s.expect("the float leaves the desktop", f.mac.isInCloset(float) && !f.mac.isVisible(float))
+        }) }
+        expectNoLongerThanAtRest(exposures)
+    }
+
     /// Renders the layer exit and holds it at its focus request, before it
     /// retires the float.
     private func renderExit(_ f: CarouselFixture, _ float: UInt32) {

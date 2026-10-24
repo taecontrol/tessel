@@ -488,6 +488,20 @@ if the first tile would leave a leading gap. An accepted width beyond a learned
 limit releases that obsolete limit. Commands arriving during the release read
 are carried forward rather than lost.
 
+A pointer move stays where the user released it until the next layout change.
+An app's or macOS's move of a rail tile is placed back instantly at tessel's
+last accepted readback, or the pointer's drop point. Only tiles with their
+entire layout target on screen are watched, outside gestures and resizes and
+without a write of tessel's in flight for that tile. Two corrections are
+allowed; a third move concedes until a layout placement or pointer drag resets
+the allowance. An unchanged click preserves other tiles' allowances.
+Correction retries keep their count; an unfinished layout placement remains
+a layout placement on retry, even if its write succeeded before its readback
+failed. That reason also survives the placement queue and a superseding render.
+A late completion of a superseded write cannot replace its retry's readback.
+At rest a correction uses no stage or captures; during motion it retargets the
+existing stage. Repairs preserve pending keyboard and native focus decisions.
+
 Instant presentation computes one layout. It prepares returning windows while
 hidden, shows them when WindowServer confirms their accepted frames, places
 visible windows, transfers focus only to a shown destination, then hides
@@ -519,7 +533,8 @@ One that ends without a frame says why:
   rounds of 50 ms timeouts. The last observation decides. This is the one
   place where coverage rests on geometry that may be stale: if that app moved
   the window before it stopped answering, a departing window over the target
-  hides and exposes desktop there until a later render places the window.
+  hides and exposes desktop there until the app resumes and its move snapshot
+  triggers an instant correction, subject to the two-correction allowance.
 - A newer render, or its app's hide or quit, superseded it. The request is
   checked again as it ends, so a cancellation that arrives during any AX call,
   the readback or the last unanswered attempt included, still supersedes it.
@@ -570,6 +585,8 @@ is more than a point from its target position, such as one its app moved,
 gets a position placement, so its own placement decides the handoff. Layer
 exits, workspace switches, rail handoffs and placement under the stage share
 this rule; focus and closet guards still apply.
+An app move read at rest also triggers an instant correction, with the same
+two-correction allowance. A pointer move waits for the next layout change.
 
 Quitting returns managed windows inside the desktop. Crash recovery uses the
 same closet boundary without persisted membership.
@@ -939,6 +956,13 @@ arm. A change tessel has already observed is not external: a tile it read as
 moved gets a placement, and a withdrawn placement never counts as in place. A
 placement cancelled at any point, including readback or the last attempt,
 is superseded and carries no frame.
+#39 adds the move case. An app's move of a rail tile during a layer exit or
+at rest ends its exposure the same way, and so does a move read after an
+unanswered app resumes: an on-screen rail tile returns instantly to its
+accepted point, up to two corrections, while pointer moves wait for the next
+layout change. An existing stage is retargeted instead of cleared by the
+correction, and the correction's placement waits for WindowServer like any
+other.
 
 E20 (#35) requires zero intermediate and gap frames for workspace, rail,
 left-tile `alt-r`, both stops (halves and mixed), and close. Right-tile `alt-r`
@@ -994,7 +1018,7 @@ hidden-layer Given; a live new panel would enter its single-window layer.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2, #19, #26, #33, #36, #38, #40 and #41.
+This table is the maintained example-to-layer map for issues #1, #2, #19, #26, #33, #36, #38, #39, #40 and #41.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -1168,6 +1192,21 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #38 E7 | T |
 | #38 E8 | X |
 | #38 E9 | T |
+| #39 E1 | P |
+| #39 E2 | P |
+| #39 E3 | P |
+| #39 E4 | P |
+| #39 E5 | P |
+| #39 E6 | P |
+| #39 E7 | P |
+| #39 E8 | P |
+| #39 E9 | P |
+| #39 E10 | P |
+| #39 E11 | P |
+| #39 E12 | P |
+| #39 E13 | P |
+| #39 E14 | P |
+| #39 E15 | P |
 | #40 E1 | P |
 | #40 E2 | P |
 | #40 E3 | P |
@@ -1205,7 +1244,11 @@ All deterministic carousel examples run directly against the simulated stage:
 rail slides, captures, placement under the stage, retargets, interrupts,
 Reduce Motion, a missing Screen Recording grant, closet timing and bounce.
 Retained membership and AX-retry scenarios use duration zero; CarouselMotion
-proves the animated path. E4's command matrix checks settled invariants at
+proves the animated path. #26 E16 also covers an unfinished layout placement
+after a hung app resumes, retried by focus or another tile's app-move correction:
+the real window moves under the stage, even when the layout's target frames
+have not changed.
+E4's command matrix checks settled invariants at
 duration zero, while E16 checks the stage at 80 and 250 ms.
 
 
