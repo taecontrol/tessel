@@ -183,6 +183,12 @@ evidence. LaunchServices notifications can raise local idle CPU (issue #15).
 Do not run `sample` during a measured window: it suspends the app and changes
 its counters.
 
+Never use `lsappinfo send` (or `setinfo`) to generate LaunchServices traffic.
+On macOS 27, broadcasting `kLSNotifyApplicationTypeChanged` with no target
+application restarted WindowServer and loginwindow, which ended the GUI session
+and killed every app in it. To study LaunchServices load, observe passively and
+let real app switches produce the traffic.
+
 ### CI
 
 Pull requests run Policy (bare `swift test`, `tessel-check layers`, and
