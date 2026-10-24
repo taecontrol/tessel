@@ -1563,7 +1563,7 @@ final class Workspaces {
             self.closeted.formUnion(safe)
             remainingHides.subtract(safe)
             if finishFailed() { return }
-            guard geometryReady, remainingHides.isEmpty else { self.publish(); return }
+            guard failedPlacements.isEmpty, geometryReady, remainingHides.isEmpty else { self.publish(); return }
             self.layerHandoff = nil
             self.desktopFocusObservation = nil
             self.placementToken = nil
