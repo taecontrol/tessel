@@ -1504,6 +1504,11 @@ final class Workspaces {
         let hiddenRoots = newlyHidden.filter { entries[$0]?.observation.parent == nil }.sorted()
         var changedBounds = false
         var focusStarted = false, focusReady = false, geometryReady = false
+        var focusOutstanding = false, focusFailed = false
+        var failedPlacements = Set<UInt32>()
+        var pendingPlacements = Set(placements.indices)
+        var activePIDs = Set<Int32>()
+        var finishedPlacements = 0
         var remainingHides = Set(hiddenRoots)
         let targets = Dictionary(uniqueKeysWithValues: show.compactMap { id in
             entries[id].map { (id, frames[id] ?? layerPlacements[id] ?? $0.observation.frame) }
@@ -1520,8 +1525,29 @@ final class Workspaces {
         }
         let scheduled = Set(placements.map(\.id))
         var ready = Set(show.filter { !scheduled.contains($0) && inPlace($0) })
+        func finishFailed() -> Bool {
+            guard self.transition == token, self.status.enabled, self.placementToken == token, !self.pointerHeld,
+                  !failedPlacements.isEmpty || focusFailed, activePIDs.isEmpty, !focusOutstanding else { return false }
+            // Dependencies only name earlier placements, so this pass also
+            // finds every transitive dependent of a failed destination.
+            var blocked = failedPlacements
+            for index in placements.indices where pendingPlacements.contains(index) && !dependencies[index].isDisjoint(with: blocked) {
+                blocked.insert(placements[index].id)
+            }
+            guard pendingPlacements.allSatisfy({ blocked.contains(placements[$0].id) }) else { return false }
+            // A failed focus request can still complete through a native
+            // selection or another app's activation, without another render.
+            if focusReady || !focusStarted {
+                self.layerHandoff = nil
+                self.desktopFocusObservation = nil
+            }
+            self.placementToken = nil
+            self.restackLayer()
+            self.publish()
+            return true
+        }
         func commitVisibility() {
-            guard self.transition == token, self.status.enabled, !self.pointerHeld, focusReady else { return }
+            guard self.transition == token, self.status.enabled, !self.pointerHeld, focusReady else { _ = finishFailed(); return }
             // A busy app must not delay an independent destination's focus.
             // Return windows as each is prepared; retire an old window only
             // when every destination covering its area is actually in place.
@@ -1534,7 +1560,8 @@ final class Workspaces {
             closet.hide(safe)
             self.closeted.formUnion(safe)
             remainingHides.subtract(safe)
-            guard geometryReady, remainingHides.isEmpty else { self.publish(); return }
+            if finishFailed() { return }
+            guard failedPlacements.isEmpty, geometryReady, remainingHides.isEmpty else { self.publish(); return }
             self.layerHandoff = nil
             self.desktopFocusObservation = nil
             self.placementToken = nil
@@ -1549,10 +1576,15 @@ final class Workspaces {
                 else { self.publish() }
             }
         }
-        func finishFocus() { focusReady = true; commitVisibility() }
+        func finishFocus() {
+            focusReady = true
+            self.layerHandoff = nil
+            self.desktopFocusObservation = nil
+            commitVisibility()
+        }
         func focusAndCommit() {
             guard self.transition == token, !focusStarted else { return }
-            if let focused = self.focused, self.closeted.contains(focused), !ready.contains(focused) { return }
+            if let focused = self.focused, self.closeted.contains(focused), !ready.contains(focused) { _ = finishFailed(); return }
             focusStarted = true
             let outgoingFront = self.applications.frontmostPID
             let handoff = hiddenRoots.contains { self.entries[$0]?.pid == outgoingFront && (self.floating($0) || $0 == outgoingSelection) }
@@ -1574,18 +1606,19 @@ final class Workspaces {
             // The destination is visible before native focus moves. A modal
             // outgoing float relinquishes focus before entering the closet.
             self.layerHandoff = LayerHandoff(token: token, selection: focused, commit: finishFocus)
+            focusOutstanding = true
             catalog.presentRail(pid: candidate.pid, id: focused, frame: nil, position: false, resize: false, focus: true, screenRight: self.screenRight) { [weak self] result in
                 guard let self, self.transition == token else { return }
+                focusOutstanding = false
+                if result.outcome == .unanswered || result.outcome == .withdrawn { focusFailed = true }
                 self.layerHandoff?.awaitingObservation = true
                 if result.focus == nil { self.expectedFocus = nil }
                 if let focus = result.focus, focus.frontmost {
                     self.finishLayerHandoff(observedFocus: focus.window.map { self.entries[$0]?.observation.parent ?? $0 }, pid: candidate.pid)
                 }
+                _ = finishFailed()
             }
         }
-        var pendingPlacements = Set(placements.indices)
-        var activePIDs = Set<Int32>()
-        var finishedPlacements = 0
         func placeReady() {
             guard self.transition == token, !self.pointerHeld else { return }
             guard let catalog = self.catalog else { return }
@@ -1622,6 +1655,9 @@ final class Workspaces {
                         // its cached frame: its own snapshot renders the next
                         // layout. A superseded request decides nothing.
                         ready.insert(p.id)
+                    }
+                    if !ready.contains(p.id), result.outcome == .unanswered || result.outcome == .withdrawn {
+                        failedPlacements.insert(p.id)
                     }
                     geometryReady = finishedPlacements == placements.count
                     if p.id == self.focused {

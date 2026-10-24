@@ -922,6 +922,16 @@ The retry measurement excludes later focus-confirmation reads while still
 requiring exactly the four original retry delays. Initial-enumeration race
 setups now hold the startup AX list rather than entering a removed mode.
 
+#41 ends an instant handoff as failed once a branch has failed and no placement
+or focus request remains in flight or can start. It releases placement so the
+shown layer can restack, retaining unsafe covers and all outgoing windows until
+focus completes. A failed focus request keeps its native-focus and external-app
+activation observations: either can still complete visibility truthfully.
+The stage expires through its existing linger; failure neither reveals success
+nor checks deliberately retained covers as failed hides. Recovery waits for the
+next command's render, which retries pending placements without an automatic
+retry or desktop activation.
+
 Retained native scenes also follow the kept rail policy. Failed-hide injection
 uses initially in-bounds windows whose widths force overflow. The latency
 elevator's singleton keeps its nominal half width. Resource setup waits for
@@ -943,7 +953,7 @@ hidden-layer Given; a live new panel would enter its single-window layer.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2, #19, #26, #33, #36 and #38.
+This table is the maintained example-to-layer map for issues #1, #2, #19, #26, #33, #36, #38 and #41.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -1117,6 +1127,16 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #38 E7 | T |
 | #38 E8 | X |
 | #38 E9 | T |
+| #41 E1 | P |
+| #41 E2 | P |
+| #41 E3 | P |
+| #41 E3a | P |
+| #41 E3b | P |
+| #41 E4 | P |
+| #41 E5 | P |
+| #41 E6 | P |
+| #41 E7 | P |
+| #41 E8 | P |
 <!-- Pending capture: #33 E20 -->
 <!-- Pending capture: #36 E8 -->
 

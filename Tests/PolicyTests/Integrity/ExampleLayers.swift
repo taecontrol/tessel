@@ -24,7 +24,7 @@ enum ExampleLayers {
         var pendingCaptures: Set<String> = []
     }
     static let heading = "## Acceptance example layers (#24)"
-    private static let idPattern = #"#(?:1|2|19|26|33|36|38) (?:E[1-9][0-9]*|U-[a-z0-9]+(?:-[a-z0-9]+)*)(?![A-Za-z0-9_-])"#
+    private static let idPattern = #"#(?:1|2|19|26|33|36|38|41) (?:E[1-9][0-9]*[a-z]?|U-[a-z0-9]+(?:-[a-z0-9]+)*)(?![A-Za-z0-9_-])"#
 
     static func parse(_ document: String) -> Map {
         var result = Map()
@@ -129,6 +129,9 @@ enum ExampleLayers {
         let source = "// 🧶 @Test(\"#2 E99\")\n@Test(\"#2 E8; #2 E999: send\") func send() {}"
         let tags = ExampleLayers.tags(in: source, path: "Tests/PolicyTests/Scenarios/Send.swift")
         #expect(tags.map(\.id) == ["#2 E8", "#2 E999"])
+        let failedFocus = ExampleLayers.tags(in: "@Test(\"#41 E3; #41 E3a; #41 E3b\") func focus() {}", path: "Tests/PolicyTests/Scenarios/Focus.swift")
+        #expect(failedFocus.map(\.id) == ["#41 E3", "#41 E3a", "#41 E3b"])
+        #expect(ExampleLayers.tags(in: "@Test(\"#41 E3ab\") func invalid() {}", path: "Tests/PolicyTests/Scenarios/Focus.swift").isEmpty)
         let shared = ExampleLayers.tags(in: "@Test(\"#26 E24; #19 E28: shared idle budget\") func idle() {}", path: "Tests/Acceptance/Resources.swift")
         #expect(shared.map(\.id) == ["#26 E24", "#19 E28"])
         #expect(shared.allSatisfy { $0.layer == .resources })
