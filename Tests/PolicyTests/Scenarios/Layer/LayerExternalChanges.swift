@@ -165,7 +165,7 @@ import Testing
         expectNoLongerThanAtRest(exposures)
     }
 
-    @Test("#33 E18 / #39: a tile its app moves during a layer exit exposes no longer than at rest", arguments: WriteOrder.allCases)
+    @Test("#33 E18 / #39 E2: a tile its app moves during a layer exit exposes no longer than at rest", arguments: WriteOrder.allCases)
     func nativeMoveExposesNoLongerThanAtRest(_ writes: WriteOrder) {
         // A move's snapshot triggers no render on 0c531ee, so neither arm's
         // exposure ends (#39). Swift Testing reports it once it passes.

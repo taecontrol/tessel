@@ -15,7 +15,7 @@ import Testing
     private static let moved = CGPoint(x: 1100, y: 43)
     private static let point = CGPoint(x: 1000, y: 100)
 
-    @Test("#39: a tile its app moved at rest is placed back, and stays placed across focus commands", arguments: WriteOrder.allCases)
+    @Test("#39 E1: a tile its app moved at rest is placed back, and stays placed across focus commands", arguments: WriteOrder.allCases)
     func tileItsAppMovedAtRestIsPlacedBack(_ writes: WriteOrder) {
         let result = Scenario.run("app moves a rail tile at rest / \(writes)", writes: writes) { s in
             let f = CarouselFixture(s, duration: 0, appCount: 2)
@@ -36,7 +36,7 @@ import Testing
         withKnownIssue("#39: a read app move is never placed back") { requireLayer(result) }
     }
 
-    @Test("#39: a tile its app moved before a layer exit is read covers the float's point once the float leaves", arguments: WriteOrder.allCases)
+    @Test("#39 E3: a tile its app moved before a layer exit is read covers the float's point once the float leaves", arguments: WriteOrder.allCases)
     func unreadMoveBeforeLayerExit(_ writes: WriteOrder) {
         let result = Scenario.run("app moves a tile, then the layer exits before the move is read / \(writes)", writes: writes) { s in
             let f = CarouselFixture(s, duration: 0, appCount: 2)
@@ -65,7 +65,7 @@ import Testing
         withKnownIssue("#39: a read app move is never placed back") { requireLayer(result) }
     }
 
-    @Test("#39: an exposure the unanswered-app fallback admits ends once the app answers", arguments: WriteOrder.allCases)
+    @Test("#39 E4: an exposure the unanswered-app fallback admits ends once the app answers", arguments: WriteOrder.allCases)
     func fallbackExposureEndsWhenTheAppAnswers(_ writes: WriteOrder) {
         let result = Scenario.run("app moves a tile and hangs before the layer exit / \(writes)", writes: writes) { s in
             let f = CarouselFixture(s, duration: 0, appCount: 2)

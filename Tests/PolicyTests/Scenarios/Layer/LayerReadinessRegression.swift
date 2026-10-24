@@ -44,7 +44,7 @@ import Testing
         requireLayer(result)
     }
 
-    @Test("#19 E7; #40 E4: a layer exit places back a tile its app moved away, then hides the float over it", arguments: WriteOrder.allCases, [8, 20])
+    @Test("#19 E7; #39 E5; #40 E4: a layer exit places back a tile its app moved away, then hides the float over it", arguments: WriteOrder.allCases, [8, 20])
     func layerExitPlacesBackATileItsAppMoved(_ writes: WriteOrder, _ commit: Int) {
         let result = Scenario.run("layer exit over a tile whose app move was read / \(writes), commit \(commit)ms", writes: writes) { s in
             let f = CarouselFixture(s, duration: 0, appCount: 2)
@@ -57,8 +57,11 @@ import Testing
             s.expect("the shown float overlaps tile B at its target", f.frame(b) == target && f.tessel.status.layer?.state == "shown" && f.mac.isVisible(float))
             f.apps[1].moveFromApplication(b, to: CGPoint(x: 1100, y: 43))
             s.settle()
-            // At rest tessel reads the move and leaves the tile there (#39).
-            s.expect("the app's move is read and the tile stays where its app put it", f.frame(b).minX == 1100 && !f.frame(b).contains(point))
+            s.expect("the app's move is read and the tile returns at rest", f.frame(b) == target)
+            // #19 E7 and #40 E4 need the tile away from its target when the
+            // layer exits: the app insists until tessel concedes (#39 E8).
+            for _ in 0..<2 { f.apps[1].moveFromApplication(b, to: CGPoint(x: 1100, y: 43)); s.settle() }
+            s.expect("after two corrections the tile stays where its app put it", f.frame(b).minX == 1100 && !f.frame(b).contains(point))
             f.apps[1].delayCommits(milliseconds: commit)
             f.mac.beginPresentationTrace()
             f.press("toggle layer")
@@ -68,7 +71,7 @@ import Testing
             s.expect("the exit places the tile back at its target", f.frame(b) == target)
             s.expect("the float leaves the desktop once the tile covers it", f.mac.isInCloset(float) && !f.mac.isVisible(float))
         }
-        requireLayer(result)
+        withKnownIssue("#39 E5: a read app move is never placed back at rest") { requireLayer(result) }
     }
 
     @Test("#19 E7: a tile withdrawn during its layer exit placement does not count as in place", arguments: WriteOrder.allCases, ["minimize", "close", "hide"])
