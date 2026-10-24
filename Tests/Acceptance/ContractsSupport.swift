@@ -51,11 +51,7 @@ struct NativeContractReply: Codable {
         let key: Bool?
     }
     let stage: Stage?
-    /// #40: placements traced against WindowServer's listing and composite.
-    struct PlacementProbe: Codable {
-        let point: [Double]
-        let events: [[Double]]
-    }
+    /// #40: placements traced against WindowServer's listing.
     struct PlacementGap: Codable {
         let id: UInt32?
         let results: [Int32]?
@@ -68,7 +64,6 @@ struct NativeContractReply: Codable {
         let writeMilliseconds: Double?
         let restoreMilliseconds: Double?
         let trace: [String: [[Double]]]
-        let probes: [PlacementProbe]
         let listedMilliseconds: [String: Double?]
         let listedAtCommit: [String: Bool]
         let resumedListedMilliseconds: [String: Double?]

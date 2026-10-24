@@ -2,9 +2,9 @@ import AppKit
 import ApplicationServices
 import Darwin
 
-/// #40: what WindowServer lists and composites around a placement's AX
+/// #40: what WindowServer lists around a placement's AX
 /// readback. The writes follow the catalog's rail placement. A sampler
-/// thread traces fixture window bounds and screen points from before the
+/// thread traces fixture window bounds and on-screen status from before the
 /// first write until a fixed limit after the commit, the instant the presenter
 /// would show or hide a window in the turn that receives the readback.
 extension FixtureContracts {
@@ -19,7 +19,7 @@ extension FixtureContracts {
         // readback lands, as the presenter does before retiring a departure.
         let fromCloset = command["fromCloset"] as? Bool == true
         if fromCloset, spaces == nil || !moved.contains(number) { throw FixtureContractError("hide the window in the closet first") }
-        let sampler = try PlacementSampler(windows: [number], command: command)
+        let sampler = PlacementSampler(windows: [number], command: command)
         sampler.start()
         let placed = place(window, application: application, target: target, command: command)
         // Whether WindowServer takes a closeted window's accepted frame while
@@ -105,17 +105,13 @@ extension FixtureContracts {
     private static func rect(_ value: CGRect) -> [Double] { value.isNull ? [] : [value.minX, value.minY, value.width, value.height] }
 }
 
-/// Samples, on its own thread, what WindowServer lists for fixture windows and
-/// the palette index it composites at screen points. Only palette indices and
-/// fixture geometry leave this process.
+/// Samples, on its own thread, the bounds and on-screen status WindowServer
+/// lists for fixture windows.
 final class PlacementSampler: @unchecked Sendable {
     struct Trace {
         /// Each change of a window's description: time, x, y, width, height,
         /// and 1 on screen, 0 off screen, -1 not listed.
         let windows: [UInt32: [[Double]]]
-        /// Each change of a point's palette index: time and index, 0 for
-        /// anything else, such as the desktop, -1 for an unreadable point.
-        let probes: [(point: [Double], events: [[Double]])]
         let samples: Int
         let longestGap: Double
         let startedAt: Double
@@ -143,7 +139,6 @@ final class PlacementSampler: @unchecked Sendable {
             }
             func relative(_ event: [Double]) -> [Double] { [(event[0] - commit) * 1_000] + event.dropFirst() }
             return ["trace": Dictionary(uniqueKeysWithValues: windows.map { (String($0.key), $0.value.map(relative)) }),
-                    "probes": probes.map { ["point": $0.point, "events": $0.events.map(relative)] as [String: Any] },
                     "listedMilliseconds": listed, "listedAtCommit": atCommit, "resumedListedMilliseconds": afterResume,
                     "traceStartMilliseconds": (startedAt - commit) * 1_000, "traceEndMilliseconds": (endedAt - commit) * 1_000,
                     "samples": samples, "longestSampleGapMilliseconds": longestGap * 1_000]
@@ -151,7 +146,6 @@ final class PlacementSampler: @unchecked Sendable {
     }
 
     let windows: [UInt32]
-    let points: [CGPoint]
     let limit: Double
     private let lock = NSLock()
     private let done = DispatchSemaphore(value: 0)
@@ -159,11 +153,9 @@ final class PlacementSampler: @unchecked Sendable {
     private var stopping = false
     private var trace: Trace?
 
-    @MainActor init(windows: [UInt32], command: [String: Any]) throws {
+    @MainActor init(windows: [UInt32], command: [String: Any]) {
         self.windows = windows
-        points = (command["stableProbes"] as? [[Double]] ?? []).compactMap { $0.count == 2 ? CGPoint(x: $0[0], y: $0[1]) : nil }
         limit = (command["limitMilliseconds"] as? Double ?? 150) / 1_000
-        if !points.isEmpty, !CGPreflightScreenCaptureAccess() { throw FixtureContractError("grant Screen Recording to the signed fixture observer") }
     }
 
     static func now() -> Double { Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1e9 }
@@ -187,7 +179,7 @@ final class PlacementSampler: @unchecked Sendable {
     }
 
     private func run() {
-        var listed: [UInt32: [[Double]]] = [:], probed = points.map { _ in [[Double]]() }
+        var listed: [UInt32: [[Double]]] = [:]
         var samples = 0, longest = 0.0, previous = PlacementSampler.now()
         let begin = previous
         while true {
@@ -197,10 +189,6 @@ final class PlacementSampler: @unchecked Sendable {
                     ?? [at, 0, 0, 0, 0, -1]
                 if listed[number]?.last.map({ Array($0.dropFirst()) != Array(state.dropFirst()) }) ?? true { listed[number, default: []].append(state) }
             }
-            for (index, point) in points.enumerated() {
-                let value = Double(Self.composited(at: point) ?? -1)
-                if probed[index].last?[1] != value { probed[index].append([PlacementSampler.now(), value]) }
-            }
             samples += 1; longest = max(longest, at - previous); previous = at
             if samples == 1 { lock.withLock { sampled = true } }
             if lock.withLock({ stopping }) { break }
@@ -208,8 +196,7 @@ final class PlacementSampler: @unchecked Sendable {
         }
         let end = PlacementSampler.now()
         lock.withLock {
-            trace = Trace(windows: listed, probes: zip(points, probed).map { ([$0.0.x, $0.0.y], $0.1) },
-                          samples: samples, longestGap: longest, startedAt: begin, endedAt: end)
+            trace = Trace(windows: listed, samples: samples, longestGap: longest, startedAt: begin, endedAt: end)
         }
         done.signal()
     }
@@ -222,33 +209,5 @@ final class PlacementSampler: @unchecked Sendable {
               let bounds = entry[kCGWindowBounds as String] as? NSDictionary,
               let rect = CGRect(dictionaryRepresentation: bounds) else { return nil }
         return (rect, entry[kCGWindowIsOnscreen as String] as? Bool ?? false)
-    }
-
-    /// The palette index WindowServer composites at one screen point, with the
-    /// recording's classification.
-    private static func composited(at point: CGPoint) -> Int? {
-        typealias Create = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
-        guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGWindowListCreateImage"),
-              let image = unsafeBitCast(symbol, to: Create.self)(CGRect(origin: point, size: CGSize(width: 1, height: 1)), 1, 0, 1 << 4)?
-                .takeRetainedValue() else { return nil }
-        var pixel = [UInt8](repeating: 0, count: 4)
-        let drawn = pixel.withUnsafeMutableBytes { buffer -> Bool in
-            guard let context = CGContext(data: buffer.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
-                                          space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
-            context.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
-            return true
-        }
-        guard drawn else { return nil }
-        let r = Int(pixel[0]), g = Int(pixel[1]), b = Int(pixel[2])
-        guard [r, g, b].allSatisfy({ $0 <= 24 || $0 >= 231 }) else { return 0 }
-        return switch (r >= 231 ? 4 : 0) | (g >= 231 ? 2 : 0) | (b >= 231 ? 1 : 0) {
-        case 4: 1
-        case 2: 2
-        case 1: 3
-        case 6: 4
-        case 5: 5
-        case 3: 6
-        default: 0
-        }
     }
 }
