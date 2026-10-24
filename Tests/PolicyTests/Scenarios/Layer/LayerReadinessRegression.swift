@@ -71,7 +71,7 @@ import Testing
             s.expect("the exit places the tile back at its target", f.frame(b) == target)
             s.expect("the float leaves the desktop once the tile covers it", f.mac.isInCloset(float) && !f.mac.isVisible(float))
         }
-        withKnownIssue("#39 E5: a read app move is never placed back at rest") { requireLayer(result) }
+        requireLayer(result)
     }
 
     @Test("#19 E7: a tile withdrawn during its layer exit placement does not count as in place", arguments: WriteOrder.allCases, ["minimize", "close", "hide"])

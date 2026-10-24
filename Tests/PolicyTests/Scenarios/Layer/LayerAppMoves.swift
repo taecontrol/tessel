@@ -3,13 +3,8 @@ import Simulator
 import Testing
 @testable import Policy
 
-/// #39: a rail tile its app moves, after tessel has read the move, is never
-/// placed back. `update` re-renders on a size change, not on a position
-/// change, and a render positions only pending, redrawn, newly shown or
-/// departure-covering tiles.
-///
-/// Each scenario fails on 0c531ee in every scheduler and is kept as a known
-/// issue until #39 is decided; Swift Testing reports it once it passes.
+/// A rail tile its app moves returns to tessel's accepted point. Layer
+/// handoffs also recover after the move is read or a hung app resumes.
 @Suite @MainActor struct LayerAppMoves {
     private static let target = CGRect(x: 869, y: 43, width: 849, height: 1064)
     private static let moved = CGPoint(x: 1100, y: 43)
@@ -33,7 +28,7 @@ import Testing
             f.press("focus left")
             s.expect("focus commands that keep the layout place B back: B is at \(f.frame(b))", f.frame(b) == Self.target)
         }
-        withKnownIssue("#39: a read app move is never placed back") { requireLayer(result) }
+        requireLayer(result)
     }
 
     @Test("#39 E3: a tile its app moved before a layer exit is read covers the float's point once the float leaves", arguments: WriteOrder.allCases)
@@ -62,7 +57,7 @@ import Testing
             s.expect("the exposure ends: last state \(states.last.map { $0.operation } ?? "none"), \(exposed.count) exposed of \(states.count)",
                      states.last.map { $0.frames.values.contains { $0.contains(Self.point) } } ?? false)
         }
-        withKnownIssue("#39: a read app move is never placed back") { requireLayer(result) }
+        requireLayer(result)
     }
 
     @Test("#39 E4: an exposure the unanswered-app fallback admits ends once the app answers", arguments: WriteOrder.allCases)
@@ -101,6 +96,6 @@ import Testing
             s.settle()
             s.expect("once the app answers, B is placed back over the point: B is at \(f.frame(b))", f.frame(b) == Self.target)
         }
-        withKnownIssue("#39: a read app move is never placed back") { requireLayer(result) }
+        requireLayer(result)
     }
 }

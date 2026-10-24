@@ -203,6 +203,67 @@ import Testing
         })
     }
 
+    @Test("#26 E16: an unfinished layout placement animates after its app resumes", arguments: WriteOrder.allCases)
+    func resumedLayoutPlacementUsesTheStage(_ writes: WriteOrder) {
+        requireCarousel(Scenario.run("a focus retry stages an unfinished layout / \(writes)", writes: writes) { s in
+            let f = CarouselFixture(s, presets: [1.0 / 3, 1.0 / 3, 1.0 / 3], duration: 250, appCount: 3)
+            let a = f.ids[0], b = f.ids[1], c = f.ids[2], app = f.apps[2]
+            let original = f.frame(c), target = f.frame(b)
+            f.focus(a); f.mac.clearMotionHistory()
+            app.hang(); f.apps[1].close(b); s.settle()
+            s.expect("C still owes the closed tile's layout slot", f.frame(c) == original && original != target)
+            s.expect("the stage clears after the hung app's retries expire", f.mac.stageEvents.last?.kind == .clear)
+            f.mac.clearMotionHistory()
+
+            app.resume(); f.press("focus right")
+            let events = f.mac.stageEvents
+            let shown = events.compactMap { if case .show(let rects) = $0.kind { rects[c] } else { nil } }.first
+            s.expect("the recovery stand-in starts at C's actual frame", shown == original)
+            s.expect("the unfinished layout move animates to its target", events.contains {
+                if case .move(let rects, let duration) = $0.kind { return rects[c] == target && duration == 250 }
+                return false
+            })
+            let shownAt = events.first { if case .show = $0.kind { true } else { false } }?.at ?? .max
+            let clearedAt = events.last { $0.kind == .clear }?.at ?? -1
+            let positions = f.mac.geometryWrites.filter { $0.window == c && $0.attribute == .position }
+            s.expect("C's position is written while the stage covers it", !positions.isEmpty && positions.allSatisfy { $0.at >= shownAt && $0.at <= clearedAt })
+            s.expect("the stage clears after recovery", events.last?.kind == .clear)
+            s.expect("C lands in the closed tile's slot", f.frame(c) == target)
+            f.focus(c)
+        })
+    }
+
+    @Test("#26 E16: an app-move correction stages an unfinished layout placement after its app resumes", arguments: WriteOrder.allCases)
+    func appMoveStagesResumedLayoutPlacement(_ writes: WriteOrder) {
+        requireCarousel(Scenario.run("an app-move correction stages an unfinished layout / \(writes)", writes: writes) { s in
+            let f = CarouselFixture(s, presets: [1.0 / 3, 1.0 / 3, 1.0 / 3], duration: 250, appCount: 3)
+            let a = f.ids[0], b = f.ids[1], c = f.ids[2], app = f.apps[2]
+            let original = f.frame(c), target = f.frame(b), expectedA = f.frame(a)
+            f.focus(a); f.mac.clearMotionHistory()
+            app.hang(); f.apps[1].close(b); s.settle()
+            s.expect("C still owes the closed tile's layout slot", f.frame(c) == original && original != target)
+            s.expect("the stage clears after the hung app's retries expire", f.mac.stageEvents.last?.kind == .clear)
+            f.mac.clearMotionHistory()
+
+            app.resume(); f.app.moveFromApplication(a, to: CGPoint(x: 40, y: expectedA.minY)); s.settle()
+            let events = f.mac.stageEvents
+            let shown = events.compactMap { if case .show(let rects) = $0.kind { rects[c] } else { nil } }.first
+            s.expect("the app-move recovery stand-in starts at C's actual frame", shown == original)
+            s.expect("the mixed pending layout move animates to its target", events.contains {
+                if case .move(let rects, let duration) = $0.kind { return rects[c] == target && duration == 250 }
+                return false
+            })
+            let shownAt = events.first { if case .show = $0.kind { true } else { false } }?.at ?? .max
+            let clearedAt = events.last { $0.kind == .clear }?.at ?? -1
+            let positions = f.mac.geometryWrites.filter { $0.window == c && $0.attribute == .position }
+            s.expect("C's position is written while the stage covers it", !positions.isEmpty && positions.allSatisfy { $0.at >= shownAt && $0.at <= clearedAt })
+            s.expect("the stage clears after app-move recovery", events.last?.kind == .clear)
+            s.expect("C lands in the closed tile's slot", f.frame(c) == target)
+            s.expect("A returns to its expected frame", f.frame(a) == expectedA)
+            f.focus(a)
+        })
+    }
+
     @Test("a cross-app rail change keeps its focus when the completing activation keys the app's previous window")
     func activationKeysPreviousWindow() {
         requireCarousel(Scenario.run("activation keys the previous window") { s in

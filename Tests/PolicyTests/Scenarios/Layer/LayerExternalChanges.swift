@@ -167,9 +167,6 @@ import Testing
 
     @Test("#33 E18 / #39 E2: a tile its app moves during a layer exit exposes no longer than at rest", arguments: WriteOrder.allCases)
     func nativeMoveExposesNoLongerThanAtRest(_ writes: WriteOrder) {
-        // A move's snapshot triggers no render on 0c531ee, so neither arm's
-        // exposure ends (#39). Swift Testing reports it once it passes.
-        withKnownIssue("#39: a read app move is never placed back") {
         var exposures = Exposures()
         for moment in Moment.allCases { requireLayer(Scenario.run("a tile's app moves it \(moment.rawValue) / \(writes)", writes: writes) { s in
             let f = CarouselFixture(s, duration: 0, appCount: 2)
@@ -186,7 +183,6 @@ import Testing
             s.expect("the float leaves the desktop", f.mac.isInCloset(float) && !f.mac.isVisible(float))
         }) }
         expectNoLongerThanAtRest(exposures)
-        }
     }
 
     /// Renders the layer exit and holds it at its focus request, before it

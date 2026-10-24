@@ -331,7 +331,9 @@ import Testing
         let f = CarouselFixture(s, duration: 0, appCount: 2), b = f.ids[1]
         let float = f.app.open(WindowSpec(frame: CGRect(x: 1000, y: 100, width: 200, height: 200), subrole: "AXDialog"))
         s.settle(); f.select(f.ids[0]); f.press("toggle layer")
-        f.apps[1].moveFromApplication(b, to: CGPoint(x: 1100, y: 43)); s.settle()
+        // The exit must place B back: its app insists until tessel concedes
+        // the at-rest correction after two attempts (#39 E8).
+        for _ in 0..<3 { f.apps[1].moveFromApplication(b, to: CGPoint(x: 1100, y: 43)); s.settle() }
         f.apps[1].delayCommits(milliseconds: commit)
         f.mac.clearMotionHistory(); f.mac.beginPresentationTrace()
         f.tessel.press("toggle layer")
