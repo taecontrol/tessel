@@ -117,8 +117,10 @@ import Testing
             f.press("toggle layer")
             f.tessel.press("focus right")
             let app = f.apps[1]
-            let held = f.mac.pause(after: .call("AccessibilityPort.set AXFrontmost=true \(app.alias) pid=\(app.pid)"))
-            if case .paused = held {} else { s.expect("the destination's activation is held: \(held)", false) }
+            // Fail the focus-only read before issuing activation. A timed-out
+            // activation write has a separate catalog hold on passive raises.
+            let held = f.mac.pause(after: .call("AccessibilityPort.copy AXFrontmost \(app.alias) pid=\(app.pid)"))
+            if case .paused = held {} else { s.expect("the destination's frontmost read is held: \(held)", false) }
             app.hang(); s.settle()
             app.resume(); s.settle()
             let start = f.mac.scheduler.trace.count
