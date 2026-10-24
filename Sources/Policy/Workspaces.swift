@@ -1535,11 +1535,9 @@ final class Workspaces {
                 blocked.insert(placements[index].id)
             }
             guard pendingPlacements.allSatisfy({ blocked.contains(placements[$0].id) }) else { return false }
-            let focusBlocked = !focusStarted && self.focused.map { blocked.contains($0) } == true
-            guard focusStarted || focusBlocked else { return false }
             // A failed focus request can still complete through a native
             // selection or another app's activation, without another render.
-            if focusReady || focusBlocked {
+            if focusReady || !focusStarted {
                 self.layerHandoff = nil
                 self.desktopFocusObservation = nil
             }

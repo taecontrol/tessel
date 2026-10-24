@@ -196,7 +196,7 @@ import Testing
                 f.press("workspace 2"); f.select(f.ids[1]); f.press("workspace 1")
                 f.apps[1].limitSize(f.ids[1], maximum: CGSize(width: 749, height: 100_000))
                 f.apps[0].hang()
-                f.tessel.changeConfig("[animation]\nduration = 0\n[gaps]\nouter = 20\n"); s.settle()
+                f.tessel.changeConfig("[animation]\nduration = 0\n[gaps]\nouter = 0\n"); s.settle()
                 f.apps[1].delayAXReplies(milliseconds: 250)
                 f.mac.clearMotionHistory()
                 let start = f.mac.scheduler.trace.count
