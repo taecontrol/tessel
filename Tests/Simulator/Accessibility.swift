@@ -319,8 +319,10 @@ extension SimulatedMac {
             }
             if isCloseted(id) { assume(.closetAXIdentity) }
             let write = recordGeometry(id, attribute: attribute, requested: value)
+            deferCommit(id)
             applyPosition(id, accepted)
             finishGeometry(id, index: write)
+            scheduleCommit(id)
         case (.window(let id), .size, .size(let size)):
             assume(.axSizeConstraints)
             guard windows[id]?.spec.resizable == true else { return .other(-25200) }
@@ -334,8 +336,10 @@ extension SimulatedMac {
                 assume(.closetSizeLoss)
                 motion.shortSizes.insert(id)
             }
+            deferCommit(id)
             applySize(id, size)
             finishGeometry(id, index: write)
+            scheduleCommit(id)
         default:
             scheduler.failUnmodeled("AccessibilityPort.set \(attribute.rawValue) \(name(node))")
             return .cannotComplete

@@ -66,6 +66,10 @@ package struct SimulatedApp: Sendable {
         mac.action("\(alias) delay AX replies by \(milliseconds)ms")
         mac.apps[pid]?.replyDelay = max(0, milliseconds)
     }
+    @MainActor package func delayCommits(milliseconds: Int) {
+        mac.action("\(alias) delay WindowServer commits by \(milliseconds)ms")
+        mac.apps[pid]?.commitDelay = max(0, milliseconds)
+    }
     @MainActor package func resume() { mac.setHung(pid, false) }
     @MainActor package func quit() { mac.terminate(pid, crash: false) }
     @MainActor package func crash() { mac.terminate(pid, crash: true) }
@@ -115,6 +119,9 @@ package final class SimulatedMac: @unchecked Sendable {
     var foundation = FoundationState()
     var motion = MotionState()
     var stageState = StageState()
+    var unlisted = Set<UInt32>()
+    var listingHistory: [ListingRead] = []
+    var commits: [WindowServerCommit] = []
 
     struct AppState {
         let pid: Int32, alias: String, bundleID: String
@@ -123,6 +130,7 @@ package final class SimulatedMac: @unchecked Sendable {
         var prohibitedNotifications = ProhibitedNotifications.omitted
         var busyUntil = 0
         var replyDelay = 0
+        var commitDelay = 8
         var omitHiddenWindows = false
         var key: UInt32?, main: UInt32?
         var windowLists: [WindowListReply] = []
@@ -143,6 +151,9 @@ package final class SimulatedMac: @unchecked Sendable {
         var minimizing = false
         var spaces: Set<UInt64> = [1]
         var group: Int?
+        /// Non-nil while AX geometry is ahead of the app-committed frame.
+        var served: CGRect?
+        var commitScheduled = false
     }
     struct TabGroup { var windows: [UInt32]; var selected: UInt32 }
     struct WeakLifecycle { weak var value: Lifecycle? }
@@ -170,6 +181,11 @@ package final class SimulatedMac: @unchecked Sendable {
     @MainActor package var frontmostApp: Int32? { front }
     @MainActor package var finder: SimulatedApp { app(10) }
     @MainActor package func frame(_ id: UInt32) -> CGRect? { windows[id]?.spec.frame }
+    @MainActor package func servedFrame(_ id: UInt32) -> CGRect? { serverFrame(id) }
+    /// Models a missing CG description without changing AX or native visibility.
+    @MainActor package func omitListings(of ids: Set<UInt32>) { unlisted = ids }
+    @MainActor package var listingReads: [ListingRead] { listingHistory }
+    @MainActor package var windowServerCommits: [WindowServerCommit] { commits }
     @MainActor package func isVisible(_ id: UInt32) -> Bool { visibleIDs().contains(id) }
     @MainActor package func isFullyOnScreen(_ id: UInt32) -> Bool {
         guard isVisible(id), let frame = frame(id) else { return false }
@@ -283,7 +299,10 @@ package final class SimulatedMac: @unchecked Sendable {
         assume(.axMessagingTimeout)
         action("\(apps[pid]!.alias) \(hung ? "hang" : "resume")")
         apps[pid]?.hung = hung
-        if !hung { apps[pid]?.busyUntil = 0 }
+        if !hung {
+            apps[pid]?.busyUntil = 0
+            for id in windows.keys.sorted() where windows[id]?.pid == pid && windows[id]?.served != nil { scheduleCommit(id) }
+        }
     }
     @MainActor func setBusy(_ pid: Int32, duration: Int) {
         assume(.axMessagingTimeout)
@@ -315,18 +334,21 @@ package final class SimulatedMac: @unchecked Sendable {
         let held = motion.pointerHeld
         pressPointer()
         applyPosition(id, point)
+        commitGeometry(id)
         if !held { pointerUp() }
     }
     @MainActor func resize(_ id: UInt32, size: CGSize) {
         assume(.axSizeConstraints)
         action("resize window \(id) to \(size.width),\(size.height)")
         applySize(id, size)
+        commitGeometry(id)
     }
     /// The app moves its own window, as AppKit's setFrame does.
     @MainActor func move(_ id: UInt32, to point: CGPoint) {
         assume(.axNotifications)
         action("window \(id) moves itself to \(point.x),\(point.y)")
         applyPosition(id, point)
+        commitGeometry(id)
     }
     @MainActor func publishWindowLists(_ pid: Int32, _ replies: [WindowListReply]) {
         assume(.transientWindowLists)
@@ -342,7 +364,7 @@ package final class SimulatedMac: @unchecked Sendable {
         nextGroup += 1
         groups[nextGroup] = TabGroup(windows: ids, selected: selected)
         let frame = windows[selected]!.spec.frame
-        for id in ids { windows[id]?.group = nextGroup; windows[id]?.spec.frame = frame }
+        for id in ids { windows[id]?.group = nextGroup; windows[id]?.spec.frame = frame; windows[id]?.served = nil }
         action("group native tabs \(ids) selected=\(selected)")
         focus(selected)
         notify(.layoutChanged, node: .window(selected))
@@ -366,9 +388,48 @@ package final class SimulatedMac: @unchecked Sendable {
         return zOrder.filter { id in
             guard let w = windows[id], !w.closed, !w.minimized, w.spaces.contains(active),
                   apps[w.pid]?.hidden == false, apps[w.pid]?.terminated == false,
-                  w.spec.frame.intersects(bounds) || w.spec.offDisplayMembership == .included else { return false }
+                  (w.served ?? w.spec.frame).intersects(bounds) || w.spec.offDisplayMembership == .included else { return false }
             return w.group.flatMap { groups[$0]?.selected == id } ?? true
         }
+    }
+    package struct ListingRead: Sendable {
+        package let at: Int
+        package let windows: Set<UInt32>
+    }
+    package struct WindowServerCommit: Sendable {
+        package let at: Int
+        package let traceIndex: Int
+        package let windows: Set<UInt32>
+    }
+    func serverFrame(_ id: UInt32) -> CGRect? { windows[id].map { $0.served ?? $0.spec.frame } }
+    func deferCommit(_ id: UInt32) {
+        assume(.windowServerListing)
+        guard let pid = windows[id]?.pid, apps[pid]!.commitDelay > 0 else { return }
+        for member in groupMembers(id) where windows[member]?.served == nil {
+            let frame = windows[member]?.spec.frame
+            windows[member]?.served = frame
+        }
+    }
+    func scheduleCommit(_ id: UInt32) {
+        guard let window = windows[id], window.served != nil, !window.commitScheduled else { return }
+        for member in groupMembers(id) { windows[member]?.commitScheduled = true }
+        scheduler.nativeAfter(milliseconds: apps[window.pid]!.commitDelay) { [self] in
+            for member in groupMembers(id) { windows[member]?.commitScheduled = false }
+            guard let app = apps[window.pid], !app.terminated, !app.hung else { return }
+            if app.busyUntil > scheduler.now {
+                scheduler.nativeAfter(milliseconds: app.busyUntil - scheduler.now) { [self] in scheduleCommit(id) }
+                return
+            }
+            commitGeometry(id)
+        }
+    }
+    func commitGeometry(_ id: UInt32) {
+        let pending = Set(groupMembers(id).filter { windows[$0]?.served != nil })
+        guard !pending.isEmpty else { return }
+        for member in pending { windows[member]?.served = nil }
+        scheduler.note("window-server commit windows=\(pending.sorted())")
+        commits.append(WindowServerCommit(at: scheduler.now, traceIndex: scheduler.trace.count, windows: pending))
+        recordPresentation("commit")
     }
     func applySize(_ id: UInt32, _ size: CGSize) {
         guard let spec = windows[id]?.spec else { return }

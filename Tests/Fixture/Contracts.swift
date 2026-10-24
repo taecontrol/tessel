@@ -184,6 +184,11 @@ final class FixtureContracts: NSObject {
                 if let pointer { CGWarpMouseCursorPosition(pointer) }
             }
             return [:]
+        case "windowListing":
+            let window = try retained(command, pid: pid)
+            guard let listed = PlacementSampler.windowServer(id(window)) else { return [:] }
+            let frame = listed.bounds
+            return ["windowListing": ["frame": [frame.minX, frame.minY, frame.width, frame.height], "onScreen": listed.onScreen]]
         case "placementGap": return try placementGap(command, application: application, pid: pid)
         case "snapshot": return snapshot(application, pid: pid)
         case "barOwner":

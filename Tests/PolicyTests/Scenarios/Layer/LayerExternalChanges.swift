@@ -5,13 +5,13 @@ import Testing
 
 /// #33 E18, amended: tessel's own ordering never exposes the desktop; an
 /// external change during a handoff exposes what it would expose at rest, and
-/// the exposure ends with the render its snapshot triggers. Each change runs
+/// the exposure ends at the first recheck after that render's app commits. Each change runs
 /// once during a layer exit and once at rest, under the same assertion.
 ///
 /// The render is found without looking at coverage: it runs in the main-lane
 /// job that delivers the change's snapshot, and its own work never waits for
-/// time to pass. The exposure must end before any timed work scheduled from
-/// that job on comes due, and the handoff arm may expose the point no longer
+/// time to pass beyond its bounded listing wait. Exposure ends at the first
+/// recheck after its app commits, and the handoff arm may expose the point no longer
 /// than the at-rest arm. An arm whose job or timers cannot be identified
 /// fails, rather than checking less.
 @Suite @MainActor struct LayerExternalChanges {
@@ -64,7 +64,7 @@ import Testing
         }
     }
 
-    @Test("#33 E18: a tile withdrawn by its app during a layer exit exposes no longer than at rest",
+    @Test("#33 E18; #40 E13: a tile withdrawn by its app during a layer exit exposes no longer than at rest",
           arguments: WriteOrder.allCases, Change.allCases)
     func withdrawalExposesNoLongerThanAtRest(_ writes: WriteOrder, _ change: Change) {
         var exposures = Exposures()
@@ -208,8 +208,8 @@ import Testing
     }
 
     /// The trace starts at the external change. The render the change's
-    /// snapshot triggers ends before the first timer, scheduled from the
-    /// snapshot's delivery on, comes due. The exposure must end by then, with
+    /// snapshot triggers ends at the first recheck after its placements commit
+    /// to WindowServer. The exposure must end by then, with
     /// the successor covering the point, and no later state may expose it.
     /// Returns how long the point was exposed, or nil when the arm failed.
     private func expectExposureEndsWithRender(_ f: CarouselFixture, changed: TraceStart, snapshot: Int?, coveredBy successor: UInt32) -> Int? {
@@ -217,7 +217,19 @@ import Testing
         // A missing boundary fails the arm; the exposure is still judged.
         var render: Int?
         if let snapshot {
-            do { render = try RenderBoundary.end(in: trace, snapshot: snapshot) } catch {
+            do {
+                let writes = f.mac.geometryWrites.filter { $0.traceIndex >= snapshot }
+                let commits = try writes.map { write in
+                    guard let commit = f.mac.windowServerCommits.first(where: { $0.traceIndex > write.traceIndex && $0.windows.contains(write.window) }) else {
+                        throw RenderBoundary.Missing(description: "no app commit after render placement of window \(write.window)")
+                    }
+                    return commit.at
+                }
+                render = try RenderBoundary.end(in: trace, snapshot: snapshot, notBefore: commits.max())
+                if let commit = commits.max(), let end = states.lastIndex(where: { !$0.frames.values.contains { $0.contains(Self.point) } }).map({ $0 + 1 }), end < states.count {
+                    s.expect("the exposure ends by the first recheck after the render's app commit", states[end].at <= commit + 4)
+                }
+            } catch {
                 s.expect("the render boundary is identified: \(error)", false)
             }
         } else { s.expect("the render boundary needs the change's snapshot delivery", false) }
@@ -229,7 +241,7 @@ import Testing
         guard let render else { return nil }
         do {
             let endTime = try RenderBoundary.time(trace, before: states[end].traceIndex)
-            s.expect("the exposure ends with the render the change's snapshot triggers, at \(endTime) ms, not after the render's first due timer",
+            s.expect("the exposure ends with the render the change's snapshot triggers, at \(endTime) ms, not after the first timer following its app commit",
                      states[end].traceIndex <= render)
             // A change that exposes the point by itself records no state.
             return endTime - (first == 0 ? changed.time : try RenderBoundary.time(trace, before: states[first].traceIndex))
@@ -290,7 +302,7 @@ enum RenderBoundary {
     /// The trace index of the first timer to fire at or after the earliest
     /// due time scheduled from the delivery job on. Every timer must have
     /// fired, so a missing firing cannot hide the boundary.
-    static func end(in trace: [String], snapshot: Int) throws(Missing) -> Int {
+    static func end(in trace: [String], snapshot: Int, notBefore commit: Int? = nil) throws(Missing) -> Int {
         var due: Int?, scheduled = 0, fired: [Int] = []
         for index in trace.indices {
             let line = trace[index]
@@ -306,7 +318,7 @@ enum RenderBoundary {
         guard fired.count == scheduled else { throw Missing(description: "\(scheduled) timers scheduled, \(fired.count) fired") }
         guard let due else { throw Missing(description: "no timer was scheduled from the delivery job at trace index \(snapshot) on") }
         for index in fired where index > snapshot {
-            if try time(trace[index]) >= due { return index }
+            if try time(trace[index]) >= max(due, commit ?? due) { return index }
         }
         throw Missing(description: "no timer fired at or after \(due) ms")
     }

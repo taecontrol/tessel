@@ -215,7 +215,7 @@ final class PlacementSampler: @unchecked Sendable {
     }
 
     /// What WindowServer lists for one fixture window, as the stage reads it.
-    private static func windowServer(_ number: UInt32) -> (bounds: CGRect, onScreen: Bool)? {
+    static func windowServer(_ number: UInt32) -> (bounds: CGRect, onScreen: Bool)? {
         var pointer = UnsafeRawPointer(bitPattern: UInt(number))
         let ids = CFArrayCreate(nil, &pointer, 1, nil)
         guard let entry = (CGWindowListCreateDescriptionFromArray(ids) as? [[String: Any]])?.first,

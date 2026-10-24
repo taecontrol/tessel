@@ -2,6 +2,48 @@ import Foundation
 import Testing
 
 extension Acceptance.Contracts {
+    @Test("window-server-listing; #40 E12: AX acceptance precedes the app commit, including in the closet", contract(.windowServerListing))
+    func windowServerListing() throws {
+        let id = try fixture.open(), before = try window(id).frame
+        let target = [before[0] + 70, before[1] + 35, before[2], before[3]]
+        let stopped = try #require(try native("placementGap", ["id": id, "frame": target, "stop": true, "limitMilliseconds": 200]).placementGap)
+        let accepted = try #require(stopped.accepted), initial = try #require(stopped.before)
+        try #require(stopped.results?.allSatisfy { $0 == 0 } == true && !desktop.near(initial, accepted))
+        let events = try #require(stopped.trace[String(id)])
+        // The only sampled negative: the app runs no commit for 200 ms after
+        // answering AX. Include the state in force at the stop, not just changes.
+        let atStop = try #require(events.last { $0[0] <= 0 })
+        let whileStopped = [atStop] + events.filter { $0[0] > 0 && $0[0] <= 200 }
+        #expect(stopped.traceStartMilliseconds < 0 && stopped.traceEndMilliseconds >= 200 && stopped.samples > 1)
+        #expect(whileStopped.allSatisfy { $0.count == 6 && $0[5] == 1 && desktop.near(Array($0[1...4]), initial) },
+                "WindowServer keeps the old frame while the app is stopped after its AX reply")
+        try requireFinalState("WindowServer lists the accepted frame after the observer resumes the fixture") {
+            let listed = try native("windowListing", ["id": id]).windowListing
+            return listed?.onScreen == true && listed.map { desktop.near($0.frame, accepted) } == true
+        }
+        try native("closetStart")
+        defer { _ = try? native("closetStop") }
+        try native("closetHide", ["ids": [id]])
+        try requireFinalState("a closet hide lists the fixture off screen") {
+            try native("windowListing", ["id": id]).windowListing?.onScreen == false
+        }
+        // `fromCloset` also shows the window; omit it to keep the final state
+        // observable in the closet until the harness sees the accepted frame.
+        let hiddenTarget = [accepted[0] + 45, accepted[1], accepted[2], accepted[3]]
+        let hidden = try #require(try native("placementGap", ["id": id, "frame": hiddenTarget, "limitMilliseconds": 0]).placementGap)
+        let hiddenAccepted = try #require(hidden.accepted)
+        try #require(hidden.results?.allSatisfy { $0 == 0 } == true && !desktop.near(accepted, hiddenAccepted))
+        try requireFinalState("WindowServer lists the AX-accepted frame while the fixture remains in the closet") {
+            let listed = try native("windowListing", ["id": id]).windowListing
+            return listed?.onScreen == false && listed.map { desktop.near($0.frame, hiddenAccepted) } == true
+        }
+        try native("closetShow", ["ids": [id]])
+        try requireFinalState("the confirmed fixture returns at the same accepted frame") {
+            let listed = try native("windowListing", ["id": id]).windowListing
+            return listed?.onScreen == true && listed.map { desktop.near($0.frame, hiddenAccepted) } == true
+        }
+    }
+
     @Test("window-levels: CG layers distinguish native roots and remain readable by ID off the active Space", contract(.windowLevels))
     func windowLevels() throws {
         let reply = try fixture.command("windowLevels")

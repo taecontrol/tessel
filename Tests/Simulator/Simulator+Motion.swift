@@ -31,6 +31,8 @@ extension SimulatedMac {
     }
     package struct PresentationState: Sendable {
         package let operation: String
+        package let at: Int
+        package let uncommitted: Set<UInt32>
         package let traceIndex: Int
         package let frames: [UInt32: CGRect]
         package let order: [UInt32]
@@ -76,8 +78,8 @@ extension SimulatedMac {
     func recordPresentation(_ operation: String) {
         guard motion.tracingPresentation else { return }
         let order = visibleIDs()
-        motion.states.append(PresentationState(operation: operation, traceIndex: scheduler.trace.count,
-            frames: Dictionary(uniqueKeysWithValues: order.compactMap { id in windows[id].map { (id, $0.spec.frame) } }), order: order))
+        motion.states.append(PresentationState(operation: operation, at: scheduler.now, uncommitted: Set(windows.keys.filter { windows[$0]?.served != nil }), traceIndex: scheduler.trace.count,
+            frames: Dictionary(uniqueKeysWithValues: order.compactMap { id in serverFrame(id).map { (id, $0) } }), order: order))
     }
     @MainActor package var geometryWrites: [GeometryWrite] { motion.writes }
     @MainActor package var visibilityChanges: [VisibilityChange] { motion.visibility }

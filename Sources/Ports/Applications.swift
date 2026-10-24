@@ -41,9 +41,17 @@ package struct ScreenGeometry: Sendable {
 @MainActor
 package protocol ScreenPort { var primaryScreen: ScreenGeometry? { get } }
 
+package struct WindowListing: Sendable, Equatable {
+    package let frame: CGRect
+    package let onScreen: Bool
+    package init(frame: CGRect, onScreen: Bool) { self.frame = frame; self.onScreen = onScreen }
+}
+
 @MainActor
 package protocol WindowOrderPort {
     func onScreenOrder() -> [UInt32]
     /// CG layers for just these windows, including those outside the active Space.
     nonisolated func windowLevels(_ windows: Set<UInt32>) -> [UInt32: Int]
+    /// What WindowServer lists for these windows, wherever they are. A closed window is missing.
+    nonisolated func listings(_ windows: Set<UInt32>) -> [UInt32: WindowListing]
 }

@@ -77,6 +77,8 @@ struct NativeContractReply: Codable {
         let samples: Int
         let longestSampleGapMilliseconds: Double
     }
+    struct WindowListing: Codable { let frame: [Double]; let onScreen: Bool }
+    let windowListing: WindowListing?
     let placementGap: PlacementGap?
     let sampledAt: Double?
     struct Window: Codable {
