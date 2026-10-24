@@ -390,6 +390,99 @@ import Testing
         })
     }
 
+    @Test("#41 E8; #40 E6; #40 E10: a failed placement preserves an independent return's listing deadline",
+          arguments: WriteOrder.allCases, [false, true])
+    func failedPlacementPreservesPendingReturn(_ writes: WriteOrder, _ selectedReturn: Bool) {
+        requireCarousel(Scenario.run("#41 failed placement with pending return / selected return \(selectedReturn) / \(writes)", writes: writes) { s in
+            let f = CarouselFixture(s, duration: 0, appCount: 2)
+            prepareWorkspace(f)
+            if selectedReturn {
+                f.press("workspace 2"); f.select(f.ids[1]); f.press("workspace 1")
+            }
+            let returning = f.ids[1], failed = f.ids[2], cover = f.ids[0]
+            f.apps[0].hang()
+            f.apps[1].delayAXReplies(milliseconds: 250)
+            f.mac.omitListings(of: [returning]); f.mac.clearMotionHistory()
+            let firstRead = f.mac.listingReads.count, start = f.mac.scheduler.trace.count
+            var sawPendingReturn = false
+            f.tessel.rows.onUpdate = { _, _ in
+                if !placementPending(f.tessel) && f.mac.isInCloset(returning) { sawPendingReturn = true }
+            }
+            f.press("workspace 2")
+            f.tessel.rows.onUpdate = nil
+            s.expect("deferred write orders release placement while the independent return still awaits its listing", writes == .eager || sawPendingReturn)
+            s.expect("the failed destination exhausts its initial attempt and four retries without replay", hiddenTimeouts(f, app: f.apps[0], since: start) == 5)
+            s.expect("the failed destination stays in the closet", f.mac.isInCloset(failed))
+            if !selectedReturn {
+                s.expect("the failed selection retains its outgoing cover and native focus", f.mac.isVisible(cover) && f.mac.focusedWindow == cover)
+                s.expect("the cover overlapping the failed destination never hides", !f.mac.visibilityChanges.contains { !$0.showing && $0.windows.contains(cover) })
+            } else {
+                s.expect("the successful selected return receives native focus after showing", f.mac.focusedWindow == returning)
+            }
+            expectPendingReturnCompletes(f, returning: returning, since: firstRead)
+            enabledWithoutDesktopActivation(f, since: start)
+        })
+    }
+
+    @Test("#41 E8; #40 E6; #40 E10: exhausted focus preserves an independent return's listing deadline", arguments: WriteOrder.allCases)
+    func failedFocusPreservesPendingReturn(_ writes: WriteOrder) {
+        requireCarousel(Scenario.run("#41 failed focus with pending return / \(writes)", writes: writes) { s in
+            let f = CarouselFixture(s, duration: 0, appCount: 3)
+            prepareWorkspace(f)
+            f.press("workspace 2"); f.select(f.ids[1]); f.press("workspace 1")
+            let selected = f.ids[1], returning = f.ids[2], cover = f.ids[0], app = f.apps[1]
+            f.apps[2].delayAXReplies(milliseconds: 250)
+            f.mac.omitListings(of: [returning]); f.mac.clearMotionHistory()
+            let firstRead = f.mac.listingReads.count, start = f.mac.scheduler.trace.count
+            f.tessel.press("workspace 2")
+            let held = f.mac.pause(after: .call("AccessibilityPort.set AXFrontmost=true \(app.alias) pid=\(app.pid)"))
+            if case .paused = held {} else { s.expect("the destination's focus-only activation is held: \(held)", false) }
+            s.expect("the focus target is already visible", f.mac.isVisible(selected))
+            app.hang()
+            var sawPendingReturn = false
+            f.tessel.rows.onUpdate = { _, _ in
+                if !placementPending(f.tessel) && f.mac.isInCloset(returning) { sawPendingReturn = true }
+            }
+            s.settle()
+            f.tessel.rows.onUpdate = nil
+            s.expect("failed focus releases placement while the independent return still awaits its listing", sawPendingReturn)
+            let activationTimeouts = f.mac.scheduler.trace.dropFirst(start).filter {
+                $0.contains("AccessibilityPort.set AXFrontmost reply \(app.alias) pid=\(app.pid) cannotComplete")
+            }.count
+            s.expect("focus exhausts its activation attempt and four retries without replay", activationTimeouts == 1 && hiddenTimeouts(f, app: app, since: start) == 4)
+            s.expect("failed focus retains the outgoing cover and native focus", f.mac.isVisible(cover) && f.mac.focusedWindow == cover)
+            s.expect("the outgoing cover never hides after failed focus", !f.mac.visibilityChanges.contains { !$0.showing && $0.windows.contains(cover) })
+            expectPendingReturnCompletes(f, returning: returning, since: firstRead)
+            enabledWithoutDesktopActivation(f, since: start)
+        })
+    }
+
+    private func expectPendingReturnCompletes(_ f: CarouselFixture, returning: UInt32, since firstRead: Int) {
+        let s = f.s
+        let acceptedAt = f.mac.listingReads.dropFirst(firstRead).first { $0.windows.contains(returning) }?.at
+        let shownAt = f.mac.visibilityChanges.first { $0.showing && $0.windows.contains(returning) }?.at
+        s.expect("the independent return becomes visible", f.mac.isVisible(returning))
+        s.expect("the omitted return shows exactly at its 100 ms deadline", acceptedAt != nil && shownAt == acceptedAt.map { $0 + 100 })
+        s.expect("the failed ending releases placement", !placementPending(f.tessel))
+        s.expect("no listing recheck or deadline timer remains", !f.mac.scheduler.pendingMainDelays.contains(4) && !f.mac.scheduler.pendingMainDelays.contains(100))
+        let reads = f.mac.listingReads.count, trace = f.mac.scheduler.trace.count, visible = f.mac.visibleOrder
+        f.apps.forEach { $0.resume() }
+        s.after(milliseconds: 5_000, "remain idle after the pending return") {}
+        s.settle()
+        s.expect("idle performs no listing reads", f.mac.listingReads.count == reads)
+        s.expect("idle never replays AX work after recovery", !f.mac.scheduler.trace.dropFirst(trace).contains { $0.contains("AccessibilityPort.") })
+        s.expect("idle preserves returned windows and retained covers", f.mac.visibleOrder == visible)
+        s.expect("focus never targets a hidden window", f.mac.focusRequests.allSatisfy { !$0.hidden })
+    }
+
+    private func placementPending(_ tessel: Tessel) -> Bool {
+        guard let token = Mirror(reflecting: tessel.workspaces).children.first(where: { $0.label == "placementToken" }) else {
+            Issue.record("the presenter must expose its placementToken to the terminal-state oracle")
+            return true
+        }
+        return !Mirror(reflecting: token.value).children.isEmpty
+    }
+
     private func prepareWorkspace(_ f: CarouselFixture) {
         let a = f.ids[0], b = f.ids[1], c = f.ids[2]
         f.select(b); f.press("send 2"); f.press("workspace 1")
