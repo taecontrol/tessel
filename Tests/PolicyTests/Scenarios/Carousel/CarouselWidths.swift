@@ -24,18 +24,26 @@ import Testing
     @Test("accepted subpoint width differences do not turn focus-only commands into resizes")
     func acceptedSizesRemainStable() {
         requireCarousel(Scenario.run("stable AX width readback") { s in
-            let f = CarouselFixture(s), b = f.ids[1]
+            let f = CarouselFixture(s, presets: [0.5, 0.5], maximumFractions: [1: 848.5 / 1708])
+            let b = f.ids[0], id = f.ids[1]
+            // Retain a nominal half so the readback differs by half a point;
+            // a limited new arrival now adopts the exact accepted width.
+            f.app.resizeFromApplication(id, to: CGSize(width: f.width(0.5), height: 400)); s.settle()
             f.press("alt-l")
-            let id = f.open(maximum: f.width(0.5) - 0.5)
+            f.near(f.frame(id).width, f.width(0.5) - 0.5, "AX accepted the half-point maximum")
             f.mac.clearMotionHistory()
             f.press("alt-h"); f.focus(b)
             f.press("alt-l"); f.focus(id)
             s.expect("focus-only commands do not repeat an accepted size within the one-point tolerance", f.mac.geometryWrites.isEmpty)
         })
         requireCarousel(Scenario.run("stable subpoint AX minimum readback") { s in
-            let f = CarouselFixture(s), b = f.ids[1]
+            // Existing half-width tiles keep this readback check independent
+            // of the full-width arrival default (#49 E9).
+            let f = CarouselFixture(s, presets: [0.5, 0.5], minimumFractions: [1: 849.5 / 1708])
+            let b = f.ids[0], id = f.ids[1]
+            f.app.resizeFromApplication(id, to: CGSize(width: f.width(0.5), height: 400)); s.settle()
             f.press("alt-l")
-            let id = f.open(minimum: f.width(0.5) + 0.5)
+            f.near(f.frame(id).width, f.width(0.5) + 0.5, "AX accepted the half-point minimum")
             f.mac.clearMotionHistory()
             f.press("alt-h"); f.focus(b)
             f.press("alt-l"); f.focus(id)
@@ -70,10 +78,12 @@ import Testing
             f.press("alt-l"); f.mac.clearMotionHistory()
             let id = f.open(minimum: maximum ? 1 : f.area.width * 0.62, maximum: maximum ? f.area.width * 0.8 : 100_000)
             let initial = f.mac.geometryWrites.filter { $0.window == id && $0.attribute == .size }
+            f.near(Double(initial.first?.requested.size?.width ?? -1), f.width(1), "first arrival request is full (#49 E1-E6)")
             if !maximum {
-                s.expect("new constrained window needs at most two size writes", (1...2).contains(initial.count))
-                f.near(Double(initial.first?.requested.size?.width ?? -1), f.width(0.5), "first request is half")
-                f.near(f.frame(id).width, f.width(2.0/3), "accepted minimum rounds to two thirds")
+                s.expect("an app that accepts full needs one arrival size write", initial.count == 1)
+                f.near(f.frame(id).width, f.width(1), "a minimum constraint does not prevent full-width arrival")
+                f.press("alt-r")
+                f.near(f.frame(id).width, f.width(2.0/3), "cycling from full rejects the small presets and rounds the minimum to two thirds")
                 f.mac.clearMotionHistory()
                 for p in [1.0, 2.0/3, 1, 2.0/3] { f.press("alt-r"); f.near(f.frame(id).width, f.width(p), "cycle skips rejected smaller presets") }
                 let requested = f.mac.geometryWrites.filter { $0.window == id && $0.attribute == .size }.compactMap { $0.requested.size?.width }
@@ -85,8 +95,11 @@ import Testing
                 let restoredRequests = f.mac.geometryWrites.filter { $0.window == id && $0.attribute == .size }.compactMap { $0.requested.size?.width }
                 s.expect("restoring never retries a rejected small preset", !restoredRequests.isEmpty && restoredRequests.allSatisfy { $0 >= f.width(2.0/3) - 1 })
             } else {
+                f.near(f.frame(id).width, f.area.width * 0.8, "the constrained arrival uses its exact maximum (#49 E5-E6)")
+                f.press("alt-r"); f.near(f.frame(id).width, f.width(1.0/3), "cycling from the exact maximum wraps to a third")
+                f.press("alt-r"); f.near(f.frame(id).width, f.width(0.5), "the next fitting preset is half")
                 f.press("alt-r"); f.near(f.frame(id).width, f.width(2.0/3), "maximum fixture reaches two thirds")
-                f.press("alt-r"); f.near(f.frame(id).width, f.width(1.0/3), "rejected full width wraps to the next accepted third")
+                f.press("alt-r"); f.near(f.frame(id).width, f.width(1.0/3), "cycling skips the maximum already rejected at arrival and wraps to a third")
                 f.mac.clearMotionHistory()
                 for p in [0.5, 2.0/3, 1.0/3, 0.5, 2.0/3, 1.0/3] { f.press("alt-r"); f.near(f.frame(id).width, f.width(p), "cycle skips rejected maximum") }
                 let requested = f.mac.geometryWrites.filter { $0.window == id && $0.attribute == .size }.compactMap { $0.requested.size?.width }
@@ -99,6 +112,7 @@ import Testing
                 let f = CarouselFixture(s, duration: 0)
                 f.press("alt-l")
                 let minimum = f.area.width * 0.62, id = f.open(minimum: minimum)
+                f.press("alt-r") // Learn the rejected third before shrinking the area.
                 f.mac.clearMotionHistory()
                 f.tessel.changeConfig(CarouselFixture.config + "[animation]\nduration = 0\n[gaps]\nouter = 300\n"); s.settle()
                 let sizes = f.mac.geometryWrites.filter { $0.window == id && $0.attribute == .size }.compactMap { $0.requested.size?.width }

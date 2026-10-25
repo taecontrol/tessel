@@ -96,7 +96,8 @@ run only with their opt-in flag: `TESSEL_CAPTURE_WORKSPACES=1` for AppKit views,
 `TESSEL_CAPTURE_CAROUSEL=1` for E21 geometry recordings, or
 `TESSEL_CAPTURE_INSTANT=1` for #33's fixture-only 120 Hz pixel recordings, or
 `TESSEL_CAPTURE_LAYER=1` for layer recordings, the automated E30 fidelity
-walkthrough and E32 owner-session preparation. Select a suite or pass a test
+walkthrough and E32 owner-session preparation, or `TESSEL_CAPTURE_ARRIVAL_WIDTH=1`
+for #49 E15's standard and maximum-width arrival geometry. Select a suite or pass a test
 name fragment, such as `scripts/verify switchWorkspaces`. Empty selections fail
 before a GUI session starts. The script sets `TESSEL_ACCEPTANCE=1`; a direct
 `TESSEL_ACCEPTANCE=1 swift build --build-tests` compiles these suites without
@@ -347,8 +348,9 @@ an architecture decision before implementation.
 
 Each workspace owns a stack of rails (rows). Existing windows enter one rail in
 ID order, independent of which app finishes its first AX enumeration, retaining their observed widths; an exact preset is recognized.
-New windows enter at half width immediately right of the focused tile, receive
-focus, and are revealed with the smallest scroll. Presets are one third, one
+New windows enter at full width immediately right of the focused tile, receive
+focus, and are revealed with the smallest scroll (#49). An app that rejects
+full width keeps the exact width it accepted on arrival. Presets are one third, one
 half, two thirds and full width, measured as `p * (area.width + outer) - outer`.
 The area is the primary display's visible frame inset by the outer gap.
 
@@ -1024,7 +1026,7 @@ hidden-layer Given; a live new panel would enter its single-window layer.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2, #19, #26, #33, #36, #38, #39, #40 and #41.
+This table is the maintained example-to-layer map for issues #1, #2, #19, #26, #33, #36, #38, #39, #40, #41 and #49.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -1237,6 +1239,21 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #41 E6 | P |
 | #41 E7 | P |
 | #41 E8 | P |
+| #49 E1 | P |
+| #49 E2 | P |
+| #49 E3 | P |
+| #49 E4 | P |
+| #49 E5 | P |
+| #49 E6 | P |
+| #49 E7 | P |
+| #49 E8 | P |
+| #49 E9 | P |
+| #49 E10 | P |
+| #49 E11 | P |
+| #49 E12 | P |
+| #49 E13 | P |
+| #49 E14 | P |
+| #49 E15 | X |
 <!-- Pending capture: #33 E20 -->
 <!-- Pending capture: #36 E8 -->
 

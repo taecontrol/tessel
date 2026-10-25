@@ -19,24 +19,28 @@ import Testing
         })
     }
 
-    @Test("#26 E10: opening after the focused right half reveals the new half with minimal scrolling")
-    func newHalfInsertsAfterFocus() {
+    @Test("#26 E10: opening after the focused right half reveals a full-width arrival with minimal scrolling")
+    func fullWidthArrivalInsertsAfterFocus() {
         requireCarousel(Scenario.run("open after visible pair") { s in
             let f = CarouselFixture(s), b = f.ids[1]
             f.press("alt-l"); let width = f.frame(b).width
             let id = f.open()
             f.order([f.ids[0], b, id, f.ids[2]])
-            f.pair(b, id, focused: id)
+            f.expanded(id)
+            s.expect("the preceding half leaves the viewport", !f.mac.isVisible(b))
             f.near(f.frame(b).width, width, "arrival preserves the neighbour's nominal width")
+            f.press("alt-h"); f.focus(b)
+            f.near(f.frame(b).minX, f.area.minX, "returning left reveals the half with minimal scrolling")
         })
     }
 
-    @Test("#26 E11: opening at the start keeps its nominal half beside the arrival")
+    @Test("#26 E11: opening at the start inserts a full-width arrival without changing its neighbor's nominal half")
     func openingAtTheStart() {
         requireCarousel(Scenario.run("open at the start") { s in
             let f = CarouselFixture(s), a = f.ids[0]
             let id = f.open()
-            f.order([a, id, f.ids[1], f.ids[2]]); f.pair(a, id, focused: id)
+            f.order([a, id, f.ids[1], f.ids[2]]); f.expanded(id)
+            f.near(f.frame(a).width, f.width(0.5), "arrival preserves the first tile's nominal half")
         })
     }
 

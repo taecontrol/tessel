@@ -10,6 +10,7 @@ struct Carousel {
         var id: UInt32
         var size: CGSize
         var preset: Double? = nil
+        var firstPlacementPending = false
         var minimum: Double = 1
         var maximum: Double = .infinity
     }
@@ -85,6 +86,7 @@ struct Carousel {
         let x = left ?? geometry(ws.rails[p.rail])[p.slot].minX
         var tile = ws.rails[p.rail].tiles[p.slot]
         tile.preset = nil
+        tile.firstPlacementPending = false
         tile.size.width = min(width, value)
         // User acceptance disproves a learned intrinsic limit in that direction.
         if value > tile.maximum + 1 { tile.maximum = .infinity }
@@ -94,8 +96,8 @@ struct Carousel {
         workspaces[p.workspace] = ws
     }
 
-    /// Learn AX's bounds; a rejected nominal preset advances to the next
-    /// candidate inside those bounds, including wrap after a rejected maximum.
+    /// Learn AX's bounds. A new window whose first placement is too wide keeps
+    /// the exact accepted width; other rejected presets advance within the bounds.
     /// Clipped readbacks cannot establish intrinsic width or height bounds.
     mutating func accept(_ id: UInt32, requested: CGSize, accepted: CGSize, learnBounds: Bool = true) {
         guard let p = location(id), var ws = workspaces[p.workspace] else { return }
@@ -103,17 +105,27 @@ struct Carousel {
         let previousWidth = nominal(tile)
         if learnBounds { tile.size.height = accepted.height }
         if learnBounds && accepted.width > requested.width + 1 { tile.minimum = accepted.width }
-        if learnBounds && accepted.width < requested.width - 1 { tile.maximum = accepted.width }
-        if let preset = tile.preset, !fits(tile, preset) {
+        let rejectedWidth = learnBounds && accepted.width < requested.width - 1
+        if rejectedWidth { tile.maximum = accepted.width }
+        if tile.firstPlacementPending && rejectedWidth {
+            tile.preset = nil
+            tile.size.width = accepted.width
+        } else if let preset = tile.preset, !fits(tile, preset) {
             let candidates = Self.presets.filter { fits(tile, $0) }
             tile.preset = candidates.first { $0 > preset + 1e-6 } ?? candidates.first
             if tile.preset == nil { tile.size.width = accepted.width }
         } else if tile.preset == nil {
             tile.size.width = min(tile.maximum, max(tile.minimum, tile.size.width))
         }
+        tile.firstPlacementPending = false
         ws.rails[p.rail].tiles[p.slot] = tile
         if abs(nominal(tile) - previousWidth) > 1 { reveal(&ws.rails[p.rail]) }
         workspaces[p.workspace] = ws
+    }
+    /// A position-only placement ends arrival handling without accepting a size.
+    mutating func finishFirstPlacement(_ id: UInt32) {
+        guard let p = location(id), workspaces[p.workspace]?.rails[p.rail].tiles[p.slot].firstPlacementPending == true else { return }
+        workspaces[p.workspace]?.rails[p.rail].tiles[p.slot].firstPlacementPending = false
     }
     mutating func select(_ id: UInt32) {
         guard let p = location(id), var ws = workspaces[p.workspace] else { return }
@@ -160,8 +172,10 @@ struct Carousel {
         let neighborIndex = p.slot > 0 ? p.slot - 1 : 1
         let neighbor = rail.tiles.count > 1 ? rail.tiles[neighborIndex].id : nil
         if suspending {
+            var tile = rail.tiles[p.slot]
+            tile.firstPlacementPending = false
             suspended[id] = Place(workspace: p.workspace, rail: rail.identity,
-                                  left: p.slot > 0 ? rail.tiles[p.slot - 1].id : nil, tile: rail.tiles[p.slot])
+                                  left: p.slot > 0 ? rail.tiles[p.slot - 1].id : nil, tile: tile)
         } else { suspended[id] = nil }
         if rail.tiles.count == 1 {
             ws.rails.remove(at: p.rail)
@@ -193,6 +207,7 @@ struct Carousel {
         let candidates = Self.presets.filter { fits(tile, $0) }
         guard let next = candidates.first(where: { presetWidth($0) > current + 1 }) ?? candidates.first else { return }
         rail.tiles[p.slot].preset = next
+        rail.tiles[p.slot].firstPlacementPending = false
         anchor(&rail, id: id, x: x); reveal(&rail)
         ws.rails[p.rail] = rail; workspaces[p.workspace] = ws
     }
