@@ -24,7 +24,7 @@ import Testing
     @Test("accepted subpoint width differences do not turn focus-only commands into resizes")
     func acceptedSizesRemainStable() {
         requireCarousel(Scenario.run("stable AX width readback") { s in
-            let f = CarouselFixture(s), b = f.ids[1]
+            let f = CarouselFixture(s, presets: [0.5]), b = f.ids[0]
             f.press("alt-l")
             let id = f.open(maximum: f.width(0.5) - 0.5)
             f.mac.clearMotionHistory()

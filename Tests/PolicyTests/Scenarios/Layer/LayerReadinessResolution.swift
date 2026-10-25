@@ -16,6 +16,11 @@ import Testing
         let result = Scenario.run("a read crosses into a new arrival's transition / \(writes)", writes: writes) { s in
             let f = CarouselFixture(s, presets: [1.0 / 3, 1.0 / 3, 1.0 / 3], duration: 0, appCount: 3)
             let a = f.ids[0], b = f.ids[1], c = f.ids[2]
+            // A known half-width arrival keeps this handoff independent of
+            // the default width of newly opened windows (#49).
+            let e = f.apps[1].open(WindowSpec(frame: CGRect(x: 40, y: 60, width: f.width(0.5), height: 1064)))
+            f.apps[1].minimize(e)
+            s.settle()
             let ignored = f.app.open(WindowSpec(subrole: "AXUnknown"), background: true)
             s.settle()
             let float = f.app.open(WindowSpec(frame: CGRect(x: 1000, y: 100, width: 650, height: 300), subrole: "AXDialog"))
@@ -35,9 +40,9 @@ import Testing
             s.step("toggle layer") { f.tessel.press("toggle layer") }
             let exit = f.mac.scheduler.run()
             if case .paused = exit {} else { s.expect("B's lane stays held through the exit: \(exit)", false) }
-            // B's app opens a tile before the held read finishes, so that
+            // B's app restores a tile before the held read finishes, so that
             // read's publication starts a new layout in which B moves right.
-            let e = f.apps[1].open(WindowSpec(frame: CGRect(x: 40, y: 60, width: 562, height: 1064)))
+            f.apps[1].restore(e)
             f.mac.scheduler.resume()
             let moved = f.mac.pause(after: .call("AccessibilityPort.set AXPosition=1441.6666666666665,43.0 window \(b) \(f.apps[1].alias)"))
             if case .paused = moved {} else { s.expect("B's move in the new layout is held: \(moved)", false) }

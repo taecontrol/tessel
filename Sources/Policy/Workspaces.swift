@@ -1076,8 +1076,9 @@ final class Workspaces {
     private func addCarouselTile(_ id: UInt32, initial: Bool = false, restoring: Bool = false) {
         guard let entry = entries[id], let workspace = entry.workspace else { return }
         let observed = min(area.width, entry.observation.frame.width)
-        let preset = initial || restoring ? Carousel.presets.first { abs(carousel.presetWidth($0) - observed) <= 1 } : 0.5
-        let tile = Carousel.Tile(id: id, size: CGSize(width: observed, height: area.height), preset: preset)
+        let preset = initial || restoring ? Carousel.presets.first { abs(carousel.presetWidth($0) - observed) <= 1 } : 1
+        let tile = Carousel.Tile(id: id, size: CGSize(width: observed, height: area.height), preset: preset,
+                                 firstPlacementPending: !initial && !restoring)
         if initial { carousel.appendInitial(tile,workspace:workspace) }
         else { carousel.insert(tile,workspace:workspace,restoring:restoring) }
         carouselSizes[id] = entry.observation.frame.size
@@ -1712,13 +1713,15 @@ final class Workspaces {
                         showSettled()
                         if p.float { self.layerPlacements[p.id] = nil }
                         if underStage { self.staging?.placed[p.id] = accepted }
-                        if p.resize, !p.float, let target = p.target {
-                            if underStage, self.staging?.shown == true { self.stage?.refresh(p.id) }
-                            self.carouselSizing.remove(p.id)
-                            self.carouselSizes[p.id] = accepted.size
+                        if !p.float, let target = p.target {
+                            if p.resize {
+                                if underStage, self.staging?.shown == true { self.stage?.refresh(p.id) }
+                                self.carouselSizing.remove(p.id)
+                                self.carouselSizes[p.id] = accepted.size
+                            }
                             self.carousel.accept(p.id, requested: target.size, accepted: accepted.size,
-                                                 learnBounds: target.minX >= bounds.minX && target.maxX <= bounds.maxX)
-                            if abs(accepted.width - target.width) > 1 || abs(accepted.height - target.height) > 1 { changedBounds = true }
+                                                 learnBounds: p.resize && target.minX >= bounds.minX && target.maxX <= bounds.maxX)
+                            if p.resize && (abs(accepted.width - target.width) > 1 || abs(accepted.height - target.height) > 1) { changedBounds = true }
                         }
                     } else if result.outcome == .unanswered, inPlace(p.id) {
                         // No write of tessel's is outstanding any more, so the
