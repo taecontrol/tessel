@@ -139,14 +139,14 @@ import Testing
             if mode == "background" { f.app.select(a) }
             s.settle(); f.order([next], rail: 2)
             s.expect("the former native root is retired", !f.tessel.windows.contains { $0.id == first })
-            f.near(f.frame(next).width, (f.area.width + 10) / 2 - 10, "the replacement retains its nominal half width")
+            f.near(f.frame(next).width, f.area.width, "the replacement retains its nominal full arrival width (#49 E1-E3)")
             if mode == "background" { f.focus(a); f.press("focus down", focus: next) }
             else {
                 f.focus(next); f.press("focus up", focus: a); f.press("focus right", focus: b)
                 f.press("focus down", focus: next)
             }
             f.press("move up", focus: next)
-            f.near(f.frame(next).width, (f.area.width - 10) / 2, "the replacement retains its nominal half when rejoining the source rail")
+            f.near(f.frame(next).width, f.area.width, "the replacement retains its nominal full width when rejoining the source rail (#49 E14)")
         })
     }
 

@@ -216,7 +216,7 @@ import Testing
             s.settle()
             let ids = [f.ids[0], b, f.ids[1], f.ids[2]], c = ids[2], d = ids[3]
             f.order(ids)
-            f.tessel.pressKey("alt-r"); f.tessel.pressKey("alt-r"); f.tessel.pressKey("alt-r"); s.settle()
+            f.tessel.pressKey("alt-r"); s.settle() // A full-width arrival cycles directly to a third (#49 E4).
             f.select(layout ? c : ids[0])
             other.busy(forMilliseconds: 300)
             s.step("two commands while app-B is busy") {

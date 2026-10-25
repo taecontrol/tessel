@@ -45,6 +45,9 @@ extension Acceptance {
 
         func prepare(_ presets: [Double]) throws -> Scene {
             try desktop.clear()
+            // These are existing windows with intentional widths, rather
+            // than full-width arrivals (#49 E9).
+            harness.stopApp()
             let native = try #require(try harness.observer.command("contract", ["operation": "screen", "pid": fixture.pid]).contract)
             let screen = try #require(native.screen), visible = try #require(native.axVisibleFrame)
             let area = [visible[0] + 10, visible[1] + 10, visible[2] - 20, visible[3] - 20]
@@ -57,10 +60,12 @@ extension Acceptance {
                 try fixture.command("move", ["key": key, "frame": [area[0], area[1], preset * (area[2] + 10) - 10, area[3]]])
             }
             try desktop.activate(key: "w0")
+            try desktop.writeConfig("[animation]\nduration = 0\n")
+            try harness.startApp(fixtureReady: false)
             try requireFinalState("the capture fixtures are catalogued") { Set(try harness.rows().map(\.id)) == Set(ids) }
-            try duration(0)
-            try desktop.expectShown(ids[0])
-            return Scene(ids: ids, screen: screen, area: area)
+            let scene = Scene(ids: ids, screen: screen, area: area)
+            try settle(scene.frames(ids, widths: presets.map(scene.width)), among: ids, focus: ids[0])
+            return scene
         }
 
         func duration(_ value: Int) throws {
@@ -225,12 +230,12 @@ extension Acceptance {
                 journey = Journey(example: "E10", duration: ms, screen: scene.screen, area: scene.area, windows: ids)
                 try duration(ms)
                 var newID: UInt32 = 0
-                let arrival = try record("Open · [2 | new 3], focus 3", duration: ms, ids: ids, discover: true, action: {
+                let arrival = try record("Open · [new 3 full], focus 3", duration: ms, ids: ids, discover: true, action: {
                     let requested = monotonicSeconds()
                     newID = try fixture.open(kind: "heavyText", key: "w2", ["title": "Invented window 3"])
                     return requested
                 }, final: {
-                    try landed(scene.frames(ids + [newID], widths: [half, half, half], camera: half + 10), among: ids + [newID], focus: newID)
+                    try landed(scene.frames(ids + [newID], widths: [half, half, scene.width(1)], camera: 2 * (half + 10)), among: ids + [newID], focus: newID)
                 })
                 journey.windows.append(newID); journey.steps.append(arrival)
                 try #require(arrival.samples.contains { $0.windows.contains { $0.id == newID && $0.valid } }, "the observer must discover the new fixture")
@@ -241,7 +246,7 @@ extension Acceptance {
                 try desktop.activate(key: "w3")
                 try settle(scene.frames(ids, widths: Array(repeating: half, count: 5), camera: 2 * (half + 10)), among: ids, focus: ids[3])
                 try desktop.post(kVK_ANSI_J, shift: true)
-                try settle(scene.frames([ids[3]], widths: [scene.area[2]]), among: ids, focus: ids[3])
+                try settle(scene.frames([ids[3]], widths: [half]), among: ids, focus: ids[3])
                 try desktop.activate(key: "w4")
                 try settle(scene.frames(top + [ids[4]], widths: Array(repeating: half, count: 4), camera: 2 * (half + 10)),
                     among: ids, focus: ids[4])

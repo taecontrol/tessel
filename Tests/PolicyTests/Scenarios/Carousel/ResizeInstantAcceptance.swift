@@ -284,13 +284,13 @@ import Testing
             let responsive = f.mac.launch()
             let other = responsive.open(WindowSpec(frame: CGRect(x: 40, y: 60, width: f.width(1.0 / 3), height: f.area.height), positionAcceptance: .screenEdges))
             s.settle()
-            f.near(f.frame(other).width, f.width(0.5), "a new arrival starts at the default half preset")
+            f.near(f.frame(other).width, f.width(1), "a new arrival starts at the default full preset (#49 E1-E3)")
             f.app.select(dragged); s.settle()
             f.mac.pointerDown()
             f.app.resize(dragged, to: CGSize(width: 600, height: f.area.height - 40))
             responsive.select(other); f.app.hang(); f.mac.pointerUp()
             f.tessel.press("cycle width"); s.settle()
-            f.near(f.frame(other).width, f.width(2.0 / 3), "the responsive app consumes the first queued command")
+            f.near(f.frame(other).width, f.width(1.0 / 3), "the responsive app consumes the first queued command from full (#49 E4)")
             // A second gesture must not discard the first app's unread baseline.
             f.mac.pointerDown(); f.mac.pointerUp(); s.settle()
             f.mac.clearMotionHistory()
@@ -310,7 +310,7 @@ import Testing
                 s.expect("recovery reconciles the tile once", f.mac.geometryWrites.filter { $0.window == dragged && $0.attribute == .size }.count == 1)
             }
             f.tessel.press("cycle width"); s.settle()
-            f.near(f.frame(other).width, f.area.width, "recovery or termination leaves the responsive selection usable")
+            f.near(f.frame(other).width, f.width(0.5), "recovery or termination leaves the responsive selection usable at the next half (#49 E4)")
         })
     }
 
