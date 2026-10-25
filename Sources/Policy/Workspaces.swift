@@ -1713,15 +1713,15 @@ final class Workspaces {
                         showSettled()
                         if p.float { self.layerPlacements[p.id] = nil }
                         if underStage { self.staging?.placed[p.id] = accepted }
-                        if !p.float, let target = p.target {
-                            if p.resize {
-                                if underStage, self.staging?.shown == true { self.stage?.refresh(p.id) }
-                                self.carouselSizing.remove(p.id)
-                                self.carouselSizes[p.id] = accepted.size
-                            }
+                        if p.resize, !p.float, let target = p.target {
+                            if underStage, self.staging?.shown == true { self.stage?.refresh(p.id) }
+                            self.carouselSizing.remove(p.id)
+                            self.carouselSizes[p.id] = accepted.size
                             self.carousel.accept(p.id, requested: target.size, accepted: accepted.size,
-                                                 learnBounds: p.resize && target.minX >= bounds.minX && target.maxX <= bounds.maxX)
-                            if p.resize && (abs(accepted.width - target.width) > 1 || abs(accepted.height - target.height) > 1) { changedBounds = true }
+                                                 learnBounds: target.minX >= bounds.minX && target.maxX <= bounds.maxX)
+                            if abs(accepted.width - target.width) > 1 || abs(accepted.height - target.height) > 1 { changedBounds = true }
+                        } else if !p.float {
+                            self.carousel.finishFirstPlacement(p.id)
                         }
                     } else if result.outcome == .unanswered, inPlace(p.id) {
                         // No write of tessel's is outstanding any more, so the

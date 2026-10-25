@@ -122,6 +122,11 @@ struct Carousel {
         if abs(nominal(tile) - previousWidth) > 1 { reveal(&ws.rails[p.rail]) }
         workspaces[p.workspace] = ws
     }
+    /// A position-only placement ends arrival handling without accepting a size.
+    mutating func finishFirstPlacement(_ id: UInt32) {
+        guard let p = location(id), workspaces[p.workspace]?.rails[p.rail].tiles[p.slot].firstPlacementPending == true else { return }
+        workspaces[p.workspace]?.rails[p.rail].tiles[p.slot].firstPlacementPending = false
+    }
     mutating func select(_ id: UInt32) {
         guard let p = location(id), var ws = workspaces[p.workspace] else { return }
         ws.current = p.rail

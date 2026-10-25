@@ -24,9 +24,13 @@ import Testing
     @Test("accepted subpoint width differences do not turn focus-only commands into resizes")
     func acceptedSizesRemainStable() {
         requireCarousel(Scenario.run("stable AX width readback") { s in
-            let f = CarouselFixture(s, presets: [0.5]), b = f.ids[0]
+            let f = CarouselFixture(s, presets: [0.5, 0.5], maximumFractions: [1: 848.5 / 1708])
+            let b = f.ids[0], id = f.ids[1]
+            // Retain a nominal half so the readback differs by half a point;
+            // a limited new arrival now adopts the exact accepted width.
+            f.app.resizeFromApplication(id, to: CGSize(width: f.width(0.5), height: 400)); s.settle()
             f.press("alt-l")
-            let id = f.open(maximum: f.width(0.5) - 0.5)
+            f.near(f.frame(id).width, f.width(0.5) - 0.5, "AX accepted the half-point maximum")
             f.mac.clearMotionHistory()
             f.press("alt-h"); f.focus(b)
             f.press("alt-l"); f.focus(id)

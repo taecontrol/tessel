@@ -13,10 +13,10 @@ import Testing
 
     @Test("#33 E18: readiness from one layer exit never releases a departure in the transition that replaces it", arguments: WriteOrder.allCases)
     func readinessStaysWithItsTransition(_ writes: WriteOrder) {
-        let result = Scenario.run("a read crosses into a new arrival's transition / \(writes)", writes: writes) { s in
+        let result = Scenario.run("a read crosses into a restored tile's transition / \(writes)", writes: writes) { s in
             let f = CarouselFixture(s, presets: [1.0 / 3, 1.0 / 3, 1.0 / 3], duration: 0, appCount: 3)
             let a = f.ids[0], b = f.ids[1], c = f.ids[2]
-            // A known half-width arrival keeps this handoff independent of
+            // Restoring a known half-width tile keeps this handoff independent of
             // the default width of newly opened windows (#49).
             let e = f.apps[1].open(WindowSpec(frame: CGRect(x: 40, y: 60, width: f.width(0.5), height: 1064)))
             f.apps[1].minimize(e)
