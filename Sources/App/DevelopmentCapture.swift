@@ -1,7 +1,7 @@
 #if TESSEL_DEVELOPMENT
 import AppKit
 
-/// Export the running app's own views for E37. No screen recording, other app
+/// Export the running app's own views for E37 and #18 E28. No screen recording, other app
 /// windows, or WindowServer screenshots are involved. Created only with both
 /// --test-fixture-only and --test-capture-ui in the development build.
 @MainActor
@@ -9,6 +9,18 @@ final class DevelopmentCapture: NSObject, NSMenuDelegate {
     private let directory = ConfigLocation.file.deletingLastPathComponent().appending(path: "ui-captures")
     private var generation: UInt64 = 0
     private var enabled = false
+    private var mapGeneration: UInt64 = 0
+
+    func update(map view: NSView) {
+        mapGeneration += 1
+        let appearance = view.appearance
+        for (name, value) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            view.appearance = NSAppearance(named: value)
+            view.displayIfNeeded()
+            export(view, name: "E28-map-\(mapGeneration)-\(name)")
+        }
+        view.appearance = appearance
+    }
 
     func update(button: NSStatusBarButton, menu: NSMenu, status: WorkspaceStatus) {
         generation += 1

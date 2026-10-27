@@ -59,10 +59,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let store = SnapshotStore(status: appStatus(config.status))
         self.store = store
         let stage = SystemMotionStage()
+        let map = SystemRailsMap()
         #if TESSEL_DEVELOPMENT
         if LaunchOptions.fixtureOnly {
             store.enableMotionInstrumentation()
             stage.onEvent = { store.recordStage($0) }
+            store.recordMap(AppStatus.TestMap())
+            map.onEvent = { store.recordMap($0) }
+            map.onCapture = { [weak self] in self?.capture?.update(map: $0) }
         }
         #endif
         do { server = try SocketServer { store.reply(to: $0) } }
@@ -71,7 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let workspaces = Workspaces(store: store, trusted: trusted, configuration: config.status.effective,
                                     applications: applications, ax: ax, screens: SystemScreen(), windowOrder: SystemWindowOrder(),
                                     scheduler: scheduler, hotkeys: SystemHotkeys(), fixtureOnly: LaunchOptions.fixtureOnly,
-                                    motionPreferences: SystemMotionPreferences(), stage: stage, pointerActivity: SystemPointerActivity()) {
+                                    motionPreferences: SystemMotionPreferences(), stage: stage, pointerActivity: SystemPointerActivity(), map: map) {
             let closet = try SkyLightCloset(simulateMissing: LaunchOptions.missingSkyLight, simulateFailedHide: LaunchOptions.failedHide)
             skyLight = closet
             return closet

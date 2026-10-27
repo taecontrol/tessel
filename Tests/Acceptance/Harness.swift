@@ -348,7 +348,9 @@ final class Harness {
     /// before the user's. Nothing outside this launch changes, so neither
     /// cleanup nor an interrupted run has anything to restore.
     func startApp(fixtureReady: Bool = true, arguments: [String] = [], reduceMotion: Bool = false) throws {
-        let capture = ProcessInfo.processInfo.environment["TESSEL_CAPTURE_WORKSPACES"] == "1" ? ["--test-capture-ui"] : []
+        let capture = ["TESSEL_CAPTURE_WORKSPACES", "TESSEL_CAPTURE_MAP"].contains {
+            ProcessInfo.processInfo.environment[$0] == "1"
+        } ? ["--test-capture-ui"] : []
         try run(["open", "-n", "-g", "--stdout", "/dev/null", "--stderr", "/dev/null",
                  "--env", "XDG_CONFIG_HOME=" + environment["XDG_CONFIG_HOME"]!, app.path,
                  "--args", "--test-fixture-only", "-reduceMotion", reduceMotion ? "YES" : "NO"] + capture + arguments,

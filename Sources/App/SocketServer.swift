@@ -77,17 +77,20 @@ final class SnapshotStore: WindowPublishing, @unchecked Sendable {
         lock.withLock {
             #if TESSEL_DEVELOPMENT
             let motion = self.status.testMotion
+            let map = self.status.testMap
             #endif
             self.status = status
             #if TESSEL_DEVELOPMENT
             self.status.testMotion = motion
+            self.status.testMap = map
             #endif
         }
     }
 
     #if TESSEL_DEVELOPMENT
-    // Compile scaffolding; map observation is enabled only by future fixture wiring.
-    func recordMap(_ map: AppStatus.TestMap) {}
+    func recordMap(_ map: AppStatus.TestMap) {
+        lock.withLock { status.testMap = map }
+    }
 
     func recordStage(_ event: StageEvent) {
         lock.withLock {
