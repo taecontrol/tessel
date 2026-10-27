@@ -50,8 +50,10 @@ import Ports
     func refresh(_ picture: MapPicture, workspace: Int, in area: CGRect) {
         guard shown else { return }
         var next = picture
-        next.wall = self.picture?.wall
-        next.workspace = self.picture?.workspace
+        if workspace == self.workspace {
+            next.wall = self.picture?.wall
+            next.workspace = self.picture?.workspace
+        }
         self.workspace = workspace
         guard next != self.picture || area != self.area || transition != drawnTransition else { return }
         draw(next, in: area)
