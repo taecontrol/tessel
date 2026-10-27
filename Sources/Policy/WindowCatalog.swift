@@ -356,7 +356,11 @@ private final class AppWindows: @unchecked Sendable {
             var elements = windows
             // Subscribe even if an animation makes this snapshot incomplete.
             // Otherwise a newly created window can finish minimizing unseen.
-            defer { updateSubscriptions(elements, using: &windowSubscriptions) }
+            defer {
+                // An incomplete walk must keep unvisited windows subscribed.
+                let known = elementsByID.keys.sorted().compactMap { elementsByID[$0] }
+                updateSubscriptions(elements + known + facts.flatMap(\.nativeTabGroups), using: &windowSubscriptions)
+            }
             // Read hide state alongside the windows; NSWorkspace's notification
             // can lag behind AX. Its cached value is a fallback for missing AXHidden.
             hidden = try value(application, .hidden)?.bool ?? hiddenHint
@@ -473,7 +477,7 @@ private final class AppWindows: @unchecked Sendable {
             }
             return
         }
-        guard !result.contains(where: { $0.id == id }) else { return }
+        guard handles[id] == nil else { return }
         let minimized = try value(window, .minimized)?.bool ?? false
         let fullscreen = try value(window, .fullscreen)?.bool ?? false
         let subrole = try value(window, .subrole)?.string ?? "AXUnknown"
@@ -487,11 +491,18 @@ private final class AppWindows: @unchecked Sendable {
         // Reinspection owns this native fact, rather than layout reconciliation.
         // A missing CG description is an incomplete read, never layer zero.
         guard let level = windowOrder.windowLevels([id])[id] else { throw AXReadError.changed }
+        var inspected = [WindowFacts(id: id, minimized: minimized, fullscreen: fullscreen, subrole: subrole, level: level,
+                                     resizable: resizable.value ?? false, tabs: max(1, tabs), frame: frame, parent: parent, nativeTabGroups: tabGroups)]
+        // A focused sheet can be read before its omitted parent.
         handles[id] = window
-        result.append(WindowFacts(id: id, minimized: minimized, fullscreen: fullscreen, subrole: subrole, level: level,
-                                  resizable: resizable.value ?? false, tabs: max(1, tabs), frame: frame, parent: parent, nativeTabGroups: tabGroups))
         elements.append(contentsOf: tabGroups)
-        for sheet in sheets { try inspect(sheet, into: &result, elements: &elements, handles: &handles, parent: id) }
+        for sheet in sheets {
+            // A sheet's closure does not retire its parent or siblings.
+            do {
+                try inspect(sheet, into: &inspected, elements: &elements, handles: &handles, parent: id)
+            } catch AXReadError.gone { continue }
+        }
+        result.append(contentsOf: inspected)
     }
 
     /// Read roles and tab counts in the window chrome, never text or titles.
@@ -501,26 +512,31 @@ private final class AppWindows: @unchecked Sendable {
         guard depth < 5, visited < 64 else { return 0 }
         visited += 1
         ax.setMessagingTimeout(element, seconds: 0.05)
-        let role = try value(element, .role)?.string ?? ""
-        if role == "AXTabGroup" {
-            let tabs = try value(element, .tabs)?.elements ?? []
-            guard !tabs.isEmpty else { return 0 }
-            let contents = try value(element, .contents)?.elements ?? []
-            // AppKit's native tab bar includes its tab buttons in AXContents.
-            // NSTabView instead publishes the selected page's content there.
-            // A native New Tab button may also occur, so count only AXTabs.
-            guard tabs.allSatisfy({ tab in contents.contains { tab == $0 } }) else { return 0 }
-            groups.append(element)
-            return tabs.count
+        do {
+            let role = try value(element, .role)?.string ?? ""
+            if role == "AXTabGroup" {
+                let tabs = try value(element, .tabs)?.elements ?? []
+                guard !tabs.isEmpty else { return 0 }
+                let contents = try value(element, .contents)?.elements ?? []
+                // AppKit's native tab bar includes its tab buttons in AXContents.
+                // NSTabView instead publishes the selected page's content there.
+                // A native New Tab button may also occur, so count only AXTabs.
+                guard tabs.allSatisfy({ tab in contents.contains { tab == $0 } }) else { return 0 }
+                groups.append(element)
+                return tabs.count
+            }
+            if depth > 0, role == "AXSheet" { sheets.append(element); return 0 }
+            guard !["AXWebArea", "AXScrollArea", "AXTextArea", "AXTextField", "AXTable", "AXOutline"].contains(role) else { return 0 }
+            let children = try value(element, .children)?.elements ?? []
+            var count = 0
+            for child in children.prefix(64 - visited) {
+                count = max(count, try chrome(child, depth: depth + 1, visited: &visited, sheets: &sheets, groups: &groups))
+            }
+            return count
+        } catch AXReadError.gone where depth > 0 {
+            // AppKit can replace a child while its window remains alive.
+            throw AXReadError.changed
         }
-        if depth > 0, role == "AXSheet" { sheets.append(element); return 0 }
-        guard !["AXWebArea", "AXScrollArea", "AXTextArea", "AXTextField", "AXTable", "AXOutline"].contains(role) else { return 0 }
-        let children = try value(element, .children)?.elements ?? []
-        var count = 0
-        for child in children.prefix(64 - visited) {
-            count = max(count, try chrome(child, depth: depth + 1, visited: &visited, sheets: &sheets, groups: &groups))
-        }
-        return count
     }
 
     private func updateSubscriptions(_ elements: [AXElement], using subscriptions: inout ElementSubscriptions<AXElement, AXNotification>) {
