@@ -610,7 +610,7 @@ final class Workspaces {
         case .workspace, .send: after.workspace = status.active
         default: break
         }
-        railsMap.command(after, in: area)
+        railsMap.command(after, workspace: status.active, in: area)
     }
 
     private func handle(_ command: WorkspaceCommand, resume: @escaping (@MainActor () -> Void) -> Void) {
@@ -902,7 +902,7 @@ final class Workspaces {
     private func onScreen() -> Set<UInt32> { Set(windowOrder.onScreenOrder()) }
 
     private func publish() {
-        if !performingCommand, railsMap.shown { railsMap.refresh(mapPicture(), in: area) }
+        if !performingCommand, railsMap.shown { railsMap.refresh(mapPicture(), workspace: status.active, in: area) }
         status.layer = status.enabled ? layer.status : nil
         status.animationDuration = motionDuration
         status.motion = configuration.animation.duration == 0 ? "off: duration 0"
