@@ -31,7 +31,7 @@ import Testing
                 s.expect("duration \(duration) is accepted", f.tessel.configuration.error == nil && f.tessel.configuration.effective.map.duration == duration)
             }
             let valid = f.tessel.configuration.effective, revision = f.tessel.configuration.revision
-            for value in ["99", "5001", "1.5", "\"1000\""] {
+            for value in ["99", "5001", "1.5", "1000.5", "\"1000\""] {
                 f.tessel.changeConfig("# invalid edit\n[map]\nduration = \(value)\n"); s.settle()
                 s.expect("\(value) reports its assignment's line", f.tessel.configuration.error?.line == 3)
                 s.expect("\(value) explains the integer bounds", f.tessel.configuration.error?.message == "duration must be a TOML integer from 100 to 5000")
@@ -40,6 +40,11 @@ import Testing
             f.tessel.changeConfig("[map]\nfade = 1\n"); s.settle()
             s.expect("fade is an unknown key on line two", f.tessel.configuration.error?.line == 2 && f.tessel.configuration.error?.message == "Unknown configuration key")
             s.expect("unknown keys retain the last valid configuration", f.tessel.configuration.effective == valid && f.tessel.configuration.revision == revision)
+            f.tessel.changeConfig("# invalid flag\n[experiments]\nmap = 1\n"); s.settle()
+            s.expect("a non-Boolean map flag reports its line and diagnostic", f.tessel.configuration.error?.line == 3
+                && f.tessel.configuration.error?.message == "map must be a boolean")
+            s.expect("an invalid flag retains the last valid configuration and revision", f.tessel.configuration.effective == valid
+                && f.tessel.configuration.revision == revision)
         })
     }
 

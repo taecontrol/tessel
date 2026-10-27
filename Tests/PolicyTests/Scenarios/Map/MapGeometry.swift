@@ -75,6 +75,40 @@ import Testing
             && $0.rect.maxX <= size.width / 3 && $0.rect.maxY <= size.height / 3 })
     }
 
+    @Test("#18 E22: a tall narrow workspace reaches the height cap before the width cap")
+    func tallWorkspaceHitsHeightCapFirst() throws {
+        let rail = MapPicture.Rail(spans: [MapPicture.Span(start: 0, width: 1)], offset: 0, remembered: 0)
+        let picture = MapPicture(rails: Array(repeating: rail, count: 80), current: 0, floats: 0,
+                                 layerShown: false, focus: .tile(0), wall: nil, workspace: nil)
+        let layout = MapLayout(picture, in: area)
+        // Eighty 14-point rows plus 16 points of card padding: 42 by 1136
+        // before reduction. Only the height exceeds one third of this area.
+        let reduction = (1064.0 / 3) / 1136
+        #expect(abs(layout.size.height - 1064.0 / 3) < 0.001)
+        #expect(abs(layout.size.width - 42 * reduction) < 0.001)
+        let first = try mark(.tile(rail: 0, slot: 0), in: layout)
+        #expect(abs(first.rect.width - 26 * reduction) < 0.001, "the height cap reduces scale without cropping")
+        #expect(layout.marks.filter { if case .tile = $0.kind { true } else { false } }.count == 80)
+        #expect(layout.marks.allSatisfy { $0.rect.minX >= 0 && $0.rect.minY >= 0
+            && $0.rect.maxX <= area.width / 3 && $0.rect.maxY <= area.height / 3 })
+    }
+
+    @Test("#18 E23: viewport edges inside desktop gaps interpolate within the expanded two-point gaps")
+    func viewportEdgesInterpolateDesktopGaps() throws {
+        let rail = MapPicture.Rail(spans: [MapPicture.Span(start: 0, width: 0.4),
+                                          MapPicture.Span(start: 0.6, width: 0.8),
+                                          MapPicture.Span(start: 1.6, width: 0.4)], offset: 0.5, remembered: 1)
+        let picture = MapPicture(rails: [rail], current: 0, floats: 0,
+                                 layerShown: false, focus: .tile(1), wall: nil, workspace: nil)
+        let viewport = try mark(.viewport(0), in: MapLayout(picture, in: area))
+        // Edges at 0.5 and 1.5 bisect [0.4, 0.6] and [1.4, 1.6]. Each
+        // midpoint adds one point after the preceding tile's scaled end.
+        let left = 8 + 0.4 * 26 + 1
+        let right = 8 + 0.4 * 26 + 2 + 0.8 * 26 + 1
+        #expect(abs(viewport.rect.minX + 2 - left) < 0.001, "the leading edge lies one point into its gap")
+        #expect(abs(viewport.rect.maxX - 2 - right) < 0.001, "the trailing edge lies one point into its gap")
+    }
+
     @Test("#18 E23: tile marks encode focus, remembered height and clipped visible fill")
     func tileMarksAndViewportClipping() throws {
         let g = 10.0 / 1708, half = 0.5 * (1 + g) - g

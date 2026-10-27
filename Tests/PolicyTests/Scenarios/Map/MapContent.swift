@@ -22,6 +22,18 @@ import Testing
         }
     }
 
+    @Test("#18 E10: Alt-J at the last of three rails shows the downward wall with motion on or off", arguments: [0, 250])
+    func lastRailShowsDownwardWall(_ animation: Int) {
+        requireScenario(Scenario.run("map downward wall animation=\(animation)") { s in
+            let f = MapFixture(s, scene: .three, animation: animation, current: 2), t0 = f.mac.scheduler.now
+            f.tessel.pressKey("alt-j"); s.settle()
+            f.expectShown(at: t0)
+            s.expect("the last rail's lower edge is the downward wall", f.show(at: t0)?.current == 2
+                && f.show(at: t0)?.wall == .down)
+            f.expectHide(at: t0 + 1000, fade: animation == 0 ? 0 : 0.12)
+        })
+    }
+
     @Test("#18 E11: a wall still appears while an earlier stage movement prevents a bounce")
     func wallDuringStageMovement() {
         requireCarousel(Scenario.run("map wall during stage motion") { s in

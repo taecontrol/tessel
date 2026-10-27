@@ -59,4 +59,44 @@ import Testing
             f.expectHide(at: t0 + 1000, fade: 0)
         })
     }
+
+    @Test("#18 E9: a hidden map skips picture and area work during an external publication")
+    func hiddenPublicationAvoidsPictureWork() {
+        requireScenario(Scenario.run("map hidden publication avoids screen reads") { s in
+            let tessel = s.startTessel(text: "[experiments]\nmap = true\n")
+            s.settle()
+            let start = s.mac.scheduler.trace.count
+            // With no windows there is no layout work. A preference notification
+            // still publishes status; evaluating the map refresh would read its area.
+            s.mac.setReduceMotion(true); s.settle()
+            s.expect("the external notification really publishes the changed motion status", tessel.status.motion == "off: Reduce Motion")
+            s.expect("a hidden publication does not evaluate the map's area", !s.mac.scheduler.trace.dropFirst(start).contains {
+                $0.contains("ScreenPort.primaryScreen")
+            })
+            s.expect("the map remains hidden", s.mac.mapEvents.isEmpty)
+            let command = s.mac.scheduler.trace.count
+            tessel.pressKey("alt-2"); s.settle()
+            s.expect("an effective key still reads the area and shows its map", s.mac.scheduler.trace.dropFirst(command).contains {
+                $0.contains("ScreenPort.primaryScreen")
+            } && s.mac.mapEvents.contains { if case .show = $0.kind { true } else { false } })
+        })
+    }
+
+    @Test("#18 E9: refreshing an unchanged picture issues no redundant show and keeps the departure")
+    func unchangedRefreshAvoidsRedundantShow() {
+        requireScenario(Scenario.run("map unchanged refresh avoids show") { s in
+            let f = MapFixture(s, animation: 0, selection: [0]), t0 = f.mac.scheduler.now
+            f.tessel.pressKey("alt-h")
+            s.after(milliseconds: 400, "publish the same configuration and picture") {
+                let publications = f.tessel.windowPublications.count
+                f.configure(animation: 0)
+                s.expect("the unchanged configuration still publishes its rows", f.tessel.windowPublications.count > publications)
+                s.expect("the refresh does not repeat the command's show", f.shows.count == 1)
+            }
+            s.settle()
+            f.expectShown(at: t0)
+            s.expect("the unchanged picture was drawn exactly once", f.shows.count == 1 && f.show(at: t0)?.wall == .left)
+            f.expectHide(at: t0 + 1000, fade: 0)
+        })
+    }
 }

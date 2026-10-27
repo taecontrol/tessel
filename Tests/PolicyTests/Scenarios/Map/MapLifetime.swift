@@ -196,6 +196,24 @@ import Testing
         })
     }
 
+    @Test("#18 E19: removing the experiment during the fade hides immediately when the reload applies")
+    func flagRemovalDuringFadeHidesImmediately() {
+        requireScenario(Scenario.run("map flag removed during fade") { s in
+            let f = MapFixture(s), t0 = f.mac.scheduler.now
+            f.tessel.pressKey("alt-l")
+            s.after(milliseconds: 1020, "remove the flag inside the 120 ms fade") { f.tessel.changeConfig("") }
+            s.after(milliseconds: 1100, "a later key cannot restore the map") { f.tessel.pressKey("alt-l") }
+            s.settle()
+            s.expect("the reload removes the experiment", f.tessel.configuration.error == nil
+                && f.tessel.configuration.effective.experiments["map"] == nil)
+            s.expect("the reload interrupts the fade at once", f.hides == [
+                SimulatedMac.MapEvent(at: t0 + 1000, kind: .hide(fade: 0.12)),
+                SimulatedMac.MapEvent(at: t0 + 1050, kind: .hide(fade: 0))])
+            s.expect("the disabled map never reappears", f.shows.count == 1)
+            s.expect("no departure timer remains", f.mac.scheduler.pendingMainDelays.isEmpty)
+        })
+    }
+
     @Test("#18 E20: losing Accessibility or quitting dismisses immediately and cancels the departure", arguments: [false, true])
     func managementEndsDismissTheMap(_ quit: Bool) {
         requireCarousel(Scenario.run("map management ends quit=\(quit)") { s in
@@ -209,6 +227,27 @@ import Testing
             s.settle()
             f.expectShown(at: t0); f.expectHide(at: t0 + 400, fade: 0)
             s.expect("no departure remains pending at rest", f.mac.scheduler.pendingMainDelays.isEmpty)
+        })
+    }
+
+    @Test("#18 E20: quit hides the map and cancels its departure before outstanding captures finish", arguments: WriteOrder.allCases)
+    func quittingWithPendingCapturesDismissesImmediately(_ order: WriteOrder) {
+        requireScenario(Scenario.run("map quit with pending captures", writes: order) { s in
+            let f = MapFixture(s), t0 = f.mac.scheduler.now
+            f.mac.clearMotionHistory()
+            f.tessel.pressKey("alt-l")
+            f.expectShown(at: t0)
+            s.expect("the animated command has captures and a map departure pending", !f.mac.stageCaptureRequests.isEmpty
+                && f.mac.stage.capturesPending && f.mac.scheduler.pendingMainDelays.contains(1000))
+            f.tessel.quit()
+            s.expect("quit still waits for outstanding captures", f.tessel.quitCompletions == 0
+                && f.mac.stage.capturesPending && f.tessel.status.enabled)
+            f.expectHide(at: t0, fade: 0)
+            s.expect("the map departure is cancelled before quit completes", !f.mac.scheduler.pendingMainDelays.contains(1000))
+            s.settle()
+            s.expect("capture completion finishes quit exactly once", f.tessel.quitCompletions == 1 && !f.mac.stage.capturesPending)
+            f.expectHide(at: t0, fade: 0)
+            s.expect("no departure remains at rest", f.mac.scheduler.pendingMainDelays.isEmpty)
         })
     }
 }
