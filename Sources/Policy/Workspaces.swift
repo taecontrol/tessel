@@ -591,7 +591,7 @@ final class Workspaces {
         }
         cancelFocusDecision()
         applyCommand(command) {
-            execute(command) { [weak self] action in self?.applyCommand(command, action) }
+            handle(command) { [weak self] action in self?.applyCommand(command, action) }
         }
     }
 
@@ -613,7 +613,7 @@ final class Workspaces {
         railsMap.command(after, in: area)
     }
 
-    private func execute(_ command: WorkspaceCommand, resume: @escaping (@MainActor () -> Void) -> Void) {
+    private func handle(_ command: WorkspaceCommand, resume: @escaping (@MainActor () -> Void) -> Void) {
         switch command {
         case .toggleLayer:
             if layer.focused {
@@ -658,7 +658,7 @@ final class Workspaces {
                 navigateLayer(direction == .left || direction == .up ? -1 : 1); break
             }
             if entries[focused ?? 0]?.observation.record.state == .floats && carousel.location(focused ?? 0) == nil {
-                execute(direction == .left || direction == .up ? .previous : .next, resume: resume); return
+                handle(direction == .left || direction == .up ? .previous : .next, resume: resume); return
             }
             let next = direction == .left || direction == .right
                 ? carousel.focusX(status.active,direction:direction == .left ? -1 : 1)
@@ -1240,7 +1240,7 @@ final class Workspaces {
             if let p = carousel.location(id), p.workspace == status.active, p.rail == current { return .tile(p.slot) }
             return nil
         }
-        return MapPicture(rails: rails, current: current, floats: floats.count, layerShown: layer.focused,
+        return MapPicture(rails: rails, current: current, floats: floats.count, layerShown: layer.entry == .all,
                           focus: focus, wall: nil, workspace: nil)
     }
 

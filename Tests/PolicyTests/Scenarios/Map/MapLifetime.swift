@@ -6,6 +6,39 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct MapLifetime {
+    @Test("#18 E4: a width key awaiting a failed pointer read shows only when the adopted width is cycled")
+    func deferredWidthShowsWhenApplied() {
+        requireCarousel(Scenario.run("map width command awaiting pointer recovery") { s in
+            let f = MapFixture(s, scene: .single, animation: 0), id = f.rails[0][0]
+            f.mac.pointerDown()
+            f.app.resize(id, to: CGSize(width: 600, height: MapFixture.area.height - 40))
+            f.app.hang(); f.mac.pointerUp()
+            f.tessel.pressKey("alt-r"); s.settle()
+            s.expect("the unread width key has no map effect yet", f.mac.mapEvents.isEmpty)
+            f.app.resume()
+            f.app.resizeFromApplication(id, to: f.mac.frame(id)!.size); s.settle()
+            let width = 0.5 * (1718.0 / 1708) - 10.0 / 1708
+            s.expect("recovery shows the cycled width", f.shows.contains {
+                abs(($0.picture.rails.first?.spans.first?.width ?? -1) - width) < 0.000001
+            })
+        })
+    }
+
+    @Test("#18 E9: a single-float arrival refreshes the focus without marking the hidden floats as shown")
+    func singleFloatArrivalKeepsOtherFloatsHollow() {
+        requireCarousel(Scenario.run("map single float arrival") { s in
+            let f = MapFixture(s, scene: .floats, animation: 0)
+            f.tessel.pressKey("alt-l")
+            s.after(milliseconds: 400, "a new float arrives alone") {
+                _ = f.app.open(WindowSpec(subrole: "AXFloatingWindow"))
+            }
+            s.settle()
+            s.expect("the arrival refreshes only its focused float", f.shows.contains {
+                $0.picture.floats == 4 && $0.picture.focus == .float(3) && !$0.picture.layerShown
+            })
+        })
+    }
+
     @Test("#18 E4: pointer-queued commands show only when the release reconciliation executes them")
     func pointerQueueShowsWhenExecuted() {
         requireCarousel(Scenario.run("map command queued after pointer release") { s in
