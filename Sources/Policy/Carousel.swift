@@ -1,5 +1,8 @@
 import CoreGraphics
 import Foundation
+#if SWIFT_PACKAGE
+import Ports
+#endif
 
 /// A bounded strip per rail. Nominal widths leave unused space to the right; a window
 /// keeps its width at either end of the rail;
@@ -37,6 +40,8 @@ struct Carousel {
     var gap: Double = 10
 
     init(width: Double = 1, gap: Double = 10) { self.width = width; self.gap = gap }
+    // Compile scaffolding for the map's red acceptance tests.
+    func mapRails(_ workspace: Int) -> (rails: [MapPicture.Rail], current: Int?) { ([], nil) }
     func presetWidth(_ preset: Double) -> Double { max(1, preset * (width + gap) - gap) }
     mutating func resizeArea(height: Double) {
         for number in workspaces.keys.sorted() {

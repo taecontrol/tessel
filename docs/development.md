@@ -1026,7 +1026,7 @@ hidden-layer Given; a live new panel would enter its single-window layer.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2, #19, #26, #33, #36, #38, #39, #40, #41 and #49.
+This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41 and #49.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -1105,6 +1105,34 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #2 E36 | R |
 | #2 E37 | X |
 | #2 U-switch-budget | L |
+| #18 E1 | P |
+| #18 E2 | P |
+| #18 E3 | P |
+| #18 E4 | P |
+| #18 E5 | P |
+| #18 E6 | P |
+| #18 E7 | P |
+| #18 E8 | P |
+| #18 E9 | P |
+| #18 E10 | P |
+| #18 E11 | P |
+| #18 E12 | P |
+| #18 E13 | P |
+| #18 E14 | P |
+| #18 E15 | P |
+| #18 E16 | P |
+| #18 E17 | P |
+| #18 E18 | P |
+| #18 E19 | P |
+| #18 E20 | P |
+| #18 E21 | P |
+| #18 E22 | P |
+| #18 E23 | P |
+| #18 E24 | C |
+| #18 E25 | J |
+| #18 E26 | R |
+| #18 E27 | L |
+| #18 E28 | X |
 | #19 E1 | P |
 | #19 E2 | P |
 | #19 E3 | P |
@@ -1256,6 +1284,7 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #49 E15 | X |
 <!-- Pending capture: #33 E20 -->
 <!-- Pending capture: #36 E8 -->
+<!-- Pending capture: #18 E28 -->
 
 E21 has an opt-in executable capture in `CapturesCarousel.swift`; it needs a
 pixel recording of the stage before the owner can review it again. All mapped

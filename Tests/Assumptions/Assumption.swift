@@ -52,12 +52,14 @@ package enum Assumption: String, CaseIterable, Sendable {
     case stageWholeWindowCapture = "stage-whole-window-capture"
     case stageProtectedCapture = "stage-protected-capture"
     case stageOverlay = "stage-overlay"
+    case mapOverlay = "map-overlay"
     case reduceMotionNotifications = "reduce-motion-notifications"
     case pointerPressNotifications = "pointer-press-notifications"
     case axResizeAnchoring = "ax-resize-anchoring"
 
     package var statement: String {
         switch self {
+        case .mapOverlay: "Showing the map window never changes focus or the frontmost app and lets the pointer through."
         case .enhancedUIResize: "With AXEnhancedUserInterface enabled, a size followed by position loses the size; disabling it around the write and restoring it preserves the requested geometry. AppKit may apply the flag while returning notImplemented."
         case .axResizeAnchoring: "AXSize can be constrained by the current positive x and by the current top against the screen bottom; moving first allows the requested size."
         case .pointerPressNotifications: "An NSEvent global monitor receives another app's mouse press before drag events and its release after them."

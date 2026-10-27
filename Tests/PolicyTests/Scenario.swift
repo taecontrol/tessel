@@ -34,7 +34,7 @@ enum Layout: String, CaseIterable, Sendable { case carousel }
                                 applications: mac.applications, ax: mac.ax, screens: mac.screens,
                                 windowOrder: mac.windowOrder, scheduler: mac.scheduler, hotkeys: keys,
                                 fixtureOnly: true, motionPreferences: mac.motionPreferences, stage: mac.stage,
-                                pointerActivity: mac.pointerActivity) { try makeCloset?() ?? mac.closetPort }
+                                pointerActivity: mac.pointerActivity, map: mac.map) { try makeCloset?() ?? mac.closetPort }
         catalog = WindowCatalog(workspaces: workspaces, applications: mac.applications, ax: mac.ax, windowOrder: mac.windowOrder, scheduler: mac.scheduler)
         workspaces.catalog = catalog
         configurationPublications.append((mac.scheduler.now, config.status))

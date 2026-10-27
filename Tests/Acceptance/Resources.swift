@@ -19,7 +19,7 @@ extension Acceptance {
             let footprintBytes: UInt64
         }
 
-        private func verifyIdleResources(_ example: String, stageWorkBefore: UInt64? = nil) throws {
+        private func verifyIdleResources(_ example: String, stageWorkBefore: UInt64? = nil, mapShowsBefore: UInt64? = nil) throws {
             let budget = try JSONDecoder().decode(Budget.self, from: Data(contentsOf: root.appending(path: "Tests/Acceptance/resource-budget.json")))
             let stageAtStart = try harness.stageWork()
             let before = try resources(harness.appPID)
@@ -42,6 +42,10 @@ extension Acceptance {
             try #require(after.footprintBytes < budget.footprintBytes, "End footprint must be below the footprint limit")
             if let stageWorkBefore {
                 try #require(try harness.stageWork() == stageWorkBefore, "The app must capture and show nothing while idle")
+            }
+            if let mapShowsBefore {
+                try #require(try harness.mapState().shows == mapShowsBefore && harness.mapWindows().isEmpty,
+                             "the map stays off screen and does no work during the measured idle window")
             }
         }
 
@@ -86,13 +90,13 @@ extension Acceptance {
             sleep(seconds: 1)
             try verifyIdleResources("E36")
         }
-        @Test("#26 E24; #19 E28: carousel and a hidden layer do no stage work at rest and keep the resource budget") func carouselAcrossWorkspacesKeepsTheIdleResourceBudget() throws {
+        @Test("#26 E24; #19 E28; #18 E26: carousel, a hidden layer and the enabled map keep the idle resource budget") func carouselAcrossWorkspacesKeepsTheIdleResourceBudget() throws {
             try harness.reset()
             // Thirty setup changes run instantly: each animated one costs a
             // capture. One animated
             // change at the default duration loads the stage before the idle
             // window.
-            try desktop.configure("[experiments]\nlayer = true\n[animation]\nduration = 0\n", layout: "carousel")
+            try desktop.configure("[experiments]\nlayer = true\nmap = true\n[animation]\nduration = 0\n", layout: "carousel")
             var last: UInt32 = 0
             for index in 0..<20 {
                 let id = try fixture.open(kind: index.isMultiple(of: 2) ? "heavyText" : "web", key: "idle\(index)", ["widthFraction": 0.4])
@@ -134,7 +138,7 @@ extension Acceptance {
             try requireFinalState("the idle float is hidden natively and in the CLI") {
                 try harness.row(hiddenFloat)?.visible == false && !desktop.observe().visibleIDs.contains(hiddenFloat)
             }
-            try desktop.configure("[experiments]\nlayer = true\n", layout: "carousel")
+            try desktop.configure("[experiments]\nlayer = true\nmap = true\n", layout: "carousel")
             let setupWorkStart = try harness.stageWork()
             let rail = try #require(try harness.row(last)?.rail)
             try desktop.post(38, shift: true)
@@ -147,7 +151,10 @@ extension Acceptance {
             if try harness.status().workspaces?.motion == "on" {
                 try #require(work > setupWorkStart, "The stage counter must increase during the animated change before it can prove idle zero work; \(given)")
             }
-            try verifyIdleResources("Carousel E24 / Layer E28", stageWorkBefore: work)
+            let shows = try harness.mapState().shows
+            try #require(shows > 0, "the real map adapter must have shown before idle absence can prove anything")
+            try requireFinalState("the map orders out before the idle resource window") { try harness.mapWindows().isEmpty }
+            try verifyIdleResources("Carousel E24 / Layer E28 / Map E26", stageWorkBefore: work, mapShowsBefore: shows)
         }
 
         private func expectMembership(_ expectation: String, _ predicate: ([Row]) -> Bool) throws {

@@ -86,6 +86,9 @@ final class SnapshotStore: WindowPublishing, @unchecked Sendable {
     }
 
     #if TESSEL_DEVELOPMENT
+    // Compile scaffolding; map observation is enabled only by future fixture wiring.
+    func recordMap(_ map: AppStatus.TestMap) {}
+
     func recordStage(_ event: StageEvent) {
         lock.withLock {
             switch event {
