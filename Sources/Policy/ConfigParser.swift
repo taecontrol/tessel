@@ -24,7 +24,7 @@ enum ConfigParser {
             if line.first == "[" {
                 guard line.last == "]", !line.hasPrefix("[["),
                       let name = keyName(String(line.dropFirst().dropLast()).trimmingCharacters(in: horizontalWhitespace)),
-                      ["experiments", "keys", "gaps", "animation"].contains(name) else {
+                      ["experiments", "keys", "gaps", "animation", "map"].contains(name) else {
                     throw ConfigError(line: lineNumber, message: "Unknown or invalid configuration table")
                 }
                 guard tables.insert(name).inserted else { throw ConfigError(line: lineNumber, message: "Duplicate \(name) table") }
@@ -39,6 +39,9 @@ enum ConfigParser {
             let canonical = table == "keys" ? KeyChord(key)?.name ?? key : key
             guard keys.insert(table + "." + canonical).inserted else { throw ConfigError(line: lineNumber, message: "Duplicate configuration key") }
             switch (table, key) {
+            case ("experiments", "map"):
+                guard ["true", "false"].contains(value) else { throw ConfigError(line: lineNumber, message: "map must be a boolean") }
+                configuration.experiments["map"] = value == "true"
             case ("experiments", "workspaces"), ("experiments", "carousel"), ("experiments", "layer"):
                 guard ["true", "false"].contains(value) else { throw ConfigError(line: lineNumber, message: "\(key) must be a boolean") }
                 // Kept experiments accept their former keys as inert compatibility input.
@@ -47,6 +50,11 @@ enum ConfigParser {
                     throw ConfigError(line: lineNumber, message: "duration must be a TOML integer from 0 to 1000")
                 }
                 configuration.animation.duration = Int(duration)
+            case ("map", "duration"):
+                guard let duration = number(value, integer: true), (100...5000).contains(duration) else {
+                    throw ConfigError(line: lineNumber, message: "duration must be a TOML integer from 100 to 5000")
+                }
+                configuration.map.duration = Int(duration)
             case ("gaps", "outer"):
                 guard let gap = number(value), gap.isFinite, gap >= 0 else { throw ConfigError(line: lineNumber, message: "outer must be a nonnegative TOML number") }
                 configuration.gaps.outer = gap

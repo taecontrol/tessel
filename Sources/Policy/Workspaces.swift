@@ -38,6 +38,9 @@ final class Workspaces {
     private var pointerGeneration: UInt64 = 0
     private var pointerCommands: [WorkspaceCommand] = []
     private let stage: (any MotionStagePort)?
+    private let railsMap: RailsMap
+    private var performingCommand = false
+    private var mapWall: MapPicture.Wall?
     /// One animated carousel change on the stage, retargeted by later
     /// commands until it clears.
     private struct Staging {
@@ -168,7 +171,9 @@ final class Workspaces {
         self.fixtureOnly = fixtureOnly
         self.motionPreferences = motionPreferences
         self.stage = stage
+        railsMap = RailsMap(port: map, scheduler: scheduler)
         motionObservation = motionPreferences?.observe { [weak self] reduced in
+            self?.configureMap()
             if reduced { self?.finishMotionImmediately() }
             self?.publish()
         }
@@ -185,6 +190,7 @@ final class Workspaces {
         guard !quitting else { return }
         let old = configuration
         configuration = next
+        configureMap()
         status.gaps = next.gaps
         status.keys = next.keys
         guard trusted else { disable(reason: "Accessibility permission needed"); return }
@@ -241,6 +247,7 @@ final class Workspaces {
     func prepareToQuit(_ ready: @escaping @MainActor @Sendable () -> Void) {
         guard !quitting else { return }
         quitting = true
+        railsMap.dismiss()
         pendingFloatTransfer = nil
         layerRestack = .done(front: nil)
         clearStage()
@@ -268,6 +275,7 @@ final class Workspaces {
     }
 
     func disable(reason: String) {
+        railsMap.dismiss()
         pendingFloatTransfer = nil
         layerRestack = .done(front: nil)
         clearStage()
@@ -582,6 +590,24 @@ final class Workspaces {
             followExternalSelection(pid: selection.pid, id: selection.id)
         }
         cancelFocusDecision()
+        let previousWorkspace = status.active
+        let before = railsMap.enabled ? mapPicture() : nil
+        performingCommand = true
+        mapWall = nil
+        execute(command)
+        performingCommand = false
+        guard let before else { return }
+        var after = mapPicture()
+        guard before != after || previousWorkspace != status.active || mapWall != nil else { return }
+        after.wall = mapWall
+        switch command {
+        case .workspace, .send: after.workspace = status.active
+        default: break
+        }
+        railsMap.command(after, in: area)
+    }
+
+    private func execute(_ command: WorkspaceCommand) {
         switch command {
         case .toggleLayer:
             if layer.focused {
@@ -626,7 +652,7 @@ final class Workspaces {
                 navigateLayer(direction == .left || direction == .up ? -1 : 1); break
             }
             if entries[focused ?? 0]?.observation.record.state == .floats && carousel.location(focused ?? 0) == nil {
-                perform(direction == .left || direction == .up ? .previous : .next); return
+                execute(direction == .left || direction == .up ? .previous : .next); return
             }
             let next = direction == .left || direction == .right
                 ? carousel.focusX(status.active,direction:direction == .left ? -1 : 1)
@@ -870,6 +896,7 @@ final class Workspaces {
     private func onScreen() -> Set<UInt32> { Set(windowOrder.onScreenOrder()) }
 
     private func publish() {
+        if !performingCommand, railsMap.shown { railsMap.refresh(mapPicture(), in: area) }
         status.layer = status.enabled ? layer.status : nil
         status.animationDuration = motionDuration
         status.motion = configuration.animation.duration == 0 ? "off: duration 0"
@@ -1087,6 +1114,12 @@ final class Workspaces {
 
     private func bounce(_ direction: WorkspaceCommand.Direction) {
         guard carousel.current(status.active) != nil else { return }
+        mapWall = switch direction {
+        case .left: .left
+        case .right: .right
+        case .up: .up
+        case .down: .down
+        }
         wall = switch direction {
         case .left: CGPoint(x: 1, y: 0)
         case .right: CGPoint(x: -1, y: 0)
@@ -1184,6 +1217,25 @@ final class Workspaces {
         guard staging != nil, !pointerHeld else { return }
         clearStage()
         renderCarouselInstant(focusing: focused, activateDesktop: false, takeFocus: pendingFocus, keepFocus: true)
+    }
+
+    private func configureMap() {
+        railsMap.configure(enabled: configuration.experiments["map"] == true,
+                           duration: configuration.map.duration,
+                           motion: configuration.animation.duration > 0 && motionPreferences?.reduceMotion != true,
+                           transition: Double(configuration.animation.duration) / 1000)
+    }
+
+    private func mapPicture() -> MapPicture {
+        let (rails, current) = carousel.mapRails(status.active)
+        let floats = floatingOrder(in: status.active)
+        let focus: MapPicture.Focus? = focused.flatMap { id in
+            if let i = floats.firstIndex(of: id) { return .float(i) }
+            if let p = carousel.location(id), p.workspace == status.active, p.rail == current { return .tile(p.slot) }
+            return nil
+        }
+        return MapPicture(rails: rails, current: current, floats: floats.count, layerShown: layer.focused,
+                          focus: focus, wall: nil, workspace: nil)
     }
 
     /// Check duration and Reduce Motion before touching the capture adapter.
