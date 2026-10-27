@@ -51,7 +51,9 @@ extension Acceptance {
                     return id
                 }
             }
-            for i in 0..<scene.floats { _ = try fixture.open(kind: "panel", key: "float\(i)", ["background": true]) }
+            let floatIDs = try (0..<scene.floats).map { i in
+                try fixture.open(kind: "panel", key: "float\(i)", ["background": true])
+            }
             try desktop.activate(key: "map0")
             try desktop.writeConfig(configuration(animation: 0))
             try harness.startApp(fixtureReady: false)
@@ -102,7 +104,9 @@ extension Acceptance {
                     try reachRail(scene.current + 1)
                 }
             }
-            let show = try harness.mapState().shows
+            let map = try harness.mapState()
+            try requireScene(scene, rails: rails, floatIDs: floatIDs, map: map)
+            let show = map.shows
             let directory = root.appending(path: ".work/captures/rails-map")
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             for appearance in ["light", "dark"] {
@@ -115,6 +119,31 @@ extension Acceptance {
                 try data.write(to: directory.appending(path: "\(scene.rawValue)-\(appearance).png"), options: .atomic)
             }
             print("#18 E28 \(scene.rawValue): \(directory.path) — pending owner review")
+        }
+
+        private func requireScene(_ scene: Scene, rails: [[UInt32]], floatIDs: [UInt32], map: Status.TestMap) throws {
+            let workspace = scene == .workspace ? 2 : 1
+            let activeRails = scene == .workspace ? [[rails[0][0]]] : rails
+            let expectedCounts = activeRails.map(\.count)
+            var expected: [UInt32: (workspace: Int, rail: Int?, slot: Int?)] = [:]
+            for (r, ids) in activeRails.enumerated() {
+                for (s, id) in ids.enumerated() { expected[id] = (workspace, r + 1, s + 1) }
+            }
+            if scene == .workspace { expected[rails[0][1]] = (1, 1, 1) }
+            for id in floatIDs { expected[id] = (workspace, nil, nil) }
+            let rows = try harness.rows()
+            let misplaced = expected.keys.sorted().filter { id in
+                guard let location = expected[id], let row = rows.first(where: { $0.id == id }) else { return true }
+                return row.workspace != location.workspace || row.rail != location.rail || row.slot != location.slot
+                    || row.state != (location.rail == nil ? "floats" : "tiled")
+            }
+            guard map.railTileCounts == expectedCounts, misplaced.isEmpty, rows.count == expected.count else {
+                let actual = rows.sorted { $0.id < $1.id }.map {
+                    "\($0.id):w\($0.workspace ?? 0)r\($0.rail ?? 0)s\($0.slot ?? 0) \($0.state)"
+                }.joined(separator: "; ")
+                throw HarnessError("map capture \(scene.rawValue) setup differs: expected workspace \(workspace) rails \(activeRails), floats \(floatIDs); "
+                    + "rendered tile counts \(map.railTileCounts), expected \(expectedCounts); misplaced or missing fixture IDs \(misplaced); rows: \(actual)")
+            }
         }
 
         private func configuration(animation: Int) -> String {

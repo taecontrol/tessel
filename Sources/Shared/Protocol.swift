@@ -121,6 +121,8 @@ struct AppStatus: Codable, Sendable {
     }
     var testMotion: TestMotion? = nil
     struct TestMap: Codable, Sendable {
+        /// Tile counts in the last picture drawn by the real map adapter.
+        var railTileCounts: [Int] = []
         var shows: UInt64 = 0
         var window: UInt32? = nil
         var key: Bool? = nil

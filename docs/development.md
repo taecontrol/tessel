@@ -378,6 +378,9 @@ app. It exports the app's own map view in light and dark for Long rail,
 Three rails, Floats visible, Crowded, a wall with motion off and a workspace
 switch. Images go to `.work/captures/rails-map` for owner review; no desktop
 pixels are exported. The capture facility is absent from the daily build.
+Before copying images, the capture checks the real adapter's rendered tile
+counts per rail and every fixture's intended workspace, rail and slot. A wrong
+setup fails with fixture-only details instead of exporting it for review.
 
 ## Carousel (#26)
 

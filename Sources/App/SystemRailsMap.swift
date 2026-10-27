@@ -50,6 +50,7 @@ final class SystemRailsMap: RailsMapPort {
         CATransaction.commit()
         if !window.isVisible { window.orderFrontRegardless() }
         #if TESSEL_DEVELOPMENT
+        observation.railTileCounts = picture.rails.map { $0.spans.count }
         observation.shows += 1
         observation.window = UInt32(window.windowNumber)
         observation.key = window.isKeyWindow

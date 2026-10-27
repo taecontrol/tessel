@@ -53,6 +53,7 @@ struct Status: Decodable {
     }
     let testMotion: TestMotion?
     struct TestMap: Decodable {
+        let railTileCounts: [Int]
         let shows: UInt64
         let window: UInt32?
         let key: Bool?
