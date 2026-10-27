@@ -590,11 +590,17 @@ final class Workspaces {
             followExternalSelection(pid: selection.pid, id: selection.id)
         }
         cancelFocusDecision()
+        applyCommand(command) {
+            execute(command) { [weak self] action in self?.applyCommand(command, action) }
+        }
+    }
+
+    private func applyCommand(_ command: WorkspaceCommand, _ action: () -> Void) {
         let previousWorkspace = status.active
         let before = railsMap.enabled ? mapPicture() : nil
         performingCommand = true
         mapWall = nil
-        execute(command)
+        action()
         performingCommand = false
         guard let before else { return }
         var after = mapPicture()
@@ -607,7 +613,7 @@ final class Workspaces {
         railsMap.command(after, in: area)
     }
 
-    private func execute(_ command: WorkspaceCommand) {
+    private func execute(_ command: WorkspaceCommand, resume: @escaping (@MainActor () -> Void) -> Void) {
         switch command {
         case .toggleLayer:
             if layer.focused {
@@ -618,7 +624,7 @@ final class Workspaces {
                 render(focusing: next, relayout: false, instant: true)
             }
         case .toggleFloat:
-            toggleFloat()
+            toggleFloat(resume: resume)
         case .workspace(let number):
             guard number != status.active else { return }
             status.active = number
@@ -652,7 +658,7 @@ final class Workspaces {
                 navigateLayer(direction == .left || direction == .up ? -1 : 1); break
             }
             if entries[focused ?? 0]?.observation.record.state == .floats && carousel.location(focused ?? 0) == nil {
-                execute(direction == .left || direction == .up ? .previous : .next); return
+                execute(direction == .left || direction == .up ? .previous : .next, resume: resume); return
             }
             let next = direction == .left || direction == .right
                 ? carousel.focusX(status.active,direction:direction == .left ? -1 : 1)
@@ -1039,7 +1045,7 @@ final class Workspaces {
         render(focusing: order[(index + step + order.count) % order.count], relayout: false, instant: true)
     }
 
-    private func toggleFloat() {
+    private func toggleFloat(resume: @escaping (@MainActor () -> Void) -> Void) {
         guard let id = focused, let entry = entries[id], entry.workspace == status.active,
               available(id), entry.observation.parent == nil else { return }
         // A second toggle reverses the pending return before any membership
@@ -1078,7 +1084,7 @@ final class Workspaces {
                       self.decisions == decision, self.focused == id, self.available(id), self.floating(id),
                       self.applications.frontmostPID == entry.pid, self.appFocus[entry.pid] == id,
                       self.entries[id]?.workspace == self.status.active, self.entries[id]?.observation.parent == nil else { return }
-                self.moveFloatToRail(id, frame: frame)
+                resume { self.moveFloatToRail(id, frame: frame) }
             }
             return
         } else { return }
@@ -1194,7 +1200,7 @@ final class Workspaces {
                 carousel.adoptWidth(id, current.width, left: current.minX - area.minX)
                 carouselSizes[id] = current.size
             }
-            for _ in 0..<pending.widthCommands { carousel.cycleWidth(id) }
+            for _ in 0..<pending.widthCommands { applyCommand(.cycleWidth) { carousel.cycleWidth(id) } }
             pointerNeedsRender = pointerNeedsRender || pending.widthCommands > 0
         }
     }

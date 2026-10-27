@@ -6,6 +6,38 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct MapLifetime {
+    @Test("#18 E4: pointer-queued commands show only when the release reconciliation executes them")
+    func pointerQueueShowsWhenExecuted() {
+        requireCarousel(Scenario.run("map command queued after pointer release") { s in
+            let f = MapFixture(s, animation: 0), t0 = f.mac.scheduler.now
+            f.mac.pointerDown()
+            f.tessel.pressKey("alt-l")
+            s.expect("a held pointer ignores the key", f.mac.mapEvents.isEmpty)
+            f.mac.pointerUp()
+            f.tessel.pressKey("alt-l")
+            s.expect("a queued key has not shown the map", f.mac.mapEvents.isEmpty)
+            s.settle()
+            s.expect("the released command eventually shows its picture", f.shows.contains { $0.at >= t0 })
+            s.expect("the executed command owns the departure", f.hides.count == 1
+                && f.hides.first?.at == (f.shows.first?.at ?? -1) + 1000)
+        })
+    }
+
+    @Test("#18 E4: a float return shows the map when its deferred geometry read commits")
+    func floatReturnShowsAfterItsRead() {
+        requireCarousel(Scenario.run("map deferred float return") { s in
+            let f = MapFixture(s, scene: .floats, animation: 0)
+            f.key("alt-z")
+            f.mac.clearMapHistory()
+            let before = f.tessel.windows.filter { $0.rail != nil }.count
+            f.tessel.pressKey("alt-f"); s.settle()
+            s.expect("the float really returned to its rail", f.tessel.windows.filter { $0.rail != nil }.count == before + 1)
+            s.expect("the committed command shows its resulting picture", f.shows.contains {
+                $0.picture.rails.flatMap(\.spans).count == before + 1 && $0.picture.floats == 2 && !$0.picture.layerShown
+            })
+        })
+    }
+
     @Test("#18 E4: a command shows immediately and starts the default one-second hold")
     func commandShowsImmediately() {
         requireCarousel(Scenario.run("map default hold") { s in
