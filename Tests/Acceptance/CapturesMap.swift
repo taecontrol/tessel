@@ -73,6 +73,12 @@ extension Acceptance {
             }
             try reachRail(scene.current + 1)
             try desktop.expectFocus(rails[scene.current][scene.remembered[scene.current]])
+            if scene == .floats {
+                // The prototype starts with the third float most recently used.
+                // Untouched native floats enter at the first arrival instead.
+                for code in [kVK_ANSI_Z, kVK_ANSI_L, kVK_ANSI_L, kVK_ANSI_Z] { try press(code) }
+                try desktop.expectFocus(rails[scene.current][scene.remembered[scene.current]])
+            }
             if scene == .wall {
                 try press(kVK_ANSI_H)
             } else if scene == .workspace {
@@ -140,11 +146,14 @@ extension Acceptance {
             let target = try #require(try harness.row(id))
             try reachRail(try #require(target.rail))
             let count = try harness.rows().count
+            var trace: [String] = []
             for _ in 0..<(count * 5) {
                 let before = try desktop.observe()
                 if desktop.focused(id, in: before) { return }
                 let selected = try #require(before.windows.first { desktop.focused($0.id, in: before) })
-                let slot = try #require(try harness.row(selected.id)?.slot)
+                let selectedRow = try #require(try harness.row(selected.id))
+                let slot = try #require(selectedRow.slot)
+                trace.append("\(selected.id) r\(selectedRow.rail ?? 0)s\(slot) frame \(selected.frame)")
                 try press(slot < (target.slot ?? 1) ? kVK_ANSI_L : kVK_ANSI_H)
                 try requireFinalState("the capture focus or stop advanced") {
                     let after = try desktop.observe()
@@ -152,7 +161,7 @@ extension Acceptance {
                         || after.windows.first { $0.id == selected.id }?.frame != selected.frame
                 }
             }
-            throw HarnessError("capture setup did not reach its tile")
+            throw HarnessError("capture setup did not reach tile \(id) r\(target.rail ?? 0)s\(target.slot ?? 0); trace: \(trace)")
         }
     }
 }
