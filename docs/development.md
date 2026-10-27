@@ -1260,6 +1260,7 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #51 E4 | P |
 | #51 E5 | P |
 | #51 E6 | C |
+| #51 E7 | P |
 <!-- Pending capture: #33 E20 -->
 <!-- Pending capture: #36 E8 -->
 

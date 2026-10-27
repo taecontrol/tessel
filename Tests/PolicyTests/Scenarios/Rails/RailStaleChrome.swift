@@ -109,9 +109,10 @@ import Testing
         })
     }
 
-    @Test("#51 E5: stale chrome inside a sheet preserves the complete parent and sibling snapshot", arguments: WriteOrder.allCases)
-    func staleSheet(_ writes: WriteOrder) {
-        requireScenario(Scenario.run("sheet descendant replacement", writes: writes) { s in
+    @Test("#51 E5: stale chrome inside a sheet preserves the complete snapshot and sibling destruction subscription",
+          arguments: WriteOrder.allCases, [false, true])
+    func staleSheet(_ writes: WriteOrder, persistent: Bool) {
+        requireScenario(Scenario.run("sheet descendant replacement persistent=\(persistent)", writes: writes) { s in
             let f = RailFixture(s, widths: [0.3, 0.3]), parent = f.ids[0]
             let sheet = f.app.open(WindowSpec(subrole: "AXDialog", parent: parent), background: true)
             let sibling = f.app.open(WindowSpec(subrole: "AXDialog", parent: parent), background: true)
@@ -119,11 +120,43 @@ import Testing
             let expected = locations(f.tessel.windows), publications = f.tessel.windowPublications.count
             s.expect("setup: both sheets are published", Set(f.tessel.windows.map(\.id)) == Set(f.ids + [sheet, sibling]))
             let start = f.mac.scheduler.now
-            f.app.replaceChromeDescendant(in: sheet)
+            f.app.replaceChromeDescendant(in: sheet, forReads: persistent ? 5 : 1)
             s.settle()
             let published = f.tessel.windowPublications.dropFirst(publications).filter { $0.pid == f.app.pid }
-            s.expect("no partial parent or sibling snapshot is published", !published.isEmpty && published.allSatisfy { locations($0.windows ?? []) == expected })
-            FoundationProof.publication(f.tessel, pid: f.app.pid, since: start, within: 500, scenario: s) { locations($0) == expected }
+            s.expect("no partial parent or sibling snapshot is published", published.allSatisfy { locations($0.windows ?? []) == expected })
+            if persistent {
+                s.expect("all five incomplete attempts retain the complete snapshot", published.isEmpty)
+                let closedAt = f.mac.scheduler.now
+                f.app.close(sibling)
+                s.settle()
+                let survivors = Set(f.ids + [sheet])
+                s.expect("the unvisited sibling's destruction is still observed after retries stop", Set(f.tessel.windows.map(\.id)) == survivors)
+                FoundationProof.publication(f.tessel, pid: f.app.pid, since: closedAt, within: 500, scenario: s) { Set($0.map(\.id)) == survivors }
+            } else {
+                FoundationProof.publication(f.tessel, pid: f.app.pid, since: start, within: 500, scenario: s) { locations($0) == expected }
+            }
+        })
+    }
+
+    @Test("#51 E7: an omitted parent does not reinspect its already-read focused sheet", arguments: WriteOrder.allCases)
+    func omittedParent(_ writes: WriteOrder) {
+        requireScenario(Scenario.run("focused sheet before its omitted parent", writes: writes) { s in
+            let f = RailFixture(s, widths: [0.3, 0.3]), parent = f.ids[0]
+            let sheet = f.app.open(WindowSpec(subrole: "AXDialog", parent: parent))
+            s.settle()
+            f.app.publishNextWindowLists(Array(repeating: .omitting([parent]), count: 20))
+            f.app.select(sheet)
+            let windowList = "AccessibilityPort.copy AXWindows \(f.app.alias) pid=\(f.app.pid)"
+            let first = f.mac.pause(after: .call(windowList))
+            if case .paused = first {} else { s.expect("the first window list read is outstanding: \(first)", false) }
+            let trace = f.mac.scheduler.trace.count
+            f.mac.scheduler.resume()
+            let confirmation = f.mac.pause(after: .call(windowList))
+            if case .paused = confirmation {} else { s.expect("the confirmation follows one complete inspection: \(confirmation)", false) }
+            let inspections = f.mac.scheduler.trace.dropFirst(trace).filter { $0.contains("AccessibilityPort.copy AXMinimized window \(sheet) ") }
+            s.expect("the focused sheet is inspected only once in the snapshot, actual \(inspections.count)", inspections.count == 1)
+            s.settle()
+            s.expect("the omitted parent and focused sheet both remain published", Set(f.tessel.windows.map(\.id)) == Set(f.ids + [sheet]))
         })
     }
 
