@@ -17,6 +17,7 @@ final class FixtureContracts: NSObject {
     private var handles: [UInt32: AXUIElement] = [:]
     private var bars: [AXUIElement] = []
     private var captured: [String: CFTypeRef] = [:]
+    private var chromeDescendant: AXUIElement?
     private var observer: AXObserver?
     private var observedPID: pid_t = 0
     /// The window handle a `watch` registered, compared with each notified element.
@@ -43,6 +44,7 @@ final class FixtureContracts: NSObject {
             spaces = nil
             moved.removeAll()
             handles.removeAll(); bars.removeAll(); captured.removeAll()
+            chromeDescendant = nil
             events.removeAll(); eventElements.removeAll(); lifecycle.removeAll(); knownProcesses.removeAll()
             knownApplications.removeAll(); lifecycleCounts.removeAll()
             return [:]
@@ -203,6 +205,21 @@ final class FixtureContracts: NSObject {
         case "retained":
             let window = try retained(command, pid: pid)
             return ["window": describe(window)]
+        case "retainChromeDescendant", "readChromeDescendant":
+            let window = try retained(command, pid: pid)
+            if operation == "retainChromeDescendant" {
+                func descendant(_ node: AXUIElement, depth: Int) -> AXUIElement? {
+                    guard depth < 5 else { return nil }
+                    if read(node, kAXRoleAttribute).value as? String == kAXStaticTextRole { return node }
+                    for child in (read(node, kAXChildrenAttribute).value as? [AXUIElement] ?? []).prefix(64) {
+                        if let found = descendant(child, depth: depth + 1) { return found }
+                    }
+                    return nil
+                }
+                chromeDescendant = descendant(window, depth: 0)
+            }
+            guard let chromeDescendant else { throw FixtureContractError("retain a fixture chrome descendant before reading it") }
+            return ["readError": read(chromeDescendant, kAXRoleAttribute).error.rawValue, "window": describe(window)]
         case "reacquire":
             let previous = try retained(command, pid: pid)
             guard let current = (read(application, kAXWindowsAttribute).value as? [AXUIElement])?.first(where: { CFEqual($0, previous) }) else {

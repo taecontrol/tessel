@@ -1026,7 +1026,7 @@ hidden-layer Given; a live new panel would enter its single-window layer.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2, #19, #26, #33, #36, #38, #39, #40, #41 and #49.
+This table is the maintained example-to-layer map for issues #1, #2, #19, #26, #33, #36, #38, #39, #40, #41, #49 and #51.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -1254,6 +1254,12 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #49 E13 | P |
 | #49 E14 | P |
 | #49 E15 | X |
+| #51 E1 | P |
+| #51 E2 | P |
+| #51 E3 | P |
+| #51 E4 | P |
+| #51 E5 | P |
+| #51 E6 | C |
 <!-- Pending capture: #33 E20 -->
 <!-- Pending capture: #36 E8 -->
 
