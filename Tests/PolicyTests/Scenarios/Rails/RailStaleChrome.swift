@@ -160,6 +160,55 @@ import Testing
         })
     }
 
+    @Test("incomplete chrome reads keep native bar subscriptions without AX removal and registration churn")
+    func retainedBarSubscriptions() {
+        requireScenario(Scenario.run("incomplete root before an already subscribed native bar") { s in
+            let app = s.mac.launch(windows: 3)
+            app.groupTabs([2, 3], selected: 2)
+            let tessel = s.startTessel()
+            s.settle()
+            s.expect("setup: the native group is published", tessel.windows.first { $0.id == 2 }?.tabs == 2)
+            let trace = s.mac.scheduler.trace.count
+            app.replaceChromeDescendant(in: 1, forReads: 5)
+            s.settle()
+            app.replaceChromeDescendant(in: 1, forReads: 0)
+            s.settle()
+            let registrations = s.mac.scheduler.trace.dropFirst(trace).filter {
+                $0.contains("AXObservation.remove") || $0.contains("AXObservation.add")
+            }
+            s.expect("incomplete reads and recovery preserve existing subscriptions without extra AX calls", registrations.isEmpty)
+            let reads = s.mac.scheduler.trace.dropFirst(trace).filter {
+                $0.contains("tessel.ax.\(app.pid) AccessibilityPort.copy")
+            }
+            let staleReplies = reads.indices.filter { reads[$0].contains("invalidUIElement") }
+            s.expect("each stale child ends the read without a root probe or immediate chrome rewalk", staleReplies.count == 5 && staleReplies.allSatisfy {
+                let next = reads.index(after: $0)
+                return next < reads.endIndex && reads[next].contains("AccessibilityPort.copy AXWindows \(app.alias)")
+            })
+            s.expect("the group remains published after recovery", tessel.windows.first { $0.id == 2 }?.tabs == 2)
+        })
+    }
+
+    @Test("a confirmed root closure during chrome does not schedule an incomplete-read retry")
+    func closedRootDuringChrome() {
+        requireScenario(Scenario.run("retained root closes after its chrome role reply") { s in
+            let f = RailFixture(s, widths: [0.3, 0.3]), target = f.ids[1]
+            f.app.publishNextWindowLists(Array(repeating: .includingClosed([target]), count: 20))
+            f.app.replaceChromeDescendant(in: target)
+            let held = f.mac.pause(after: .call("AccessibilityPort.copy AXRole window \(target) \(f.app.alias)"))
+            if case .paused = held {} else { s.expect("the root's chrome role read is outstanding: \(held)", false) }
+            let trace = f.mac.scheduler.trace.count, closedAt = f.mac.scheduler.now
+            f.app.close(target)
+            s.settle()
+            FoundationProof.publication(f.tessel, pid: f.app.pid, since: closedAt, within: 500, scenario: s) {
+                $0.map(\.id) == [f.ids[0]]
+            }
+            s.expect("a dead root is omitted without an incomplete-read backoff", !f.mac.scheduler.trace.dropFirst(trace).contains {
+                $0.contains("tessel.ax.\(f.app.pid) SchedulingPort.after +100ms")
+            })
+        })
+    }
+
     private func locations(_ rows: [WindowRecord]) -> [String] {
         rows.sorted { $0.id < $1.id }.map { "\($0.id):\($0.workspace ?? 0):\($0.rail ?? 0):\($0.slot ?? 0)" }
     }
