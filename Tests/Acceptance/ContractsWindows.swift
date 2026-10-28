@@ -2,6 +2,21 @@ import Foundation
 import Testing
 
 extension Acceptance.Contracts {
+    @Test("#51 E6: stale-chrome-descendant: replacing a subview invalidates its cached AX handle without closing the root", contract(.staleChromeDescendant))
+    func staleChromeDescendant() throws {
+        let id = try fixture.open()
+        let before = try window(id)
+        try #require(before.role == "AXWindow" && before.idError == 0 && before.roleError == 0)
+        try #require(try native("retainChromeDescendant", ["id": id]).readError == 0)
+        try fixture.command("replaceChromeDescendant")
+        try requireFinalState("the removed subview is invalid while the same window root remains valid") {
+            let state = try native("readChromeDescendant", ["id": id])
+            return state.readError == -25202 && state.window?.role == "AXWindow" && state.window?.roleError == 0
+                && state.window?.id == id && state.window?.idError == 0
+        }
+        try #require(try native("retainChromeDescendant", ["id": id]).readError == 0)
+    }
+
     @Test("window-server-listing; #40 E12: AX acceptance precedes the app commit, including in the closet", contract(.windowServerListing))
     func windowServerListing() throws {
         let id = try fixture.open(), before = try window(id).frame

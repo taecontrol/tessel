@@ -103,6 +103,13 @@ Content tab buttons have no AXChildren value. Segmented radio groups expose
 only those buttons as children and report unsupported AXTabs/AXContents;
 the other segmented roles retain conservative alternative shapes.
 
+`replaceChromeDescendant(in:forReads:)` captures a child in AXChildren and then
+replaces it before that reply returns. The cached child's generation answers
+invalidUIElement; fresh children and the window root stay valid with the same
+window ID. Each requested children read repeats the replacement, so scenarios
+can exercise a transient replacement or exhaust retries before the next event.
+This also applies inside sheets and alongside native tab bars (#51).
+
 `addTab(to:activating:)` creates a new native root on the active desktop, retaining
 the group's bar and frame. A background insertion can therefore be CG-visible
 before policy reconciles a closeted group's hidden intent; it does not inherit

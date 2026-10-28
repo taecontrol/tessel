@@ -6,6 +6,15 @@ package enum ContentTabStyle: String, CaseIterable, Sendable {
 }
 
 extension SimulatedApp {
+    @MainActor package func replaceChromeDescendant(in window: UInt32, forReads count: Int = 1) {
+        mac.assume(.staleChromeDescendant)
+        mac.action("\(alias) replace chrome descendant in window \(window) for \(count) children reads")
+        var chrome = mac.foundation.chrome[window] ?? .init()
+        chrome.replacements = max(0, count)
+        mac.foundation.chrome[window] = chrome
+        mac.notify(.layoutChanged, node: .window(window))
+    }
+
     @MainActor package func showContentTabs(in window: UInt32, count: Int = 3, style: ContentTabStyle = .populated) {
         mac.assume(.contentTabChrome)
         mac.action("\(alias) show \(count) \(style.rawValue) content tabs in window \(window)")
@@ -58,13 +67,15 @@ extension SimulatedApp {
 extension SimulatedMac {
     struct FoundationState {
         struct ContentTabs { let count: Int; let style: ContentTabStyle }
+        struct Chrome { var generation = 0; var replacements = 0 }
+        var chrome: [UInt32: Chrome] = [:]
         var content: [UInt32: ContentTabs] = [:]
         var newTabButtons: Set<Int> = []
         var windowLists: [Int32: [UInt32]] = [:]
         var withheldFocus: Set<Int32> = []
     }
     enum FoundationNode: Hashable, Sendable {
-        case contentGroup, contentTab(Int), page, newTabButton
+        case contentGroup, contentTab(Int), page, newTabButton, chrome(Int)
     }
 
     func publishedWindowList(_ pid: Int32) -> [UInt32]? {
@@ -78,9 +89,22 @@ extension SimulatedMac {
         return true
     }
     func foundationChildren(_ window: UInt32) -> [AXElement] {
-        guard foundation.content[window] != nil else { return [] }
-        assume(.contentTabChrome)
-        return [element(.foundation(window, .contentGroup))]
+        var children: [AXElement] = []
+        if foundation.content[window] != nil {
+            assume(.contentTabChrome)
+            children.append(element(.foundation(window, .contentGroup)))
+        }
+        if var chrome = foundation.chrome[window] {
+            assume(.staleChromeDescendant)
+            children.append(element(.foundation(window, .chrome(chrome.generation))))
+            // AppKit replaces the child after capturing the parent's reply.
+            if chrome.replacements > 0 {
+                chrome.replacements -= 1
+                chrome.generation += 1
+                foundation.chrome[window] = chrome
+            }
+        }
+        return children
     }
     func extraNativeControls(_ group: Int) -> [AXElement] {
         guard foundation.newTabButtons.contains(group), let selected = groups[group]?.selected else { return [] }
@@ -88,7 +112,15 @@ extension SimulatedMac {
         return [element(.foundation(selected, .newTabButton))]
     }
     func readFoundation(_ attribute: AXAttribute, window: UInt32, node: FoundationNode) -> AXResult<AXValue> {
-        if node == .newTabButton {
+        if case .chrome(let generation) = node {
+            assume(.staleChromeDescendant)
+            guard windows[window]?.closed == false, foundation.chrome[window]?.generation == generation else { return AXResult(.invalidUIElement) }
+            switch attribute {
+            case .role: return AXResult(.success, .string("AXGroup"))
+            case .children: return AXResult(.success, .elements([]))
+            default: break
+            }
+        } else if node == .newTabButton {
             assume(.nativeTabExtraControls)
             switch attribute {
             case .role: return AXResult(.success, .string("AXButton"))

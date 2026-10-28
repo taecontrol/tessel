@@ -220,6 +220,14 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 }
                 if background { window.orderBack(nil) }
             }
+        case "replaceChromeDescendant":
+            guard let content = windows[key]?.contentView,
+                  let child = content.subviews.first(where: { $0 is NSTextField }) else { return ["error": "a fixture subview is required"] }
+            let frame = child.frame
+            child.removeFromSuperview()
+            let replacement = NSTextField(labelWithString: "Replacement fixture content")
+            replacement.frame = frame
+            content.addSubview(replacement)
         case "paint":
             guard let window = windows[key], let color = command["color"] as? Int, FixtureInstantRecording.colors.indices.contains(color) else { return ["error": "paint needs a fixture window and palette index"] }
             paint(window, color: color)

@@ -5,6 +5,34 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct RailNativeWindows {
+    @Test("#51 E3: native tab replacement during stale chrome transfers membership to exactly one successor", arguments: WriteOrder.allCases)
+    func nativeTabsWithStaleChrome(_ writes: WriteOrder) {
+        requireScenario(Scenario.run("native successor across a stale descendant read", writes: writes) { s in
+            let f = RailFixture(s, widths: [0.25, 0.25]), a = f.ids[0], b = f.ids[1]
+            let tabs = f.mac.launch(), first = tabs.open(), next = tabs.open()
+            tabs.groupTabs([first, next], selected: first)
+            s.settle()
+            f.press("cycle width", focus: first)
+            let nominal = (f.area.width + 10) / 3 - 10
+            f.press("move down", focus: first)
+            f.select(b); f.press("move down", focus: b)
+            f.press("focus up", focus: a)
+            let publications = f.tessel.windowPublications.count
+            tabs.replaceChromeDescendant(in: next)
+            tabs.selectTab(next)
+            s.settle()
+            let published = f.tessel.windowPublications.dropFirst(publications).filter { $0.pid == tabs.pid }
+            s.expect("every publication has exactly one native front in the original slot", !published.isEmpty && published.allSatisfy {
+                let fronts = ($0.windows ?? []).filter { [first, next].contains($0.id) }
+                return fronts.count == 1 && fronts[0].workspace == 1 && fronts[0].rail == 2 && fronts[0].slot == 1
+            })
+            s.expect("only the successor remains", !f.tessel.windows.contains { $0.id == first } && f.tessel.windows.contains { $0.id == next })
+            f.order([a]); f.order([next, b], rail: 2)
+            f.near(f.frame(next).width, nominal, "the successor inherits the predecessor's nominal width")
+            f.press("focus up", focus: a); f.press("focus down", focus: next)
+        })
+    }
+
     @Test("native activation before termination cannot replace the adjacent-rail landing", arguments: [false, true], WriteOrder.allCases)
     func termination(crash: Bool, order: WriteOrder) {
         for exitOrder in TerminationExitOrder.allCases {
