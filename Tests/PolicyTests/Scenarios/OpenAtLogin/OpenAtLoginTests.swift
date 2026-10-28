@@ -178,15 +178,24 @@ import Testing
     func statusCompatibility() throws {
         var status = AppStatus(permission: "needed", config: ConfigStatus(path: "/fixture/tessel.toml"), version: "fixture", pid: 1)
         #expect(status.openAtLogin == OpenAtLoginStatus(state: .unavailable, reason: "development build"))
+        status.workspaces = WorkspaceStatus(enabled: true, reason: "enabled", active: 4, rail: 2, railCount: 3)
+        status.answeredAt = 123.5
         status.openAtLogin = OpenAtLoginStatus(state: .enabled, reason: "macOS refused: Request denied")
         let data = try JSONEncoder().encode(status)
         let decoded = try? JSONDecoder().decode(AppStatus.self, from: data)
         #expect(decoded?.openAtLogin == status.openAtLogin)
+        #expect(decoded?.workspaces == status.workspaces)
+        #expect(decoded?.answeredAt == 123.5)
         var legacy = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         legacy.removeValue(forKey: "openAtLogin")
         let oldData = try JSONSerialization.data(withJSONObject: legacy)
         let old = try? JSONDecoder().decode(AppStatus.self, from: oldData)
         #expect(old?.openAtLogin == OpenAtLoginStatus(state: .unavailable, reason: "development build"))
         #expect(old?.permission == "needed")
+        #expect(old?.config.path == "/fixture/tessel.toml")
+        #expect(old?.version == "fixture")
+        #expect(old?.pid == 1)
+        #expect(old?.workspaces == status.workspaces)
+        #expect(old?.answeredAt == 123.5)
     }
 }
