@@ -9,6 +9,22 @@ private final class NativeRootEvents: @unchecked Sendable {
 }
 
 @Suite @MainActor struct MacOSChoices {
+    @Test("a replaced chrome child invalidates only the old generation of its AX handle")
+    func staleChromeDescendant() throws {
+        let mac = SimulatedMac()
+        defer { mac.shutdown() }
+        let app = mac.launch(windows: 1), ax = mac.ax
+        let root = try #require(ax.copy(.windows, of: ax.application(app.pid)).value?.elements?.first)
+        app.replaceChromeDescendant(in: 1)
+        let stale = try #require(ax.copy(.children, of: root).value?.elements?.first)
+        #expect(ax.copy(.role, of: stale).status == .invalidUIElement)
+        let fresh = try #require(ax.copy(.children, of: root).value?.elements?.first)
+        #expect(fresh != stale && ax.copy(.role, of: fresh).value?.string == "AXGroup")
+        #expect(ax.copy(.role, of: stale).status == .invalidUIElement)
+        #expect(ax.copy(.role, of: root).value?.string == "AXWindow" && ax.windowID(root).value == 1)
+        #expect(mac.settle() == .settled)
+    }
+
     @Test("minimize completion separates a harmless main write from a restoring raise, even with a timed-out reply", arguments: MinimizedRaiseReply.allCases, [false, true])
     func minimizeFocus(_ reply: MinimizedRaiseReply, _ raising: Bool) throws {
         for completed in [false, true] {
