@@ -97,12 +97,23 @@ struct ConfigStatus: Codable, Sendable {
     }
 }
 
+struct OpenAtLoginStatus: Codable, Sendable, Equatable {
+    enum State: String, Codable, Sendable {
+        case enabled, off, offInSettings, unavailable
+    }
+    var state: State
+    var reason: String?
+
+    var text: String { "" }
+}
+
 struct AppStatus: Codable, Sendable {
     let permission: String
     let config: ConfigStatus
     let version: String
     let pid: Int32
     var workspaces = WorkspaceStatus()
+    var openAtLogin = OpenAtLoginStatus(state: .off, reason: nil)
     /// Raw monotonic seconds (`CLOCK_MONOTONIC_RAW`) when tessel produced this answer.
     var answeredAt: Double? = nil
     #if TESSEL_DEVELOPMENT

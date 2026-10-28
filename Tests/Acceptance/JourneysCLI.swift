@@ -19,8 +19,9 @@ extension Acceptance.Journeys {
                 .map { Set($0.keys) }
             try #require(keys == ["id", "app", "bundleId", "state", "reason", "tabs", "workspace", "visible", "rail", "slot", "answeredAt"])
         }
-        try step("#1 E12 status reports permission, config path, error line and version") {
+        try step("#1 E12; #55 E12 status reports permission, config path, error line, version and development login-item unavailability") {
             let status = try harness.status()
+            try #require(status.openAtLogin == Status.OpenAtLogin(state: "unavailable", reason: "development build"))
             try #require(status.permission == "granted" && status.config.path == harness.configFile.path)
             try #require(status.config.state == "defaults" && status.version.hasPrefix("0.1.0"))
             try desktop.writeConfig("[experiments]\nunknown = true\n")

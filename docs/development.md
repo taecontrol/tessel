@@ -904,7 +904,7 @@ deterministic policy layer and are not tagged in these files:
 | Reduce Motion | Wiring check that Reduce Motion makes a carousel move instant (E18 belongs to P) |
 | Reload | File watcher wiring for save, atomic replace, chmod and delete |
 | Crash, quit and unavailable mechanics | #2 E28, E29, E34 |
-| CLI and config files | #1 E10, E12; #1 U-cli-args, U-private-transport, U-read-only-transport, U-stalled-clients, U-observer-identity, U-cpu-oracle, U-notification-retries |
+| CLI and config files | #1 E10, E12; #55 E12; #1 U-cli-args, U-private-transport, U-read-only-transport, U-stalled-clients, U-observer-identity, U-cpu-oracle, U-notification-retries |
 | Signing and permission | #1 E13, E15, E16 |
 
 Latency owns #2 U-switch-budget in `Tests/Acceptance/Latency.swift`.
@@ -1064,7 +1064,7 @@ hidden-layer Given; a live new panel would enter its single-window layer.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49 and #51.
+This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49, #51 and #55.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -1327,6 +1327,18 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #51 E5 | P |
 | #51 E6 | C |
 | #51 E7 | P |
+| #55 E1 | P |
+| #55 E2 | P |
+| #55 E3 | P |
+| #55 E4 | P |
+| #55 E5 | P |
+| #55 E6 | P |
+| #55 E7 | P |
+| #55 E8 | P |
+| #55 E9 | P |
+| #55 E10 | P |
+| #55 E11 | P |
+| #55 E12 | J |
 <!-- Pending capture: #33 E20 -->
 <!-- Pending capture: #36 E8 -->
 
