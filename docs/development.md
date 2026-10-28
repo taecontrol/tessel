@@ -97,7 +97,8 @@ run only with their opt-in flag: `TESSEL_CAPTURE_WORKSPACES=1` for AppKit views,
 `TESSEL_CAPTURE_INSTANT=1` for #33's fixture-only 120 Hz pixel recordings, or
 `TESSEL_CAPTURE_LAYER=1` for layer recordings, the automated E30 fidelity
 walkthrough and E32 owner-session preparation, or `TESSEL_CAPTURE_ARRIVAL_WIDTH=1`
-for #49 E15's standard and maximum-width arrival geometry. Select a suite or pass a test
+for #49 E15's standard and maximum-width arrival geometry, or `TESSEL_CAPTURE_MAP=1`
+for #18 E28's light and dark map views. Select a suite or pass a test
 name fragment, such as `scripts/verify switchWorkspaces`. Empty selections fail
 before a GUI session starts. The script sets `TESSEL_ACCEPTANCE=1`; a direct
 `TESSEL_ACCEPTANCE=1 swift build --build-tests` compiles these suites without
@@ -230,7 +231,11 @@ The config is `$XDG_CONFIG_HOME/tessel/tessel.toml`, defaulting to
 workspaces and floating layer with their normal shortcuts. The kept experiments
 have no flags. Legacy `workspaces`, `carousel` and `layer` booleans in
 `[experiments]` are accepted and ignored; unknown keys still report their line.
-The table remains available for future experiments.
+`[experiments] map = true` enables the rails map experiment (off by default).
+`[map] duration` is its fully visible time after the last effective key, an
+integer from 100 to 5000 ms (default 1000). It is accepted without the flag and
+reported in `config.effective.map.duration`. A change applies to the next key;
+invalid edits keep the last valid configuration. Other map keys are rejected.
 
 ```toml
 [gaps]
@@ -238,6 +243,12 @@ outer = 10
 
 [animation]
 duration = 250
+
+[experiments]
+map = true
+
+[map]
+duration = 1000
 
 [keys]
 alt-r = "cycle width"
@@ -343,6 +354,33 @@ Workspace E36 enforces the same unchanged idle limits as foundation E22.
 Before the first public release (#6), revisit the bundle IDs, config schema,
 and read-only CLI contract. A command that changes state or exposes titles needs
 an architecture decision before implementation.
+
+## Rails map (#18)
+
+With the experiment enabled, effective keys and wall hits show a small map of
+the active workspace. External changes refresh a shown map without extending
+its hold. Motion follows animation duration and Reduce Motion, independently
+of Screen Recording. The panel passes clicks through, takes no focus, joins all
+Spaces and orders out after its 120 ms fade (instantly with motion off).
+
+Bare `swift test` proves E1–E23 through the recording port and pure layout.
+The signed `mapOverlayPreservesFocusAndPassesClicks` contract proves E24;
+`carouselKeyShowsAndRetiresMap` proves E25. Resources and latency run their
+existing carousel scenarios with the map enabled for E26–E27. Fixture-only
+development status exposes `testMap`; public status does not.
+
+```sh
+TESSEL_CAPTURE_MAP=1 scripts/verify captureRailsMap
+```
+
+This opt-in E28 capture adds `--test-capture-ui` to the signed fixture-only
+app. It exports the app's own map view in light and dark for Long rail,
+Three rails, Floats visible, Crowded, a wall with motion off and a workspace
+switch. Images go to `.work/captures/rails-map` for owner review; no desktop
+pixels are exported. The capture facility is absent from the daily build.
+Before copying images, the capture checks the real adapter's rendered tile
+counts per rail and every fixture's intended workspace, rail and slot. A wrong
+setup fails with fixture-only details instead of exporting it for review.
 
 ## Carousel (#26)
 
@@ -1026,7 +1064,7 @@ hidden-layer Given; a live new panel would enter its single-window layer.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2, #19, #26, #33, #36, #38, #39, #40, #41, #49 and #51.
+This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49 and #51.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -1105,6 +1143,34 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #2 E36 | R |
 | #2 E37 | X |
 | #2 U-switch-budget | L |
+| #18 E1 | P |
+| #18 E2 | P |
+| #18 E3 | P |
+| #18 E4 | P |
+| #18 E5 | P |
+| #18 E6 | P |
+| #18 E7 | P |
+| #18 E8 | P |
+| #18 E9 | P |
+| #18 E10 | P |
+| #18 E11 | P |
+| #18 E12 | P |
+| #18 E13 | P |
+| #18 E14 | P |
+| #18 E15 | P |
+| #18 E16 | P |
+| #18 E17 | P |
+| #18 E18 | P |
+| #18 E19 | P |
+| #18 E20 | P |
+| #18 E21 | P |
+| #18 E22 | P |
+| #18 E23 | P |
+| #18 E24 | C |
+| #18 E25 | J |
+| #18 E26 | R |
+| #18 E27 | L |
+| #18 E28 | X |
 | #19 E1 | P |
 | #19 E2 | P |
 | #19 E3 | P |

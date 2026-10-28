@@ -1,7 +1,44 @@
+import Carbon
+import CoreGraphics
 import Foundation
 import Testing
 
 extension Acceptance.Contracts {
+    @Test("#18 E24: map-overlay: tessel's map sits above the stage without taking focus and passes a centre click to the fixture", contract(.mapOverlay))
+    func mapOverlayPreservesFocusAndPassesClicks() throws {
+        defer { harness.stopApp() }
+        let ids = try desktop.railSetup([1], duration: 0, configuration: "[experiments]\nmap = true\n[map]\nduration = 5000\n")
+        let id = ids[0]
+        let before = try desktop.observe(focusedOnly: true), nativeBefore = try fixture.command("ping")
+        try #require(before.frontmostFixturePID == fixture.pid && desktop.focused(id, in: before))
+        try desktop.post(kVK_ANSI_L)
+        let overlay = try #require(try finalValue { try harness.mapWindows().first }, "the real map window must appear in tessel's CG listing")
+        let state = try harness.mapState()
+        try #require(state.window == overlay.id, "the observed window belongs to the real map adapter")
+        try #require(overlay.level > Int(CGWindowLevelForKey(.floatingWindow)) && overlay.level < Int(CGWindowLevelForKey(.mainMenuWindow)))
+        let visible = try #require(try native("screen").axVisibleFrame)
+        let visibleFrame = CGRect(x: visible[0], y: visible[1], width: visible[2], height: visible[3])
+        try #require(visibleFrame.contains(overlay.frame))
+        try #require(abs(overlay.frame.maxX - (visibleFrame.maxX - 10)) <= 2
+            && abs(overlay.frame.maxY - (visibleFrame.maxY - 10)) <= 2, "the card occupies the primary visible frame's bottom-right corner")
+        try #require(state.key == false && state.main == false, "the native map window is neither key nor main")
+        let after = try desktop.observe(focusedOnly: true), nativeAfter = try fixture.command("ping")
+        try #require(after.frontmostFixturePID == before.frontmostFixturePID && desktop.focused(id, in: after))
+        try #require(nativeAfter.keyWindow == nativeBefore.keyWindow && nativeAfter.mainWindow == nativeBefore.mainWindow)
+        _ = try window(id) // Retain the signed observer's AX handle before posting.
+        let clicks = nativeAfter.clicks?[String(id)] ?? 0
+        try native("pointerPress", ["id": id, "point": [overlay.frame.midX, overlay.frame.midY]])
+        try requireFinalState("a centre click reaches the fixture beneath the still-visible map") {
+            try (fixture.command("ping").clicks?[String(id)] ?? 0) == clicks + 1 && harness.mapWindows().contains { $0.id == overlay.id }
+        }
+        // Harness.rows filters to fixture-owned records; decode the full public
+        // response here so that absence is a discriminating catalog assertion.
+        let reply = try harness.invoke("windows", "--json")
+        try #require(reply.status == 0)
+        let rows = try JSONDecoder().decode([Row].self, from: reply.outputData)
+        try #require(!rows.contains { $0.id == overlay.id }, "the map never enters tessel windows")
+    }
+
     @Test("#36 E1: stage-protected-capture: protected video has a locked surface without a base address; display and unprotected captures are readable", contract(.stageProtectedCapture))
     func stageProtectedCapture() throws {
         try #require(try native("screenRecording").screenRecording == true, "grant Screen Recording to the signed fixture observer")

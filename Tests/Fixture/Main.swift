@@ -45,6 +45,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
     var socketPath = ""
     var transitions: [UUID: NSObjectProtocol] = [:]
     var keyCount = 0
+    var clicks: [Int: Int] = [:]
     var keyMonitor: Any?
     let contracts = FixtureContracts()
 
@@ -55,8 +56,11 @@ final class Fixture: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.current = self
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            MainActor.assumeIsolated { self?.keyCount += 1 }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown]) { [weak self] event in
+            MainActor.assumeIsolated {
+                if event.type == .keyDown { self?.keyCount += 1 }
+                else if let window = event.window { self?.clicks[window.windowNumber, default: 0] += 1 }
+            }
             return event
         }
         _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
@@ -447,6 +451,7 @@ final class Fixture: NSObject, NSApplicationDelegate {
 
     var snapshot: [String: Any] {
         ["pid": getpid(), "active": NSApp.isActive, "keyCount": keyCount, "transitionCount": transitions.count, "windows": windows.mapValues { $0.windowNumber },
+         "clicks": Dictionary(uniqueKeysWithValues: clicks.map { (String($0.key), $0.value) }),
          "keyWindow": NSApp.keyWindow.map { $0.windowNumber } as Any? ?? NSNull(),
          "mainWindow": NSApp.mainWindow.map { $0.windowNumber } as Any? ?? NSNull(),
          "minimizeEvents": minimizeRecorders.mapValues(\.events),

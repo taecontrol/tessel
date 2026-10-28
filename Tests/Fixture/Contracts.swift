@@ -146,7 +146,13 @@ final class FixtureContracts: NSObject {
             var point = CGPoint.zero, dimensions = CGSize.zero
             AXValueGetValue(position as! AXValue, .cgPoint, &point); AXValueGetValue(size as! AXValue, .cgSize, &dimensions)
             let oldPointer = CGEvent(source: nil)?.location
-            let target = CGPoint(x: point.x + dimensions.width / 2, y: point.y + 12)
+            var target = CGPoint(x: point.x + dimensions.width / 2, y: point.y + 12)
+            if let requested = command["point"] as? [Double] {
+                guard requested.count == 2, CGRect(origin: point, size: dimensions).contains(CGPoint(x: requested[0], y: requested[1])) else {
+                    throw FixtureContractError("a pointer target must be inside the retained frontmost fixture")
+                }
+                target = CGPoint(x: requested[0], y: requested[1])
+            }
             CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: target, mouseButton: .left)?.post(tap: .cghidEventTap)
             CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: target, mouseButton: .left)?.post(tap: .cghidEventTap)
             CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: target, mouseButton: .left)?.post(tap: .cghidEventTap)

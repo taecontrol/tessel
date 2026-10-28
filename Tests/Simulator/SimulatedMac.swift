@@ -119,6 +119,7 @@ package final class SimulatedMac: @unchecked Sendable {
     var foundation = FoundationState()
     var motion = MotionState()
     var stageState = StageState()
+    var mapHistory: [MapEvent] = []
     var unlisted = Set<UInt32>()
     var listingHistory: [ListingRead] = []
     var commits: [WindowServerCommit] = []

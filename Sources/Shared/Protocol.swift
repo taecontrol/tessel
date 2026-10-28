@@ -44,6 +44,11 @@ struct Configuration: Codable, Sendable, Equatable {
     var keys = KeyChord.layerDefaults
     var gaps = Gaps()
     var animation = Animation()
+    var map = MapSettings()
+}
+
+struct MapSettings: Codable, Sendable, Equatable {
+    var duration: Int = 1000
 }
 
 struct Animation: Codable, Sendable, Equatable {
@@ -115,6 +120,15 @@ struct AppStatus: Codable, Sendable {
         var stageScreenshots: [String: UInt64] = [:]
     }
     var testMotion: TestMotion? = nil
+    struct TestMap: Codable, Sendable {
+        /// Tile counts in the last picture drawn by the real map adapter.
+        var railTileCounts: [Int] = []
+        var shows: UInt64 = 0
+        var window: UInt32? = nil
+        var key: Bool? = nil
+        var main: Bool? = nil
+    }
+    var testMap: TestMap? = nil
     #endif
 }
 

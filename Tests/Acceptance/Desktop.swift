@@ -163,11 +163,11 @@ struct Desktop {
         try requireFinalState("the fixture catalog emptied") { try harness.rows().isEmpty }
     }
 
-    func split() throws -> (UInt32, UInt32) {
+    func split(configuration: String = "") throws -> (UInt32, UInt32) {
         harness.stopApp()
         let a = try fixture.open(key: "a", ["widthFraction": 1.0]), b = try fixture.open(key: "b", ["widthFraction": 1.0])
         try activate(key: "b")
-        try writeConfig("[animation]\nduration = 0\n")
+        try writeConfig(configuration + "[animation]\nduration = 0\n")
         try harness.startApp(fixtureReady: false)
         try requireFinalState("both workspace setup fixtures listed") {
             Set(try harness.rows().map(\.id)) == Set([a, b])

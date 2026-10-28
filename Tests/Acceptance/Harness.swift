@@ -1,4 +1,5 @@
 import Darwin
+import CoreGraphics
 import Foundation
 import Testing
 
@@ -51,6 +52,14 @@ struct Status: Decodable {
         let stageScreenshots: [String: UInt64]
     }
     let testMotion: TestMotion?
+    struct TestMap: Decodable {
+        let railTileCounts: [Int]
+        let shows: UInt64
+        let window: UInt32?
+        let key: Bool?
+        let main: Bool?
+    }
+    let testMap: TestMap?
     let workspaces: Workspaces?
     struct Workspaces: Decodable {
         let enabled: Bool
@@ -86,6 +95,7 @@ struct FixtureReply: Decodable {
     let observation: Observation?
     let postedAt: Double?
     let keyCount: Int?
+    let clicks: [String: Int]?
     let menuContains: Bool?
     let ready: Bool?
     let active: Bool?
@@ -339,7 +349,9 @@ final class Harness {
     /// before the user's. Nothing outside this launch changes, so neither
     /// cleanup nor an interrupted run has anything to restore.
     func startApp(fixtureReady: Bool = true, arguments: [String] = [], reduceMotion: Bool = false) throws {
-        let capture = ProcessInfo.processInfo.environment["TESSEL_CAPTURE_WORKSPACES"] == "1" ? ["--test-capture-ui"] : []
+        let capture = ["TESSEL_CAPTURE_WORKSPACES", "TESSEL_CAPTURE_MAP"].contains {
+            ProcessInfo.processInfo.environment[$0] == "1"
+        } ? ["--test-capture-ui"] : []
         try run(["open", "-n", "-g", "--stdout", "/dev/null", "--stderr", "/dev/null",
                  "--env", "XDG_CONFIG_HOME=" + environment["XDG_CONFIG_HOME"]!, app.path,
                  "--args", "--test-fixture-only", "-reduceMotion", reduceMotion ? "YES" : "NO"] + capture + arguments,
@@ -416,6 +428,31 @@ final class Harness {
     func stageMotion() throws -> Status.TestMotion {
         guard let motion = try status().testMotion else { throw HarnessError("fixture-only status must expose testMotion stage instrumentation") }
         return motion
+    }
+
+    func mapState() throws -> Status.TestMap {
+        try #require(try status().testMap, "fixture-only status must expose testMap from the real map adapter")
+    }
+
+    struct MapWindow {
+        let id: UInt32
+        let frame: CGRect
+        let level: Int
+    }
+    /// Inspect only tessel's numerical CG metadata, never titles or app lists.
+    func mapWindows() throws -> [MapWindow] {
+        guard let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] else {
+            throw HarnessError("WindowServer did not supply its on-screen listing")
+        }
+        return windows.compactMap { row in
+            guard (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == appPID,
+                  let level = (row[kCGWindowLayer as String] as? NSNumber)?.intValue,
+                  level > Int(CGWindowLevelForKey(.floatingWindow)), level < Int(CGWindowLevelForKey(.mainMenuWindow)),
+                  let id = (row[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
+                  let bounds = row[kCGWindowBounds as String] as? [String: Any],
+                  let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { return nil }
+            return MapWindow(id: id, frame: frame, level: level)
+        }
     }
 
     /// States the motion Given, so a failed motion example explains itself.

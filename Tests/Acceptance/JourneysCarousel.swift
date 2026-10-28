@@ -4,6 +4,27 @@ import Foundation
 import Testing
 
 extension Acceptance.Journeys {
+    @Test("#18 E25: a real carousel key shows one map, which leaves the screen, and the disabled flag suppresses it")
+    func carouselKeyShowsAndRetiresMap() throws {
+        let ids = try desktop.railSetup([0.5, 0.5], duration: 0, configuration: "[experiments]\nmap = true\n")
+        let before = try harness.mapState().shows
+        try desktop.post(kVK_ANSI_L)
+        try desktop.expectFocus(ids[1])
+        try requireFinalState("the real key shows the map in CG and increments the adapter counter once") {
+            try harness.mapState().shows == before + 1 && harness.mapWindows().count == 1
+        }
+        try requireFinalState("the map orders out after its hold within the five-second final-state margin") {
+            try harness.mapWindows().isEmpty
+        }
+        try #require(try harness.mapState().shows == before + 1)
+        try desktop.configure("[experiments]\nmap = false\n[animation]\nduration = 0\n", layout: "carousel")
+        try desktop.post(kVK_ANSI_H); try desktop.expectFocus(ids[0])
+        let disabled = try harness.mapState().shows
+        try desktop.post(kVK_ANSI_L); try desktop.expectFocus(ids[1])
+        try #require(try harness.mapState().shows == disabled && harness.mapWindows().isEmpty,
+                     "the same real key with the flag off creates no tessel window above the stage")
+    }
+
     private func videoRail(_ widths: [Double] = [0.6, 0.6, 0.6], protected: Bool = true) throws -> [UInt32] {
         let ids = try desktop.railSetup(widths, duration: 0, video: 1)
         let sizes = try videoWidths(widths)

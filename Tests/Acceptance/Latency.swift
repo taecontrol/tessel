@@ -61,7 +61,7 @@ extension Acceptance {
                          Double(summary.p95Nanoseconds ?? 0) / 1e6, Double(summary.maxNanoseconds ?? 0) / 1e6, Double(budget ?? limit) / 1e6))
         }
 
-        @Test("#2 U-switch-budget: 100 workspace switches and 100 rail moves")
+        @Test("#2 U-switch-budget; #18 E27: 100 workspace switches and 100 rail moves with the map enabled")
         func workspaceSwitchesAndRailMoves() throws {
             struct Artifact: Encodable {
                 let schemaVersion: Int
@@ -106,7 +106,9 @@ extension Acceptance {
                 try encoder.encode(artifact).write(to: path, options: .atomic)
             }
             do {
-                let (a, b) = try desktop.split()
+                let mapConfig = "[experiments]\nmap = true\n"
+                let (a, b) = try desktop.split(configuration: mapConfig)
+                try #require(try desktop.harness.status().config.effective.experiments["map"] == true, "the latency suite requires the map experiment")
                 for index in 0..<100 {
                     let destination = index.isMultiple(of: 2) ? 2 : 1
                     let target = destination == 2 ? b : a, hidden = destination == 2 ? a : b
@@ -124,7 +126,7 @@ extension Acceptance {
                 // Settle the default motion before changing to the measured
                 // duration below; that write must be a real config revision.
                 let ids = try desktop.railSetup(Array(repeating: width / (area[2] - 20), count: 5),
-                    firstIn: elevatorApp)
+                    firstIn: elevatorApp, configuration: mapConfig)
                 let top = Array(ids.dropFirst())
                 func landed(pair: Int?, focus: UInt32, in observation: Observation, frames: [UInt32: [Double]]? = nil) -> Bool {
                     guard desktop.focused(focus, in: observation) else { return false }
@@ -153,7 +155,7 @@ extension Acceptance {
                 try requireFinalState("the latency setup returns to its second rail") {
                     try landed(pair: nil, focus: ids[0], in: desktop.observe())
                 }
-                try desktop.configure(desktop.carousel + "[animation]\nduration = \(animationDuration)\n", layout: "carousel")
+                try desktop.configure(mapConfig + "[animation]\nduration = \(animationDuration)\n", layout: "carousel")
                 var pair = 0
                 var topFocus = top[1]
                 for index in 0..<100 {
