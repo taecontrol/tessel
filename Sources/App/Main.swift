@@ -218,11 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     #if !TESSEL_DEVELOPMENT
     @objc private func changeOpenAtLogin() {
-        guard let store else { return }
-        let current = store.openAtLogin
-        guard let request = current.clickRequest else { return }
-        let refused = loginItem.perform(request)
-        store.openAtLogin = current.performed(refused: refused, now: loginItem.state())
+        store?.changeOpenAtLogin(loginItem.perform)
         updateMenu()
     }
     #endif

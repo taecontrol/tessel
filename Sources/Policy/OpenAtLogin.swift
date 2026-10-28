@@ -76,8 +76,11 @@ enum OpenAtLogin: Equatable, Sendable {
         return previous == state ? self : .installed(state)
     }
 
+    /// A request that macOS accepted, such as opening Settings, is only a fresh
+    /// read: it must not clear an earlier refusal while the state is unchanged.
     func performed(refused: String?, now state: LoginItemState) -> OpenAtLogin {
         guard case .installed = self else { return self }
+        guard let refused else { return reading(state) }
         return .installed(state, refused: refused)
     }
 }

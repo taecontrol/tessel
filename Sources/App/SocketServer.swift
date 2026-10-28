@@ -78,23 +78,37 @@ final class SnapshotStore: WindowPublishing, @unchecked Sendable {
         self.status.openAtLogin = openAtLogin.status
     }
 
-    var openAtLogin: OpenAtLogin {
-        get { lock.withLock { loginItem } }
-        set {
-            lock.withLock {
-                loginItem = newValue
-                status.openAtLogin = newValue.status
-            }
+    var openAtLogin: OpenAtLogin { lock.withLock { loginItem } }
+
+    /// Serializes login-item reads and changes, so a read that started before a
+    /// click never replaces the click's result. BTM can take time; it is never
+    /// called under `lock`, which window snapshots share.
+    private let loginItemLock = NSLock()
+
+    func refreshOpenAtLogin() {
+        guard let readLoginItem else { return }
+        loginItemLock.withLock {
+            guard case .installed = openAtLogin else { return }
+            let state = readLoginItem()
+            publish(openAtLogin.reading(state))
         }
     }
 
-    func refreshOpenAtLogin() {
-        guard let readLoginItem, case .installed = openAtLogin else { return }
-        // BTM can take time; it must never hold up a window snapshot's lock.
-        let state = readLoginItem()
+    /// Performs the click's request, then reports the state BTM gives afterwards.
+    func changeOpenAtLogin(_ perform: (LoginItemRequest) -> String?) {
+        guard let readLoginItem else { return }
+        loginItemLock.withLock {
+            let current = openAtLogin
+            guard let request = current.clickRequest else { return }
+            let refused = perform(request)
+            publish(current.performed(refused: refused, now: readLoginItem()))
+        }
+    }
+
+    private func publish(_ value: OpenAtLogin) {
         lock.withLock {
-            loginItem = loginItem.reading(state)
-            status.openAtLogin = loginItem.status
+            loginItem = value
+            status.openAtLogin = value.status
         }
     }
 

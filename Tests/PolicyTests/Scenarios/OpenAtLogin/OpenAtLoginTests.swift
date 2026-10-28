@@ -152,6 +152,15 @@ import Testing
         }
     }
 
+    @Test("#55 E10: opening Login Items settings keeps a refusal while BTM still reports the same state")
+    func openingSettingsKeepsARefusal() {
+        let refused = OpenAtLogin.installed(.notRegistered).performed(refused: "Request denied", now: .requiresApproval)
+        #expect(refused.clickRequest == .openSettings)
+        let opened = refused.performed(refused: nil, now: .requiresApproval)
+        #expect(opened.status == OpenAtLoginStatus(state: .offInSettings, reason: "macOS refused: Request denied"))
+        #expect(refused.performed(refused: nil, now: .enabled).status == OpenAtLoginStatus(state: .enabled, reason: nil))
+    }
+
     @Test("#55 E11: status text says on, off, off in System Settings or unavailable with its reason")
     func statusText() {
         let cases: [(OpenAtLoginStatus, String)] = [
