@@ -97,12 +97,36 @@ struct ConfigStatus: Codable, Sendable {
     }
 }
 
+struct OpenAtLoginStatus: Codable, Sendable, Equatable {
+    enum State: String, Codable, Sendable {
+        case enabled, off, offInSettings, unavailable
+    }
+    var state: State
+    var reason: String?
+
+    var text: String {
+        switch state {
+        case .enabled: "Open at login: on"
+        case .off: "Open at login: off"
+        case .offInSettings: "Open at login: off in System Settings"
+        case .unavailable: "Open at login: unavailable" + (reason.map { " (\($0))" } ?? "")
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(state, forKey: .state)
+        try container.encode(reason, forKey: .reason)
+    }
+}
+
 struct AppStatus: Codable, Sendable {
     let permission: String
     let config: ConfigStatus
     let version: String
     let pid: Int32
     var workspaces = WorkspaceStatus()
+    var openAtLogin = OpenAtLoginStatus(state: .unavailable, reason: "development build")
     /// Raw monotonic seconds (`CLOCK_MONOTONIC_RAW`) when tessel produced this answer.
     var answeredAt: Double? = nil
     #if TESSEL_DEVELOPMENT
@@ -130,6 +154,25 @@ struct AppStatus: Codable, Sendable {
     }
     var testMap: TestMap? = nil
     #endif
+}
+
+extension AppStatus {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(permission: try container.decode(String.self, forKey: .permission),
+                  config: try container.decode(ConfigStatus.self, forKey: .config),
+                  version: try container.decode(String.self, forKey: .version),
+                  pid: try container.decode(Int32.self, forKey: .pid))
+        workspaces = try container.decode(WorkspaceStatus.self, forKey: .workspaces)
+        if let value = try container.decodeIfPresent(OpenAtLoginStatus.self, forKey: .openAtLogin) {
+            openAtLogin = value
+        }
+        answeredAt = try container.decodeIfPresent(Double.self, forKey: .answeredAt)
+        #if TESSEL_DEVELOPMENT
+        testMotion = try container.decodeIfPresent(TestMotion.self, forKey: .testMotion)
+        testMap = try container.decodeIfPresent(TestMap.self, forKey: .testMap)
+        #endif
+    }
 }
 
 struct Reply: Codable, Sendable {

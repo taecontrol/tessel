@@ -22,6 +22,11 @@ struct Row: Decodable, Equatable, Hashable {
 }
 
 struct Status: Decodable {
+    struct OpenAtLogin: Decodable, Equatable {
+        let state: String
+        let reason: String?
+    }
+    let openAtLogin: OpenAtLogin?
     struct Config: Decodable {
         let path: String
         let state: String

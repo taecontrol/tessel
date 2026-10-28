@@ -67,9 +67,50 @@ final class SnapshotStore: WindowPublishing, @unchecked Sendable {
     private let lock = NSLock()
     private var windows: [pid_t: [WindowRecord]] = [:]
     private var status: AppStatus
+    private var loginItem: OpenAtLogin
+    private let readLoginItem: (@Sendable () -> LoginItemState)?
     private var ready = false
 
-    init(status: AppStatus) { self.status = status }
+    init(status: AppStatus, openAtLogin: OpenAtLogin, readLoginItem: (@Sendable () -> LoginItemState)? = nil) {
+        self.status = status
+        self.loginItem = openAtLogin
+        self.readLoginItem = readLoginItem
+        self.status.openAtLogin = openAtLogin.status
+    }
+
+    var openAtLogin: OpenAtLogin { lock.withLock { loginItem } }
+
+    /// Serializes login-item reads and changes, so a read that started before a
+    /// click never replaces the click's result. BTM can take time; it is never
+    /// called under `lock`, which window snapshots share.
+    private let loginItemLock = NSLock()
+
+    func refreshOpenAtLogin() {
+        guard let readLoginItem else { return }
+        loginItemLock.withLock {
+            guard case .installed = openAtLogin else { return }
+            let state = readLoginItem()
+            publish(openAtLogin.reading(state))
+        }
+    }
+
+    /// Performs the click's request, then reports the state BTM gives afterwards.
+    func changeOpenAtLogin(_ perform: (LoginItemRequest) -> String?) {
+        guard let readLoginItem else { return }
+        loginItemLock.withLock {
+            let current = openAtLogin
+            guard let request = current.clickRequest else { return }
+            let refused = perform(request)
+            publish(current.performed(refused: refused, now: readLoginItem()))
+        }
+    }
+
+    private func publish(_ value: OpenAtLogin) {
+        lock.withLock {
+            loginItem = value
+            status.openAtLogin = value.status
+        }
+    }
 
     func markReady() { lock.withLock { ready = true } }
 
@@ -80,6 +121,7 @@ final class SnapshotStore: WindowPublishing, @unchecked Sendable {
             let map = self.status.testMap
             #endif
             self.status = status
+            self.status.openAtLogin = loginItem.status
             #if TESSEL_DEVELOPMENT
             self.status.testMotion = motion
             self.status.testMap = map
@@ -117,7 +159,8 @@ final class SnapshotStore: WindowPublishing, @unchecked Sendable {
     }
 
     func reply(to command: String) -> Reply {
-        lock.withLock {
+        if command == "status" { refreshOpenAtLogin() }
+        return lock.withLock {
             guard ready else { return Reply(error: "tessel is starting") }
             // The state below is read under this lock at this instant.
             let answeredAt = Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1e9
