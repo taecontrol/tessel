@@ -204,7 +204,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         let quitItem = menu.addItem(withTitle: "Quit tessel", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
-        statusItem?.menu = menu
+        if existingMenu == nil { statusItem?.menu = menu }
         let label = config.status.error.map { "Configuration error (line \($0.line))" }
             ?? (workspace.enabled ? "Workspace \(workspace.active)" + (workspace.layout == "carousel" ? ", rail \(workspace.rail ?? 0) of \(workspace.railCount)" : "") : "Workspaces disabled: \(workspace.reason)")
         statusItem?.button?.setAccessibilityLabel("tessel: " + label)
@@ -271,7 +271,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 #if !TESSEL_DEVELOPMENT
 extension AppDelegate: NSMenuDelegate {
-    func menuWillOpen(_ menu: NSMenu) {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        // AppKit permits rebuilding here, not in menuWillOpen. Shortcut
+        // matching needs no titles and must not cause a BTM read.
+        guard menu.propertiesToUpdate.contains(.propertyItemTitle) else { return }
         store?.refreshOpenAtLogin()
         updateMenu(menu)
     }
