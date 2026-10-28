@@ -43,6 +43,25 @@ Never launch an unsigned or ad-hoc-signed bundle with either ID. Doing so can
 revoke the existing Accessibility grant. Bundles must stay outside `/tmp`,
 where LaunchServices cannot register them reliably.
 
+The development build never reads or changes login items, including in the
+fixture harness, and has no **Open at Login** menu item. The daily build registers
+on its first launch from `/Applications` or `~/Applications`, even without the
+Accessibility permission. Turn it off with **Open at Login** in the menu bar;
+later launches preserve that choice. An off in System Settings shows
+**Open at Login…**, which opens Login Items so the user can turn it back on.
+A daily copy outside Applications has a disabled item explaining where to move
+it and never reads or changes login items.
+
+`status --json` includes `openAtLogin` with `state` (`enabled`, `off`,
+`offInSettings` or `unavailable`) and `reason` (a string or null). Text status
+includes `Open at login: on`, `off`, `off in System Settings` or
+`unavailable (<reason>)`. A refused change keeps the state macOS reports and
+shows `macOS refused: <message>` in the menu and JSON reason until the state
+changes. Login-item state is read only at launch, when the menu opens, after a
+click and for each status request; no timer or background polling reads it.
+This lifecycle default has no experiment flag, as explicitly agreed in
+[issue #55](https://github.com/taecontrol/tessel/issues/55).
+
 ## Verification
 
 Bare `swift test` runs the deterministic scenarios, simulator framework and

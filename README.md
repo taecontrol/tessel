@@ -14,6 +14,10 @@ file. Inactive windows live in a hidden Space; quitting returns them to the
 current desktop. The read-only CLI lists windows, their classification and
 reason, workspace and rail membership.
 
+The daily build registers to open at login on its first launch from
+`/Applications` or `~/Applications`. Turn it off with **Open at Login** in the
+menu bar. The development build never registers as a login item.
+
 Option+H/L visits edge stops without wrapping; Option+K/J moves between rails.
 Add Shift to move the window instead. Option+R cycles widths through one third,
 one half, two thirds and full. Short rails keep their nominal widths and leave

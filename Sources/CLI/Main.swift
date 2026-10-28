@@ -26,6 +26,7 @@ struct Main {
                 else {
                     print("tessel \(status.version)")
                     print(status.permission == "granted" ? "Accessibility permission granted" : "Accessibility permission needed")
+                    print(status.openAtLogin.text)
                     print("Config: \(status.config.path) (\(status.config.state))")
                     if let error = status.config.error { print("Line \(error.line): \(error.message)") }
                 }

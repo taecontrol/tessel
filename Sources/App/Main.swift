@@ -45,6 +45,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var termination: DispatchSourceSignal?
     #if TESSEL_DEVELOPMENT
     private let capture = LaunchOptions.captureUI ? DevelopmentCapture() : nil
+    #else
+    private let loginItem = SystemLoginItem()
     #endif
     private let trusted = AXIsProcessTrusted()
 
@@ -56,7 +58,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let config = ConfigManager(path: file.file.path, main: scheduler.main, load: { try file.load() }, watch: { file.watch() })
         file.onChange = { [weak config] in config?.scheduleReload() }
         self.config = config
-        let store = SnapshotStore(status: appStatus(config.status))
+        #if TESSEL_DEVELOPMENT
+        let openAtLogin = OpenAtLogin(development: true, bundle: Bundle.main.bundleURL,
+                                      home: FileManager.default.homeDirectoryForCurrentUser, read: { .notRegistered })
+        let store = SnapshotStore(status: appStatus(config.status), openAtLogin: openAtLogin)
+        #else
+        var openAtLogin = OpenAtLogin(development: false, bundle: Bundle.main.bundleURL,
+                                      home: FileManager.default.homeDirectoryForCurrentUser, read: loginItem.state)
+        // Register before permission-dependent setup: tessel must also return at
+        // login to explain a missing Accessibility grant.
+        if let request = openAtLogin.launchRequest {
+            let refused = loginItem.perform(request)
+            openAtLogin = openAtLogin.performed(refused: refused, now: loginItem.state())
+        }
+        let store = SnapshotStore(status: appStatus(config.status), openAtLogin: openAtLogin, readLoginItem: loginItem.state)
+        #endif
         self.store = store
         let stage = SystemMotionStage()
         let map = SystemRailsMap()
@@ -122,9 +138,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return status
     }
 
-    private func updateMenu() {
+    private func updateMenu(_ existingMenu: NSMenu? = nil) {
         guard let config else { return }
-        let menu = NSMenu()
+        let menu = existingMenu ?? NSMenu()
+        menu.removeAllItems()
         let workspace = workspaces?.status ?? WorkspaceStatus()
         if workspace.enabled {
             statusItem?.button?.title = String(workspace.active)
@@ -161,6 +178,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(withTitle: "Configuration error (line \(error.line)): \(error.message)", action: nil, keyEquivalent: "")
         }
         menu.addItem(.separator())
+        #if !TESSEL_DEVELOPMENT
+        let openAtLogin = store?.openAtLogin ?? .development
+        switch openAtLogin.menuItem {
+        case .absent: break
+        case .disabled(let title):
+            menu.addItem(withTitle: title, action: nil, keyEquivalent: "").isEnabled = false
+        case .toggle(let on):
+            let item = menu.addItem(withTitle: "Open at Login", action: #selector(changeOpenAtLogin), keyEquivalent: "")
+            item.target = self
+            item.state = on ? .on : .off
+        case .openSettings:
+            let item = menu.addItem(withTitle: "Open at Login…", action: #selector(changeOpenAtLogin), keyEquivalent: "")
+            item.target = self
+        }
+        if case .installed = openAtLogin, let reason = openAtLogin.status.reason {
+            menu.addItem(withTitle: reason, action: nil, keyEquivalent: "")
+        }
+        menu.addItem(.separator())
+        menu.delegate = self
+        #endif
         let reload = menu.addItem(withTitle: "Reload config", action: #selector(reloadConfig), keyEquivalent: "r")
         reload.target = self
         menu.addItem(withTitle: config.status.path, action: nil, keyEquivalent: "")
@@ -178,6 +215,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func reloadConfig() { config?.reload() }
+
+    #if !TESSEL_DEVELOPMENT
+    @objc private func changeOpenAtLogin() {
+        guard let store else { return }
+        let current = store.openAtLogin
+        guard let request = current.clickRequest else { return }
+        let refused = loginItem.perform(request)
+        store.openAtLogin = current.performed(refused: refused, now: loginItem.state())
+        updateMenu()
+    }
+    #endif
 
     @objc private func quit() {
         guard let workspaces else { NSApp.terminate(nil); return }
@@ -224,3 +272,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         server?.stop()
     }
 }
+
+#if !TESSEL_DEVELOPMENT
+extension AppDelegate: NSMenuDelegate {
+    func menuWillOpen(_ menu: NSMenu) {
+        store?.refreshOpenAtLogin()
+        updateMenu(menu)
+    }
+}
+#endif
