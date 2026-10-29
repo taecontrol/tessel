@@ -14,7 +14,7 @@ extension Acceptance.Journeys {
             try desktop.activate(key: "a")
             try desktop.expectPassedKey(kVK_ANSI_1)
             let status = try harness.invoke("status", "--json")
-            try #require(status.status != 0 && status.error.contains("tessel is not running"))
+            try #require(status.status != 0 && status.error.contains("Tessel is not running"))
         }
         try step("#2 E29 crash recovery returns orphans after a successful AX enumeration") {
             do {

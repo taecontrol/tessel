@@ -19,7 +19,7 @@ import Testing
             try deadline.wait(poll: poll)
         }
         #expect(now - start >= 750_000_000 && now - start < 1_000_000_000)
-        #expect(IPCError.timeout.cliMessage == "tessel is not responding")
+        #expect(IPCError.timeout.cliMessage == "Tessel is not responding")
     }
 
     @Test("#1 E11: an absent listener or failed readiness reports not running immediately", arguments: [false, true])
@@ -33,7 +33,7 @@ import Testing
             try deadline.wait(poll: poll)
         }
         #expect(polls == (readinessFailure ? 1 : 0))
-        #expect(IPCError.unavailable.cliMessage == "tessel is not running")
+        #expect(IPCError.unavailable.cliMessage == "Tessel is not running")
     }
 
     @Test("#1 E11: connect, write and interrupted reads share the original virtual deadline")

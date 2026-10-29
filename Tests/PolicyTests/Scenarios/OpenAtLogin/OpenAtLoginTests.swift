@@ -122,7 +122,7 @@ import Testing
                 for current in [value, value.reading(state), value.performed(refused: "Denied", now: state)] {
                     #expect(current.launchRequest == nil)
                     #expect(current.clickRequest == nil)
-                    #expect(current.menuItem == .disabled("Open at Login: move tessel to Applications"))
+                    #expect(current.menuItem == .disabled("Open at Login: move Tessel to Applications"))
                     #expect(current.status == OpenAtLoginStatus(state: .unavailable, reason: "not in Applications"))
                 }
             }

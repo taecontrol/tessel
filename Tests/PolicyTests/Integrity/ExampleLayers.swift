@@ -24,7 +24,7 @@ enum ExampleLayers {
         var pendingCaptures: Set<String> = []
     }
     static let heading = "## Acceptance example layers (#24)"
-    private static let idPattern = #"#(?:1|2|18|19|26|33|36|38|39|40|41|49|51|55|57) (?:E[1-9][0-9]*[a-z]?|U-[a-z0-9]+(?:-[a-z0-9]+)*)(?![A-Za-z0-9_-])"#
+    private static let idPattern = #"#(?:1|2|18|19|26|33|36|38|39|40|41|49|51|55|57|59) (?:E[1-9][0-9]*[a-z]?|U-[a-z0-9]+(?:-[a-z0-9]+)*)(?![A-Za-z0-9_-])"#
 
     static func parse(_ document: String) -> Map {
         var result = Map()
@@ -90,7 +90,7 @@ enum ExampleLayers {
 
     private static func layer(path: String, function: String, step: Bool) -> Layer? {
         if path.hasPrefix("Tests/Acceptance/Contracts") { return .contract }
-        if path.hasPrefix("Tests/CheckTests/") { return .tooling }
+        if path.hasPrefix("Tests/CheckTests/") || path.hasPrefix("Tests/BuildTests/") { return .tooling }
         if path.hasPrefix("Tests/PolicyTests/Scenarios/") && !step { return .policy }
         if path.hasPrefix("Tests/Acceptance/Journeys") && path.hasSuffix(".swift") { return .journey }
         if path == "Tests/Acceptance/Latency.swift" && !step { return .latency }

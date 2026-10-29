@@ -11,7 +11,7 @@ struct Main {
         let reply: Reply
         do { reply = try SocketIO.request(command) }
         catch let error as IPCError { fail(error.cliMessage) }
-        catch { fail("tessel is not running") }
+        catch { fail("Tessel is not running") }
         if let error = reply.error { fail(error) }
         do {
             if command == "windows", let windows = reply.windows {
@@ -24,14 +24,14 @@ struct Main {
             } else if command == "status", let status = reply.status {
                 if args.contains("--json") { try printJSON(status) }
                 else {
-                    print("tessel \(status.version)")
+                    print("Tessel \(status.version)")
                     print(status.permission == "granted" ? "Accessibility permission granted" : "Accessibility permission needed")
                     print(status.openAtLogin.text)
                     print("Config: \(status.config.path) (\(status.config.state))")
                     if let error = status.config.error { print("Line \(error.line): \(error.message)") }
                 }
-            } else { fail("Invalid response from tessel") }
-        } catch { fail("Could not encode tessel's response") }
+            } else { fail("Invalid response from Tessel") }
+        } catch { fail("Could not encode Tessel's response") }
     }
 
     static func printJSON(_ value: some Encodable) throws {

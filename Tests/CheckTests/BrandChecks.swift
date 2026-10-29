@@ -37,7 +37,9 @@ import Testing
 
     @Test("#59 E12: the README keeps the code MIT and excludes the Tessel name and logo")
     func licenseExcludesNameAndLogo() throws {
+        // Markdown wraps prose, so compare the README with its whitespace collapsed.
         let readme = try String(contentsOf: root.appending(path: "README.md"), encoding: .utf8)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
         #expect(readme.contains("[MIT](LICENSE)"))
         #expect(readme.contains("The Tessel name and logo are not covered by the MIT license"))
     }

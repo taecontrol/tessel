@@ -49,7 +49,7 @@ enum OpenAtLogin: Equatable, Sendable {
     var menuItem: LoginMenuItem {
         switch self {
         case .development: .absent
-        case .notInApplications: .disabled("Open at Login: move tessel to Applications")
+        case .notInApplications: .disabled("Open at Login: move Tessel to Applications")
         case .installed(.enabled, _): .toggle(on: true)
         case .installed(.notFound, _), .installed(.notRegistered, _): .toggle(on: false)
         case .installed(.requiresApproval, _): .openSettings

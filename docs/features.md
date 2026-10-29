@@ -1,6 +1,6 @@
 # Features
 
-A comparison of the window managers that inspired tessel, and where each idea
+A comparison of the window managers that inspired Tessel, and where each idea
 stands. "Idea" means not planned yet: it becomes an issue only when someone
 decides to try it.
 
@@ -20,11 +20,11 @@ as of October 2026.
 - macOS reports each native tab as its own window. Without tab handling, every
   tab gets its own tile, and background tabs leave empty space.
 
-tessel keeps checking a new window for a moment, counts native tabs as one
+Tessel keeps checking a new window for a moment, counts native tabs as one
 window, and can explain every classification (#1, #2). Paneru already handles
 native tabs.
 
-AX roots also include surfaces that should never join a layout. tessel checks
+AX roots also include surfaces that should never join a layout. Tessel checks
 CG level before subrole: standard windows, dialogs, system dialogs and floating
 windows at layer 0 or the floating level 3 are managed, including apps' own
 utility panels, inspectors and palettes. Other surfaces are listed as
@@ -35,7 +35,7 @@ macOS moves a window that sits entirely off screen onto another display, so
 AeroSpace and Paneru hide windows by leaving a thin sliver of each one visible
 at a screen edge.
 
-tessel's workspace experiment (#2) instead keeps inactive windows in one hidden
+Tessel's workspace experiment (#2) instead keeps inactive windows in one hidden
 Space, with no sliver. It brings them to the current native desktop when shown.
 This uses private SkyLight operations; see [ADR 0002](adr/0002-hide-inactive-windows-in-a-skylight-space.md).
 Paneru combines native Spaces with virtual rows whose inactive windows are
@@ -43,7 +43,7 @@ parked in a strip. TileMyMac uses Paneru's engine and exposes numbered rows.
 
 ## Comparison
 
-| Feature | AeroSpace | TrellisWM | TileMyMac / Paneru | Omarchy (Hyprland) | On macOS | tessel |
+| Feature | AeroSpace | TrellisWM | TileMyMac / Paneru | Omarchy (Hyprland) | On macOS | Tessel |
 |---|---|---|---|---|---|---|
 | Tiling model | Manual i3-style tree | Docking by dragging | Scrolling strip | Dwindle: automatic spiral splits | Accessibility API | #3 |
 | Scrolling columns layout (niri-style) | — | — | Yes, one strip per display | Per workspace | Feasible | Carousel experiment (#26) |
@@ -67,7 +67,7 @@ parked in a strip. TileMyMac uses Paneru's engine and exposes numbered rows.
 | Per-app rules (workspace, floating) | Yes | Exclude an app | Yes (Paneru) | Yes | Feasible | Idea |
 | Gaps | Yes | — | — | Yes, with a toggle | Feasible | #2 |
 | Active window border | — | — | — | Gradient border | Needs its own overlay | Idea |
-| Layout animations | — | 460 ms, drawn from snapshots | — | Bezier curves | Window captures on tessel's own overlay; needs Screen Recording | Carousel: 250 ms, configurable; rails slide as one sheet (#26, ADR 0006) |
+| Layout animations | — | 460 ms, drawn from snapshots | — | Bezier curves | Window captures on Tessel's own overlay; needs Screen Recording | Carousel: 250 ms, configurable; rails slide as one sheet (#26, ADR 0006) |
 | Overview of everything | — | Yes | — | — | Needs Screen Recording | Idea |
 | Saved views | — | Nine | — | Saved window width | Feasible | Idea |
 | Layout survives restarts | — | Yes | Yes (Paneru) | Per workspace | Feasible | Idea |
