@@ -2,7 +2,7 @@ enum IPCError: Error, Equatable {
     case unavailable, timeout, invalidMessage, unsafeEndpoint, alreadyRunning
 
     var cliMessage: String {
-        self == .timeout ? "tessel is not responding" : "tessel is not running"
+        self == .timeout ? "Tessel is not responding" : "Tessel is not running"
     }
 }
 

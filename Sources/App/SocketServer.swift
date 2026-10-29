@@ -161,7 +161,7 @@ final class SnapshotStore: WindowPublishing, @unchecked Sendable {
     func reply(to command: String) -> Reply {
         if command == "status" { refreshOpenAtLogin() }
         return lock.withLock {
-            guard ready else { return Reply(error: "tessel is starting") }
+            guard ready else { return Reply(error: "Tessel is starting") }
             // The state below is read under this lock at this instant.
             let answeredAt = Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1e9
             switch command {
@@ -171,7 +171,7 @@ final class SnapshotStore: WindowPublishing, @unchecked Sendable {
                 return Reply(status: status)
             case "windows":
                 guard status.permission == "granted" else {
-                    return Reply(error: "Accessibility permission needed. Open tessel's menu and System Settings to grant access.")
+                    return Reply(error: "Accessibility permission needed. Open Tessel's menu and System Settings to grant access.")
                 }
                 return Reply(windows: windows.values.flatMap { $0 }.sorted { $0.id < $1.id }.map {
                     var record = $0

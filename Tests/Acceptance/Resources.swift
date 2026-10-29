@@ -49,7 +49,7 @@ extension Acceptance {
             }
         }
 
-        @Test("#1 E22: idle resource budget") func e22TwentyIdleWindowsStayWithinWakeupCPUAndFootprintLimits() throws {
+        @Test("#1 E22; #59 E5: idle resource budget") func e22TwentyIdleWindowsStayWithinWakeupCPUAndFootprintLimits() throws {
             // Discover an existing desktop in one snapshot. Opening twenty
             // windows under a live manager leaves arrival animations in flight.
             harness.stopApp()

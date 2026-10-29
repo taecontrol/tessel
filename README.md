@@ -1,14 +1,19 @@
-# tessel
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/tessel-lockup-dark.svg">
+    <img src="docs/brand/tessel-lockup.svg" alt="Tessel" width="385" height="91">
+  </picture>
+</h1>
 
-A keyboard-first tiling window manager for macOS.
+<p align="center">A keyboard-first tiling window manager for macOS</p>
 
-tessel is an experiment. It grows one feature at a time: each feature starts
+Tessel is an experiment. It grows one feature at a time: each feature starts
 behind a config flag, gets used for real, and is then kept or removed. It aims
 to stay fast and light, so it only gains what it actually needs.
 
 ## Status
 
-tessel manages ten keyboard-driven workspaces, remembered rails of tiled
+Tessel manages ten keyboard-driven workspaces, remembered rails of tiled
 windows and a floating layer per workspace. They are active without a config
 file. Inactive windows live in a hidden Space; quitting returns them to the
 current desktop. The read-only CLI lists windows, their classification and
@@ -21,7 +26,7 @@ menu bar. The development build never registers as a login item.
 Option+H/L visits edge stops without wrapping; Option+K/J moves between rails.
 Add Shift to move the window instead. Option+R cycles widths through one third,
 one half, two thirds and full. Short rails keep their nominal widths and leave
-space to the right. While a mouse button is held, tessel leaves the windows
+space to the right. While a mouse button is held, Tessel leaves the windows
 alone; releasing a resized edge adopts its width and restores the rail height.
 
 Option+Tab returns to the previously selected available window, across
@@ -29,7 +34,7 @@ workspaces and including floats. Press it again to switch back.
 
 Option+Z enters or leaves the floating layer, Option+Shift+Z pins it above the
 rails, and Option+F moves a window between rail and layer. Floats start hidden;
-a new dialog shows alone. tessel manages standard windows, dialogs, system
+a new dialog shows alone. Tessel manages standard windows, dialogs, system
 dialogs and floating windows at CG layer 0 or the floating level 3, including
 utility panels, inspectors and palettes. Other levels and subroles are ignored.
 
@@ -51,4 +56,5 @@ Build from source with Xcode 27 using [the development guide](docs/development.m
 
 ## License
 
-[MIT](LICENSE)
+The code is licensed under [MIT](LICENSE). The Tessel name and logo are not
+covered by the MIT license; see [the brand assets](docs/brand/README.md).

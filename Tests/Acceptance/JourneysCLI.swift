@@ -45,11 +45,11 @@ extension Acceptance.Journeys {
             do {
                 defer { kill(harness.appPID, SIGCONT) }
                 let result = try failure()
-                try #require(result.status != 0 && result.error.contains("tessel is not responding"), "a stalled server must not hang the CLI")
+                try #require(result.status != 0 && result.error.contains("Tessel is not responding"), "a stalled server must not hang the CLI")
             }
             harness.stopApp()
             let result = try failure()
-            try #require(result.status != 0 && result.error.contains("tessel is not running"))
+            try #require(result.status != 0 && result.error.contains("Tessel is not running"))
             try harness.startApp(fixtureReady: false)
             try requireFinalState("the same fixture observed after restarting") { try harness.row(window) != nil }
         }

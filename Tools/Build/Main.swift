@@ -121,14 +121,7 @@ struct TesselBuild {
             let app = bundle.executable == "TesselApp"
             let path = stage.appending(path: bundle.name + ".app")
             let macOS = path.appending(path: "Contents/MacOS")
-            let info: [String: Any] = [
-                "CFBundleIdentifier": bundle.identifier, "CFBundleExecutable": bundle.executable,
-                "CFBundleName": bundle.name, "CFBundlePackageType": "APPL",
-                "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": stamp,
-                "LSMinimumSystemVersion": "27.0", "LSUIElement": app, "NSHighResolutionCapable": true,
-            ]
-            try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
-                .write(to: path.appending(path: "Contents/Info.plist"))
+            try writeInfo(into: path, name: bundle.name, identifier: bundle.identifier, executable: bundle.executable, version: stamp, variant: options.variant)
             if app { try sign(macOS.appending(path: "tessel"), identifier: bundle.identifier + ".cli") }
             try sign(path)
             let verified = try run(["codesign", "--verify", "--strict", path.path])
@@ -174,6 +167,46 @@ struct TesselBuild {
             throw Failure("The configured code-signing identity is unavailable. See docs/development.md.")
         }
         return identity
+    }
+
+    /// Writes a staged bundle's Info.plist. The app bundle first gets the
+    /// variant's compiled icon, which its Info.plist names; the fixture has none.
+    static func writeInfo(into bundle: URL, name: String, identifier: String, executable: String, version: String, variant: String) throws {
+        let app = executable == "TesselApp"
+        let icon = app ? try compileAppIcon(variant: variant, into: bundle.appending(path: "Contents/Resources")) : [:]
+        let info: [String: Any] = [
+            "CFBundleIdentifier": identifier, "CFBundleExecutable": executable,
+            "CFBundleName": name, "CFBundlePackageType": "APPL",
+            "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": version,
+            "LSMinimumSystemVersion": "27.0", "LSUIElement": app, "NSHighResolutionCapable": true,
+        ].merging(icon) { current, _ in current }
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+            .write(to: bundle.appending(path: "Contents/Info.plist"))
+    }
+
+    /// The Icon Composer source and app icon name for a build variant. The
+    /// development icon differs, so the two builds are told apart in System Settings.
+    static func appIcon(variant: String) -> (source: String, name: String) {
+        variant == "dev" ? ("Sources/App/TesselDev.icon", "TesselDev") : ("Sources/App/Tessel.icon", "Tessel")
+    }
+
+    /// Compiles the variant's app icon into a bundle's Resources with actool and
+    /// returns the Info.plist keys actool assigns to it. macOS 27 renders an
+    /// Icon Composer icon natively; a legacy icns would be framed at small sizes.
+    static func compileAppIcon(variant: String, into resources: URL) throws -> [String: String] {
+        let icon = appIcon(variant: variant)
+        let partial = FileManager.default.temporaryDirectory.appending(path: "tessel-icon-\(UUID().uuidString).plist")
+        defer { try? FileManager.default.removeItem(at: partial) }
+        try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+        let result = try run(["xcrun", "actool", root.appending(path: icon.source).path, "--compile", resources.path,
+                              "--app-icon", icon.name, "--enable-on-demand-resources", "NO", "--development-region", "en",
+                              "--target-device", "mac", "--platform", "macosx", "--minimum-deployment-target", "27.0",
+                              "--output-partial-info-plist", partial.path])
+        guard result.status == 0, let keys = (try? PropertyListSerialization.propertyList(from: Data(contentsOf: partial), format: nil)) as? [String: String],
+              keys["CFBundleIconName"] == icon.name else {
+            throw Failure("Compiling the app icon \(icon.source) failed.")
+        }
+        return keys
     }
 
     static func sources(in folder: String) throws -> [URL] {

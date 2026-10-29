@@ -56,7 +56,7 @@ extension Acceptance.Journeys {
                 }
             }
         }
-        try step("#1 E15 a signed rebuild preserves Accessibility") {
+        try step("#1 E15; #59 E4 a signed rebuild preserves Accessibility") {
             let before = try harness.status()
             try #require(before.permission == "granted")
             let window = try fixture.open()

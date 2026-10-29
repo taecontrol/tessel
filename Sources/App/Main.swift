@@ -202,12 +202,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reload.target = self
         menu.addItem(withTitle: config.status.path, action: nil, keyEquivalent: "")
         menu.addItem(.separator())
-        let quitItem = menu.addItem(withTitle: "Quit tessel", action: #selector(quit), keyEquivalent: "q")
+        let quitItem = menu.addItem(withTitle: "Quit Tessel", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         if existingMenu == nil { statusItem?.menu = menu }
         let label = config.status.error.map { "Configuration error (line \($0.line))" }
             ?? (workspace.enabled ? "Workspace \(workspace.active)" + (workspace.layout == "carousel" ? ", rail \(workspace.rail ?? 0) of \(workspace.railCount)" : "") : "Workspaces disabled: \(workspace.reason)")
-        statusItem?.button?.setAccessibilityLabel("tessel: " + label)
+        statusItem?.button?.setAccessibilityLabel("Tessel: " + label)
         statusItem?.button?.toolTip = label
         #if TESSEL_DEVELOPMENT
         if let button = statusItem?.button { capture?.update(button: button, menu: menu, status: workspace) }
@@ -251,8 +251,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         catch {
             // Leave a useful menu if LaunchServices cannot relaunch the bundle.
             let alert = NSAlert()
-            alert.messageText = "Reopen tessel to use Accessibility"
-            alert.informativeText = "The permission is granted. Quit and open tessel again."
+            alert.messageText = "Reopen Tessel to use Accessibility"
+            alert.informativeText = "The permission is granted. Quit and open Tessel again."
             alert.runModal()
         }
     }

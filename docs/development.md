@@ -33,7 +33,7 @@ You can symlink this bundled CLI into a directory on your `PATH`.
 With a custom `XDG_CONFIG_HOME`, pass the same value to `open --env` and the CLI.
 The bundle ID and config path select the instance the CLI observes.
 Every JSON answer carries `answeredAt`: raw monotonic seconds
-(`CLOCK_MONOTONIC_RAW`, the clock `clock_gettime_nsec_np` reads) when tessel
+(`CLOCK_MONOTONIC_RAW`, the clock `clock_gettime_nsec_np` reads) when Tessel
 read the state it reports. `status --json` has it at the top level, and each
 `windows --json` record repeats it. Text output is unchanged.
 
@@ -76,7 +76,7 @@ twice within each process. CI runs 3.
 
 The production catalog, Workspaces, Carousel, closet recovery and config reload run
 against a simulated macOS behind small platform ports. Its virtual clock proves
-tessel's own delays; enumerated schedules expose races without depending on
+Tessel's own delays; enumerated schedules expose races without depending on
 macOS timing. A failed scenario reports the expectation, schedule and port trace
 with virtual times, invented app aliases and window IDs. Unmodeled calls and
 runs that exceed a transition or virtual-time bound fail instead of inventing a
@@ -92,7 +92,7 @@ observer; journeys check wiring; latency measures speed. Every accepted example
 has exactly one layer in the [example map](#acceptance-example-layers-24).
 
 For real-system verification, stop this worktree's development app and every
-other tessel instance managing windows. Use an awake, unlocked desktop:
+other Tessel instance managing windows. Use an awake, unlocked desktop:
 
 ```sh
 scripts/build
@@ -137,16 +137,16 @@ The harness checks the desktop session and holds a temporary `caffeinate`
 assertion until cleanup. It launches the signed development bundle through
 `open`, an isolated temporary `XDG_CONFIG_HOME`, real AppKit fixtures and an
 independent signed AX/CG observer. A test-only local socket drives the fixtures;
-tessel is observed through its bundled CLI. The harness cleans up its own
+Tessel is observed through its bundled CLI. The harness cleans up its own
 processes and data. It always passes `--test-fixture-only`, so only fixture
 processes are observed or managed, including crash recovery. The daily build
-rejects that argument. Another tessel instance can contaminate these fixtures.
+rejects that argument. Another Tessel instance can contaminate these fixtures.
 
 The harness owns the Reduce Motion Given rather than inheriting the desktop's
 setting; GitHub's macOS images turn Reduce Motion on, which made every carousel
-move instant on CI. Each launch passes tessel `-reduceMotion NO`, or `YES` where
+move instant on CI. Each launch passes Tessel `-reduceMotion NO`, or `YES` where
 a journey asks for it. That argument domain precedes the user's preference in
-tessel's process only. macOS protects the persistent preference, and the private
+Tessel's process only. macOS protects the persistent preference, and the private
 setter the Reduce Motion contract uses changes only the observer's own process,
 so nothing desktop-wide changes and neither cleanup nor an interrupted run has
 anything to restore. A launch waits until `status --json` reports whether
@@ -177,7 +177,7 @@ after the Dock animation, when macOS sends the AX event.
 Each observation carries raw monotonic `sampledAt`; JSON CLI answers carry
 `answeredAt`. A final-state evaluation uses its latest input's production time,
 or receipt time when no timestamp exists, so descheduling the test process does
-not turn an earlier observer sample into tessel latency (issue #21). The script
+not turn an earlier observer sample into Tessel latency (issue #21). The script
 prints its scheduling priority and relaunches a clamped process tree as an
 `Interactive` launchd job in the user's GUI session, forwarding environment,
 output and exit status. Priority below 31 indicates a utility/background clamp
@@ -564,10 +564,10 @@ limit releases that obsolete limit. Commands arriving during the release read
 are carried forward rather than lost.
 
 A pointer move stays where the user released it until the next layout change.
-An app's or macOS's move of a rail tile is placed back instantly at tessel's
+An app's or macOS's move of a rail tile is placed back instantly at Tessel's
 last accepted readback, or the pointer's drop point. Only tiles with their
 entire layout target on screen are watched, outside gestures and resizes and
-without a write of tessel's in flight for that tile. Two corrections are
+without a write of Tessel's in flight for that tile. Two corrections are
 allowed; a third move concedes until a layout placement or pointer drag resets
 the allowance. An unchanged click preserves other tiles' allowances.
 Correction retries keep their count; an unfinished layout placement remains
@@ -588,13 +588,13 @@ render their snapshot triggers. AX writes temporarily disable an app's enhanced
 UI flag and restore its value. No stage or capture is involved. Busy writes
 retain their bounded retries.
 
-A replacement is **in place** when tessel has no write of its own
+A replacement is **in place** when Tessel has no write of its own
 outstanding for it, and its last observed frame is within one point of its
 target on each of x, y, width and height. The presenter uses the same
 tolerance to decide that a window needs no placement, so a tile it leaves
 alone is never waiting for a placement that will not come. A scheduled window
 is judged only when its own placement ends, because its cached frame can
-predate an earlier write of tessel's that has not been confirmed; such a write
+predate an earlier write of Tessel's that has not been confirmed; such a write
 stays pending until a readback succeeds, so the next render schedules the
 window again. A placement that returns a frame supplies its accepted geometry.
 One that ends without a frame says why:
@@ -652,7 +652,7 @@ it off screen. Positive checks wait for final states within the harness margin;
 only the stopped-app negative samples a 200 ms interval. The simulator serves
 committed geometry with an 8 ms app commit by default, deferred while an app is
 hung or busy. Its 0 and 20 ms variants exercise current and slower views. App
-commits are native timed events, separate from tessel's scheduling timers.
+commits are native timed events, separate from Tessel's scheduling timers.
 
 A window still in the closet is never in place, so the old view stays until its
 replacement returns. A tile under a departing window whose last observation
@@ -768,7 +768,7 @@ it with the accepted prototype; generating the recording does not accept it.
 ## Floating layer (#19)
 
 Each workspace has a floating layer. Existing floats start hidden in the closet while the rail keeps
-focus. If startup focus is already on a float, tessel enters the whole layer.
+focus. If startup focus is already on a float, Tessel enters the whole layer.
 The layer's visibility belongs to its workspace; switching away
 hides all its windows and returning restores its selection.
 
@@ -785,7 +785,7 @@ first arrival. The raise changes neither AXMain nor activation. The pass is a
 function of observed state rather than of the render that preceded it: one is
 owed after every placement and whenever the native frontmost app differs from
 the one the last pass was computed for, including an app with no managed
-window. It runs once tessel's own focus write has answered and native focus is
+window. It runs once Tessel's own focus write has answered and native focus is
 not on another managed window, since that means a selection is still on its
 way. Every catalog publication and focus result re-checks this; with nothing
 owed and the same frontmost app the check does nothing. Tessel skips frontmost-app floats:
@@ -799,7 +799,7 @@ allows AX to accept AXFrontmost while the app is not yet active. A main or
 raise write can then complete that activation. A newer selection cancels the
 focus writes that follow a request, but it does not cancel the request. Each
 app worker therefore remembers its latest request until it is resolved. A
-request is resolved when tessel's own AXMain and AXRaise have followed it and
+request is resolved when Tessel's own AXMain and AXRaise have followed it and
 the app is later read frontmost. It is also resolved when the frontmost read
 taken where its focus writes stopped already finds the app active. Only the
 presentation that issued the request takes that read; a later one that only
@@ -809,7 +809,7 @@ Cmd-Tab, consumes the request, so that does not resolve it. While a request
 is unresolved, the worker declines to raise that app's floats and reports the
 raise as deferred. The app's first publication after resolution owes another
 pass. After a request whose focus writes never ran, that app's floats wait
-for tessel's next selection in it.
+for Tessel's next selection in it.
 
 This is best effort on macOS 27. Every raised float is above background apps'
 tiles, but the frontmost app's focused window can remain above another app's
@@ -885,7 +885,7 @@ Hidden floats retain `state: "floats"`, workspace membership, null `rail` and
 `slot`, and `visible: false` in `windows --json`. Manual classifications report
 `floats` / `moved to the layer` or `tiled` / `moved to a rail`.
 
-Classification is fixed: tessel manages windows at CG
+Classification is fixed: Tessel manages windows at CG
 layer 0 or the floating level 3 with subrole `AXStandardWindow`, `AXDialog`,
 `AXSystemDialog`, or `AXFloatingWindow`. Layer 3 includes apps' own floating
 utility panels, inspectors and palettes. Every other layer is `ignored` with
@@ -1027,7 +1027,7 @@ render independently of coverage; native app commit records and policy timer
 records identify its end. Missing or malformed evidence fails the arm. A
 recheck may finish in the main job its timer makes runnable. No later state may
 expose the point, and the handoff arm may expose it no longer than the at-rest
-arm. A change tessel has already observed is not external: a tile it read as
+arm. A change Tessel has already observed is not external: a tile it read as
 moved gets a placement, and a withdrawn placement never counts as in place. A
 placement cancelled at any point, including readback or the last attempt,
 is superseded and carries no frame.
@@ -1043,7 +1043,7 @@ E20 (#35) requires zero intermediate and gap frames for workspace, rail,
 left-tile `alt-r`, both stops (halves and mixed), and close. Right-tile `alt-r`
 and open report their residue without asserting zero. The accepted platform
 residue comes from independent AX position and size commits: AppKit does not
-accept an atomic `AXFrame` write. Waiting for the final listing prevents tessel
+accept an atomic `AXFrame` write. Waiting for the final listing prevents Tessel
 from retiring or returning windows too early; it cannot remove an intermediate
 frame the app itself commits while visible. #35 accepts this residue.
 
@@ -1091,9 +1091,35 @@ preserving #19 E26.
 The layer-key wiring scene creates its panel before startup to establish the
 hidden-layer Given; a live new panel would enter its single-window layer.
 
+## App icon (#59)
+
+`scripts/build` compiles the variant's Icon Composer source with `xcrun actool`
+into the app bundle's `Assets.car` and merges the keys actool assigns, including
+`CFBundleIconName`, into `Info.plist`: `Sources/App/Tessel.icon` for the daily
+build and `Sources/App/TesselDev.icon` for the development build. macOS 27
+renders an Icon Composer icon natively; a legacy `.icns` is framed in a gray
+squircle at 16 and 32 px. The sources live under `Sources/App`, so they are
+build inputs. The fixture bundle has no icon. See [the brand assets](brand/README.md)
+for the mark and how to edit the sources.
+
+Bare `swift test` proves E1–E3 with the real actool, and E11–E14 by reading
+the repository. The signing journey proves E4 and the unchanged idle budget
+proves E5. This opt-in capture renders both signed bundles' icons as the
+system resolves them, at 256, 128, 32 and 16 px on light and dark, for E6–E7:
+
+```sh
+scripts/build --variant daily && scripts/build
+TESSEL_CAPTURE_APP_ICON=1 scripts/verify captureAppIcons
+```
+
+Images go to `.work/captures/app-icon`. The owner checks E8 (the dark, clear
+and tinted icon styles) on their own Mac, E9 on the pushed README, and uploads
+`docs/brand/social-preview.png` in the repository settings for E10. No
+screenshot of a real machine is committed.
+
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49, #51, #55 and #57.
+This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49, #51, #55, #57 and #59.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -1107,7 +1133,8 @@ P files live in `Tests/PolicyTests/Scenarios/`, J in
 `Tests/Acceptance/Journeys*.swift`, L in `Tests/Acceptance/Latency.swift`,
 and R in `Tests/Acceptance/Resources.swift`. X tests use `capture*` function
 names in Acceptance, or live in `Tests/Acceptance/Captures*.swift`.
-C tests live in `Tests/Acceptance/Contracts*.swift`; T in `Tests/CheckTests/`.
+C tests live in `Tests/Acceptance/Contracts*.swift`; T in `Tests/CheckTests/` or
+`Tests/BuildTests/`.
 Contracts declare their assumption IDs as well as any mapped native example. The E20 integrity check
 rejects missing tags, unmapped tags, duplicate map rows and tags in another
 layer. Every mapped ID must have a tagged test in its own layer.
@@ -1386,8 +1413,25 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #57 E16 | P |
 | #57 E17 | P |
 | #57 E18 | J |
+| #59 E1 | T |
+| #59 E2 | T |
+| #59 E3 | T |
+| #59 E4 | J |
+| #59 E5 | R |
+| #59 E6 | X |
+| #59 E7 | X |
+| #59 E8 | X |
+| #59 E9 | X |
+| #59 E10 | X |
+| #59 E11 | T |
+| #59 E12 | T |
+| #59 E13 | T |
+| #59 E14 | T |
 <!-- Pending capture: #33 E20 -->
 <!-- Pending capture: #36 E8 -->
+<!-- Pending capture: #59 E8 -->
+<!-- Pending capture: #59 E9 -->
+<!-- Pending capture: #59 E10 -->
 
 E21 has an opt-in executable capture in `CapturesCarousel.swift`; it needs a
 pixel recording of the stage before the owner can review it again. All mapped
