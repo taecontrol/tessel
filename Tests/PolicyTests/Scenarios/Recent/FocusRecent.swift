@@ -307,8 +307,11 @@ import Testing
                     let focused = f.mac.focusedWindow
                     s.expect("press \(press) focuses no unavailable window (got \(String(describing: focused)))",
                              focused.map { !unavailable.contains($0) } ?? true)
-                    s.expect("press \(press) leaves no focus effect on an unavailable window",
-                             !f.mac.focusEffects.contains { $0.window.map(unavailable.contains) ?? false })
+                    // Activating a's app briefly keys its ignored window before
+                    // tessel selects the target, as for every focus key, so check
+                    // the windows tessel asks Accessibility to select.
+                    s.expect("press \(press) never asks to select an unavailable window",
+                             !f.mac.focusRequests.contains { unavailable.contains($0.window) })
                     Recent.lands(f, expected)
                 }
             }
