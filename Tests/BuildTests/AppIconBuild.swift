@@ -37,14 +37,18 @@ struct AppIconBuild {
         }
     }
 
-    /// Compiles the variant's icon with the build tool's own step and returns its name.
+    /// Stages an app bundle with the build tool's own Info.plist step and
+    /// returns the icon name its Info.plist declares.
     @discardableResult
     private func expectCompiledIcon(variant: String) throws -> String {
-        let resources = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + "/Contents/Resources")
-        defer { try? FileManager.default.removeItem(at: resources.deletingLastPathComponent().deletingLastPathComponent()) }
-        let keys = try TesselBuild.compileAppIcon(variant: variant, into: resources)
-        let name = try #require(keys["CFBundleIconName"], "Info.plist must name the app icon")
-        let catalog = resources.appending(path: "Assets.car")
+        let bundle = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + "/Generic.app")
+        defer { try? FileManager.default.removeItem(at: bundle.deletingLastPathComponent()) }
+        // The build stages the executable before it writes Info.plist.
+        try FileManager.default.createDirectory(at: bundle.appending(path: "Contents/MacOS"), withIntermediateDirectories: true)
+        try TesselBuild.writeInfo(into: bundle, name: "Generic", identifier: "com.example.generic", executable: "TesselApp", version: "1", variant: variant)
+        let keys = try PropertyListSerialization.propertyList(from: Data(contentsOf: bundle.appending(path: "Contents/Info.plist")), format: nil) as? [String: Any]
+        let name = try #require(keys?["CFBundleIconName"] as? String, "Info.plist must name the app icon")
+        let catalog = bundle.appending(path: "Contents/Resources/Assets.car")
         try #require(FileManager.default.fileExists(atPath: catalog.path), "the bundle must carry Assets.car")
         let info = try TesselBuild.run(["xcrun", "assetutil", "--info", catalog.path])
         try #require(info.status == 0, "assetutil must read the compiled catalog")
