@@ -917,7 +917,7 @@ deterministic policy layer and are not tagged in these files:
 | Startup | #1 E9 |
 | Switch | #2 E31, E32 |
 | Send | #2 E35 |
-| Rail scroll and elevator | Wiring regression (no policy example IDs) |
+| Rail scroll and elevator | #57 E18; otherwise wiring regression |
 | Carousel rail change | #26 E15 |
 | Floating layer | #19 E29 |
 | Reduce Motion | Wiring check that Reduce Motion makes a carousel move instant (E18 belongs to P) |
@@ -1083,7 +1083,7 @@ hidden-layer Given; a live new panel would enter its single-window layer.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49, #51 and #55.
+This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49, #51, #55 and #57.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -1358,6 +1358,24 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #55 E10 | P |
 | #55 E11 | P |
 | #55 E12 | J |
+| #57 E1 | P |
+| #57 E2 | P |
+| #57 E3 | P |
+| #57 E4 | P |
+| #57 E5 | P |
+| #57 E6 | P |
+| #57 E7 | P |
+| #57 E8 | P |
+| #57 E9 | P |
+| #57 E10 | P |
+| #57 E11 | P |
+| #57 E12 | P |
+| #57 E13 | P |
+| #57 E14 | P |
+| #57 E15 | P |
+| #57 E16 | P |
+| #57 E17 | P |
+| #57 E18 | J |
 <!-- Pending capture: #33 E20 -->
 <!-- Pending capture: #36 E8 -->
 
