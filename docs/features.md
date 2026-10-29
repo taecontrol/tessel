@@ -57,6 +57,7 @@ parked in a strip. TileMyMac uses Paneru's engine and exposes numbered rows.
 | Numbered workspaces | Yes, emulated | Nested spaces | Native Spaces plus virtual rows parked in a strip | 1–10 | Hidden Space or off-screen parking | Hidden Space (#2) |
 | Send window to workspace | Yes | — | Native Spaces and virtual rows | With or without following | Feasible | #2 |
 | Previous workspace, next and previous | Back and forth | Back and forward history | Native Spaces | Both | Feasible | Idea |
+| Previous window | Not compared | Not compared | Not compared | Not compared | Feasible | Option+Tab across workspaces, including floats (#57) |
 | Move workspace to another monitor | Yes | Per display | — | By direction | Feasible | Idea |
 | Pin a workspace to a monitor | Yes | — | — | Through rules | Feasible | Idea |
 | Scratchpad | — | — | — | Yes | Feasible | Idea |

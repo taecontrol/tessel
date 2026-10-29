@@ -271,15 +271,25 @@ duration = 1000
 
 [keys]
 alt-r = "cycle width"
+alt-tab = "focus recent"
 ```
 
 Unknown keys and invalid TOML preserve the last valid configuration. Saving,
 replacing or deleting a file reloads automatically. Status reports the effective
 configuration, revision, source state and error. `[keys]` overrides merge with
 the layer defaults; an empty command disables a binding. Keys use lowercase ANSI
-letters and digits with `alt`, `shift`, `ctrl` and `cmd` modifiers. Numeric
+letters, digits and `tab` with `alt`, `shift`, `ctrl` and `cmd` modifiers. Numeric
 workspace/send bindings cover 1…10, using 0 for 10. Directional traversal never
 wraps on a rail; `focus next|previous` remain bindable horizontal aliases.
+
+`alt-tab` defaults to `focus recent`, which selects the most recently selected
+available window other than the current selection, across workspaces and
+including floats. Sheets and child dialogs count as their root window.
+Minimized, hidden and native fullscreen windows are skipped. Only windows
+selected since launch enter the history; without another available window in
+that history, the command does nothing. Changes within a workspace animate like
+directional focus; workspace switches are instant. This command needs no
+experiment flag.
 
 The primary display is managed; Stage Manager and other displays remain outside
 this scope. Inactive windows live in the SkyLight closet. Quitting returns

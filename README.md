@@ -24,6 +24,9 @@ one half, two thirds and full. Short rails keep their nominal widths and leave
 space to the right. While a mouse button is held, tessel leaves the windows
 alone; releasing a resized edge adopts its width and restores the rail height.
 
+Option+Tab returns to the previously selected available window, across
+workspaces and including floats. Press it again to switch back.
+
 Option+Z enters or leaves the floating layer, Option+Shift+Z pins it above the
 rails, and Option+F moves a window between rail and layer. Floats start hidden;
 a new dialog shows alone. tessel manages standard windows, dialogs, system
