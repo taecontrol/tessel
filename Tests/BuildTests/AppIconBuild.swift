@@ -13,8 +13,7 @@ struct AppIconBuild {
     @Test("#59 E2: the development build carries its own icon variant under its own name")
     func developmentBuildCarriesItsOwnIcon() throws {
         let development = try expectCompiledIcon(variant: "dev")
-        let daily = try expectCompiledIcon(variant: "daily")
-        #expect(development != daily, "Tessel Dev must name a different icon than Tessel")
+        #expect(development != TesselBuild.appIcon(variant: "daily").name, "Tessel Dev must name a different icon than Tessel")
     }
 
     @Test("#59 E3: every file of both app icon sources is a build input")
