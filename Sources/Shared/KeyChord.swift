@@ -1,7 +1,7 @@
 import Foundation
 
 enum WorkspaceCommand: Sendable {
-    case workspace(Int), send(Int), next, previous, focus(Direction), move(Direction), cycleWidth
+    case workspace(Int), send(Int), next, previous, recent, focus(Direction), move(Direction), cycleWidth
     case toggleLayer, toggleFloat
 
     enum Direction: String, Sendable { case left, right, up, down }
@@ -13,6 +13,7 @@ enum WorkspaceCommand: Sendable {
         case "cycle width": self = .cycleWidth
         case "focus next": self = .next
         case "focus previous": self = .previous
+        case "focus recent": self = .recent
         default:
             let words = text.split(separator: " ", omittingEmptySubsequences: false)
             if words.count == 2, let direction = Direction(rawValue: String(words[1])) {
@@ -36,7 +37,7 @@ struct KeyChord: Sendable {
         "a":0, "s":1, "d":2, "f":3, "h":4, "g":5, "z":6, "x":7, "c":8, "v":9,
         "b":11, "q":12, "w":13, "e":14, "r":15, "y":16, "t":17,
         "1":18, "2":19, "3":20, "4":21, "6":22, "5":23, "9":25, "7":26, "8":28, "0":29,
-        "o":31, "u":32, "i":34, "p":35, "l":37, "j":38, "k":40, "n":45, "m":46,
+        "o":31, "u":32, "i":34, "p":35, "l":37, "j":38, "k":40, "n":45, "m":46, "tab":48,
     ]
     static let modifierOrder = ["alt", "shift", "ctrl", "cmd"]
     let code: UInt32
@@ -68,7 +69,7 @@ struct KeyChord: Sendable {
     }
 
     static let defaults: [String: String] = {
-        var keys = ["alt-j": "focus next", "alt-k": "focus previous"]
+        var keys = ["alt-j": "focus next", "alt-k": "focus previous", "alt-tab": "focus recent"]
         for number in 1...10 {
             let digit = number == 10 ? 0 : number
             keys["alt-\(digit)"] = "workspace \(number)"
