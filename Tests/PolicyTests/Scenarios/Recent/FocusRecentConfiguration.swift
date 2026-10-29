@@ -45,7 +45,7 @@ import Testing
             s.settle(); f.focus(b)
 
             for (text, needle) in [("[keys]\nalt-space = \"focus recent\"\n", "tab"),
-                                   ("[keys]\nalt-tab = \"focus last\"\n", "focus recent")] {
+                                   ("[keys]\nalt-tab = \"focus last\"\n", "focus next|previous|recent|")] {
                 let revision = f.tessel.configuration.revision
                 s.step("reject \(needle)") { f.tessel.changeConfig(base + text) }
                 s.settle()
@@ -84,7 +84,7 @@ import Testing
             _ = try ConfigParser.parse(Data("[keys]\nalt-tab = \"focus last\"\n".utf8))
             Issue.record("an unknown command must be rejected")
         } catch let error as ConfigError {
-            #expect(error.line == 2 && error.message.contains("focus recent"))
+            #expect(error.line == 2 && error.message.contains("focus next|previous|recent|"))
         }
     }
 }
