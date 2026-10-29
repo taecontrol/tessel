@@ -23,11 +23,13 @@ import Testing
         let workflows = root.appending(path: ".github/workflows")
         let files = try FileManager.default.contentsOfDirectory(atPath: workflows.path).filter { $0.hasSuffix(".yml") }
         let sources = try files.map { try String(contentsOf: workflows.appending(path: $0), encoding: .utf8) }
-        for source in sources {
+        for (file, source) in zip(files, sources) {
             #expect(!source.contains("workflow_dispatch:") && !source.contains("schedule:"))
+            // ADR 0010: Policy may take up to fifteen minutes; every other job stays under ten.
+            let limit = file == "policy.yml" ? 16 : 10
             for line in source.components(separatedBy: .newlines).filter({ $0.contains("timeout-minutes:") }) {
                 let value = Int(line.components(separatedBy: ":").last!.trimmingCharacters(in: .whitespaces)) ?? 100
-                #expect(value < 10)
+                #expect(value < limit, "\(file) timeout")
             }
             for suite in ["--contracts", "--journeys", "--latency", "--resources", "200 second"] { #expect(!source.contains(suite)) }
         }

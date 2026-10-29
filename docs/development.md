@@ -213,8 +213,8 @@ let real app switches produce the traffic.
 ### CI
 
 Pull requests run Policy (bare `swift test`, `tessel-check layers`, and
-`determinism --runs 3`), Simulator evidence, and Permissions. Policy has a nine
-minute timeout, the evidence job five, and Permissions seven. Permissions signs
+`determinism --runs 3`), Simulator evidence, and Permissions. Policy has a fifteen
+minute timeout ([ADR 0010](adr/0010-give-the-policy-job-fifteen-minutes.md)), the evidence job five, and Permissions seven. Permissions signs
 and builds once, then selects only `signingAndPermission` and `--permission`:
 signed rebuild, denied Accessibility and permission recovery/restart. Its seven
 minute limit leaves margin over the measured 99 s build, 50 s signing journey
