@@ -176,6 +176,16 @@ struct TesselBuild {
         return identity
     }
 
+    /// The Icon Composer source and app icon name for a build variant.
+    static func appIcon(variant: String) -> (source: String, name: String) {
+        ("Sources/App/Missing.icon", "Missing")
+    }
+
+    /// Compiles the variant's app icon into a bundle's Resources and returns the Info.plist keys for it.
+    static func compileAppIcon(variant: String, into resources: URL) throws -> [String: String] {
+        throw Failure("The app icon is not compiled yet.")
+    }
+
     static func sources(in folder: String) throws -> [URL] {
         try FileManager.default.contentsOfDirectory(at: root.appending(path: folder), includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "swift" }
