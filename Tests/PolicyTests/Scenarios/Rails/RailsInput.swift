@@ -316,7 +316,7 @@ import Testing
             s.settle()
             s.expect("invalid commands report their line", f.tessel.configuration.error?.line == 4)
             let message = f.tessel.configuration.error?.message ?? ""
-            s.expect("error lists every directional command", message.contains("focus next|previous|left|right|up|down") && message.contains("move left|right|up|down"))
+            s.expect("error lists every directional command", message.contains("focus next|previous|recent|left|right|up|down") && message.contains("move left|right|up|down"))
             s.expect("invalid edits keep all effective bindings", f.tessel.status.keys == effective)
             f.press("focus up", focus: ids[1])
             f.tessel.changeConfig("[experiments]\nworkspaces = true\n[keys]\nalt-a = 'move right'\n")

@@ -213,6 +213,14 @@ extension Acceptance {
                 try desktop.expectFocus(ids[3])
                 try desktop.expectMenu("Workspace 1, rail 1 of 2")
             }
+            try step("#57 E18: real Option-Tab alternates focus between two rails") {
+                try desktop.post(kVK_Tab)
+                try desktop.expectFocus(ids[0])
+                try desktop.expectMenu("Workspace 1, rail 2 of 2")
+                try desktop.post(kVK_Tab)
+                try desktop.expectFocus(ids[3])
+                try desktop.expectMenu("Workspace 1, rail 1 of 2")
+            }
         }
 
         @Test("reload journey")

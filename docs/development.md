@@ -213,8 +213,8 @@ let real app switches produce the traffic.
 ### CI
 
 Pull requests run Policy (bare `swift test`, `tessel-check layers`, and
-`determinism --runs 3`), Simulator evidence, and Permissions. Policy has a nine
-minute timeout, the evidence job five, and Permissions seven. Permissions signs
+`determinism --runs 3`), Simulator evidence, and Permissions. Policy has a fifteen
+minute timeout ([ADR 0010](adr/0010-give-the-policy-job-fifteen-minutes.md)), the evidence job five, and Permissions seven. Permissions signs
 and builds once, then selects only `signingAndPermission` and `--permission`:
 signed rebuild, denied Accessibility and permission recovery/restart. Its seven
 minute limit leaves margin over the measured 99 s build, 50 s signing journey
@@ -271,15 +271,25 @@ duration = 1000
 
 [keys]
 alt-r = "cycle width"
+alt-tab = "focus recent"
 ```
 
 Unknown keys and invalid TOML preserve the last valid configuration. Saving,
 replacing or deleting a file reloads automatically. Status reports the effective
 configuration, revision, source state and error. `[keys]` overrides merge with
 the layer defaults; an empty command disables a binding. Keys use lowercase ANSI
-letters and digits with `alt`, `shift`, `ctrl` and `cmd` modifiers. Numeric
+letters, digits and `tab` with `alt`, `shift`, `ctrl` and `cmd` modifiers. Numeric
 workspace/send bindings cover 1…10, using 0 for 10. Directional traversal never
 wraps on a rail; `focus next|previous` remain bindable horizontal aliases.
+
+`alt-tab` defaults to `focus recent`, which selects the most recently selected
+available window other than the current selection, across workspaces and
+including floats. Sheets and child dialogs count as their root window.
+Minimized, hidden and native fullscreen windows are skipped. Only windows
+selected since launch enter the history; without another available window in
+that history, the command does nothing. Changes within a workspace animate like
+directional focus; workspace switches are instant. This command needs no
+experiment flag.
 
 The primary display is managed; Stage Manager and other displays remain outside
 this scope. Inactive windows live in the SkyLight closet. Quitting returns
@@ -917,7 +927,7 @@ deterministic policy layer and are not tagged in these files:
 | Startup | #1 E9 |
 | Switch | #2 E31, E32 |
 | Send | #2 E35 |
-| Rail scroll and elevator | Wiring regression (no policy example IDs) |
+| Rail scroll and elevator | #57 E18; otherwise wiring regression |
 | Carousel rail change | #26 E15 |
 | Floating layer | #19 E29 |
 | Reduce Motion | Wiring check that Reduce Motion makes a carousel move instant (E18 belongs to P) |
@@ -1083,7 +1093,7 @@ hidden-layer Given; a live new panel would enter its single-window layer.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49, #51 and #55.
+This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49, #51, #55 and #57.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -1358,6 +1368,24 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #55 E10 | P |
 | #55 E11 | P |
 | #55 E12 | J |
+| #57 E1 | P |
+| #57 E2 | P |
+| #57 E3 | P |
+| #57 E4 | P |
+| #57 E5 | P |
+| #57 E6 | P |
+| #57 E7 | P |
+| #57 E8 | P |
+| #57 E9 | P |
+| #57 E10 | P |
+| #57 E11 | P |
+| #57 E12 | P |
+| #57 E13 | P |
+| #57 E14 | P |
+| #57 E15 | P |
+| #57 E16 | P |
+| #57 E17 | P |
+| #57 E18 | J |
 <!-- Pending capture: #33 E20 -->
 <!-- Pending capture: #36 E8 -->
 

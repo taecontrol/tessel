@@ -653,6 +653,23 @@ final class Workspaces {
             status.active = number
             remember(focused)
             render(focusing: focused, relayout: false, layoutWindows: [focused], instant: true)
+        case .recent:
+            let current = focused.map { entries[$0]?.observation.parent ?? $0 }
+            guard let target = entries.lazy.filter({
+                $0.key != current && $0.value.recent > 0 && $0.value.workspace != nil
+                    && $0.value.observation.parent == nil && self.availableState($0.value.observation.record.state)
+            }).max(by: { ($0.value.recent, $0.key) < ($1.value.recent, $1.key) }),
+                  let workspace = target.value.workspace else { return }
+            let next = target.key
+            let instant = workspace != status.active
+            if !instant, let rail = carousel.location(next)?.rail,
+               let currentRail = carousel.workspaces[workspace]?.current, rail != currentRail {
+                cardDirection = rail < currentRail ? -1 : 1
+            }
+            status.active = workspace
+            layer.entry = floating(next) ? .all : .rails
+            remember(next)
+            render(focusing: next, relayout: false, instant: instant)
         case .focus(let direction):
             if layer.focused {
                 navigateLayer(direction == .left || direction == .up ? -1 : 1); break

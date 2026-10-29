@@ -42,7 +42,8 @@ import Testing
             let tessel = s.startTessel(text: "[keys]\nalt-x = 'pin layer'\n")
             s.settle()
             s.expect("the removed command is rejected at line 2", tessel.configuration.error?.line == 2)
-            s.expect("the diagnostic lists exactly the surviving commands", tessel.configuration.error?.message == "Unknown command; use workspace 1…10, send 1…10, focus next|previous|left|right|up|down, move left|right|up|down, cycle width, toggle layer, or toggle float")
+            // #57 E16 adds focus recent to the listed commands.
+            s.expect("the diagnostic lists exactly the surviving commands", tessel.configuration.error?.message == "Unknown command; use workspace 1…10, send 1…10, focus next|previous|recent|left|right|up|down, move left|right|up|down, cycle width, toggle layer, or toggle float")
             s.expect("a rejected config keeps the default layer bindings", tessel.status.keys["alt-z"] == "toggle layer" && tessel.status.keys["alt-f"] == "toggle float" && tessel.status.keys["alt-x"] == nil)
         })
     }
