@@ -121,15 +121,7 @@ struct TesselBuild {
             let app = bundle.executable == "TesselApp"
             let path = stage.appending(path: bundle.name + ".app")
             let macOS = path.appending(path: "Contents/MacOS")
-            let icon = app ? try compileAppIcon(variant: options.variant, into: path.appending(path: "Contents/Resources")) : [:]
-            let info: [String: Any] = [
-                "CFBundleIdentifier": bundle.identifier, "CFBundleExecutable": bundle.executable,
-                "CFBundleName": bundle.name, "CFBundlePackageType": "APPL",
-                "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": stamp,
-                "LSMinimumSystemVersion": "27.0", "LSUIElement": app, "NSHighResolutionCapable": true,
-            ].merging(icon) { current, _ in current }
-            try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
-                .write(to: path.appending(path: "Contents/Info.plist"))
+            try writeInfo(into: path, name: bundle.name, identifier: bundle.identifier, executable: bundle.executable, version: stamp, variant: options.variant)
             if app { try sign(macOS.appending(path: "tessel"), identifier: bundle.identifier + ".cli") }
             try sign(path)
             let verified = try run(["codesign", "--verify", "--strict", path.path])
@@ -175,6 +167,21 @@ struct TesselBuild {
             throw Failure("The configured code-signing identity is unavailable. See docs/development.md.")
         }
         return identity
+    }
+
+    /// Writes a staged bundle's Info.plist. The app bundle first gets the
+    /// variant's compiled icon, which its Info.plist names; the fixture has none.
+    static func writeInfo(into bundle: URL, name: String, identifier: String, executable: String, version: String, variant: String) throws {
+        let app = executable == "TesselApp"
+        let icon = app ? try compileAppIcon(variant: variant, into: bundle.appending(path: "Contents/Resources")) : [:]
+        let info: [String: Any] = [
+            "CFBundleIdentifier": identifier, "CFBundleExecutable": executable,
+            "CFBundleName": name, "CFBundlePackageType": "APPL",
+            "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": version,
+            "LSMinimumSystemVersion": "27.0", "LSUIElement": app, "NSHighResolutionCapable": true,
+        ].merging(icon) { current, _ in current }
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+            .write(to: bundle.appending(path: "Contents/Info.plist"))
     }
 
     /// The Icon Composer source and app icon name for a build variant. The
