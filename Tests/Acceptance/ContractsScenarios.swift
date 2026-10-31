@@ -244,18 +244,20 @@ extension Acceptance.Contracts {
             try requireFinalState("native promotion and termination notifications arrive") {
                 let events = Array((try native("lifecycle").lifecycle ?? []).dropFirst(offset))
                 return events.contains { $0.knownPID == pid && $0.name == "NSWorkspaceDidTerminateApplicationNotification" }
-                    && events.contains { $0.knownPID == fixture.pid && $0.name == "NSWorkspaceDidActivateApplicationNotification" }
+                    && events.contains { $0.knownPID != pid && $0.name == "NSWorkspaceDidActivateApplicationNotification" }
             }
             let events = Array((try native("lifecycle").lifecycle ?? []).dropFirst(offset))
             let terminated = try #require(events.firstIndex { $0.knownPID == pid && $0.name == "NSWorkspaceDidTerminateApplicationNotification" })
             let exited = try #require(events[terminated].alivePIDs)
             try #require(events[terminated].mainThread && !exited.contains(pid), "termination delivery must observe process exit")
-            let promotions = events.prefix(terminated).filter { $0.knownPID == fixture.pid && $0.name == "NSWorkspaceDidActivateApplicationNotification" }
+            // macOS chooses the survivor: the fixture behind the target, or
+            // an app outside the harness such as Finder.
+            let promotions = events.prefix(terminated).filter { $0.knownPID != pid && $0.name == "NSWorkspaceDidActivateApplicationNotification" }
             print("Termination activation: crash=\(crash), promotions before termination delivery=\(promotions.count)")
             for event in promotions {
                 let alive = try #require(event.alivePIDs)
-                try #require(event.mainThread && alive.contains(fixture.pid), "native promotion must name a surviving fixture")
-                print("Termination activation: crash=\(crash), dying process still exists at promotion=\(alive.contains(pid))")
+                try #require(event.mainThread && event.pid.map(alive.contains) == true, "native promotion must name a survivor")
+                print("Termination activation: crash=\(crash), survivor is a fixture=\(event.knownPID == fixture.pid), dying process still exists at promotion=\(alive.contains(pid))")
             }
         }
     }
