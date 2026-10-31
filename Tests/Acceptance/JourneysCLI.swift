@@ -23,10 +23,10 @@ extension Acceptance.Journeys {
         try requireFinalState("the workspace command and its window change are persisted") {
             entries = Array(try ownLogEntries(pid: pid, reports: reports).dropFirst(baseline))
             return entries.contains { $0.category == "commands" && $0.message.contains("workspace 2") }
-                && entries.contains { $0.category == "windows" && $0.message.contains("after command workspace 2") }
+                && entries.contains { $0.category == "windows" && $0.message.hasPrefix("window ") && $0.message.contains("after command workspace 2") }
         }
         let commands = entries.indices.filter { entries[$0].category == "commands" && entries[$0].message.contains("workspace 2") }
-        let windows = entries.indices.filter { entries[$0].category == "windows" && entries[$0].message.contains("after command workspace 2") }
+        let windows = entries.indices.filter { entries[$0].category == "windows" && entries[$0].message.hasPrefix("window ") && entries[$0].message.contains("after command workspace 2") }
         try #require(commands.count == 1 && windows.count == 1, "one command and one changed fixture must be recorded")
         try #require(commands[0] < windows[0])
         try #require(entries[windows[0]].message.range(of: "\\b\(window)\\b", options: .regularExpression) != nil)
@@ -374,8 +374,8 @@ private func requireDiagnosticTextLines(_ text: String, including entries: [Diag
 private func writeDiagnosticReport(in directory: URL, name: String, bundleID: String, date: Date) throws -> URL {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.timeZone = TimeZone(secondsFromGMT: 0)
-    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS Z"
+    formatter.timeZone = .current
+    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SS Z"
     let header: [String: Any] = ["app_name": "TesselApp", "bundleID": bundleID, "timestamp": formatter.string(from: date), "bug_type": "309"]
     let file = directory.appending(path: "TesselApp-\(name).ips")
     try (JSONSerialization.data(withJSONObject: header) + Data("\n{}\n".utf8)).write(to: file)
