@@ -6,6 +6,7 @@ import Ports
 @MainActor
 final class ConfigManager {
     private let main: any MainLane
+    private let diagnostics: any DiagnosticsPort
     private let load: () throws -> Data?
     private let watch: () -> Void
     private var pending: (any ScheduledWork)?
@@ -17,6 +18,7 @@ final class ConfigManager {
     init(path: String, main: any MainLane, diagnostics: any DiagnosticsPort,
          load: @escaping () throws -> Data?, watch: @escaping () -> Void) {
         self.main = main
+        self.diagnostics = diagnostics
         self.load = load
         self.watch = watch
         status = ConfigStatus(path: path)
@@ -31,6 +33,7 @@ final class ConfigManager {
             hasRead = false
             status.state = "error"
             status.error = ConfigError(line: 1, message: "Unable to read configuration file")
+            recordStatus()
             onChange?(status)
             return
         }
@@ -49,7 +52,13 @@ final class ConfigManager {
             status.state = "error"
             status.error = ConfigError(line: 1, message: "Invalid TOML")
         }
+        recordStatus()
         onChange?(status)
+    }
+
+    private func recordStatus() {
+        if let error = status.error { diagnostics.record(.configError(line: error.line, message: error.message)) }
+        else { diagnostics.record(.configLoaded(state: status.state, revision: status.revision)) }
     }
 
     func scheduleReload() {

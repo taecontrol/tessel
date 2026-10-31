@@ -6,6 +6,21 @@ enum WorkspaceCommand: Sendable {
 
     enum Direction: String, Sendable { case left, right, up, down }
 
+    var text: String {
+        switch self {
+        case .workspace(let number): "workspace \(number)"
+        case .send(let number): "send \(number)"
+        case .next: "focus next"
+        case .previous: "focus previous"
+        case .recent: "focus recent"
+        case .focus(let direction): "focus \(direction.rawValue)"
+        case .move(let direction): "move \(direction.rawValue)"
+        case .cycleWidth: "cycle width"
+        case .toggleLayer: "toggle layer"
+        case .toggleFloat: "toggle float"
+        }
+    }
+
     init?(_ text: String) {
         switch text {
         case "toggle layer": self = .toggleLayer

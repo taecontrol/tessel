@@ -16,6 +16,8 @@ final class Workspaces {
         var manual: WindowState? = nil
     }
     private let store: any WindowPublishing
+    private let diagnostics: any DiagnosticsPort
+    private let journal: DiagnosticJournal
     private let applications: any ApplicationPort
     private let ax: any AccessibilityPort
     private let screens: any ScreenPort
@@ -161,6 +163,8 @@ final class Workspaces {
          map: (any RailsMapPort)? = nil, diagnostics: any DiagnosticsPort,
          makeCloset: () throws -> any ClosetPort) {
         self.store = store
+        self.diagnostics = diagnostics
+        journal = DiagnosticJournal(port: diagnostics)
         self.trusted = trusted
         self.applications = applications
         self.ax = ax
@@ -188,6 +192,7 @@ final class Workspaces {
 
     func configure(_ next: Configuration) {
         guard !quitting else { return }
+        journal.trigger = .config
         let old = configuration
         configuration = next
         configureMap()
@@ -198,6 +203,7 @@ final class Workspaces {
         carousel.width = area.width
         carousel.gap = next.gaps.outer
         if !status.enabled {
+            journal.trigger = .enable
             do { try closet.start() }
             catch let error as WindowCloset.Unavailable { disable(reason: error.reason); return }
             catch { disable(reason: "SkyLight could not create the hidden Space"); return }
@@ -217,6 +223,7 @@ final class Workspaces {
                 nativeFocus = current
             }
             installKeys()
+            if status.enabled { diagnostics.record(.enabled) }
             if focused.map(floating) == true { focused = carousel.remembered(1) }
             if !entries.isEmpty { render(focusing: focused ?? preferred(in: 1), relayout: true, takeFocus: nativeFocus == nil) }
         } else {
@@ -275,6 +282,8 @@ final class Workspaces {
     }
 
     func disable(reason: String) {
+        journal.trigger = .disable
+        if reason != "quit" { diagnostics.record(.disabled(reason: reason)) }
         railsMap.dismiss()
         pendingFloatTransfer = nil
         layerRestack = .done(front: nil)
@@ -310,11 +319,14 @@ final class Workspaces {
         status.reason = reason
         status.active = 1
         publish()
+        if reason == "quit" { journal.finish() }
         scheduler.main.after(milliseconds: 30) { [weak self] in self?.publish() }
     }
 
     func update(pid: Int32, observations: [WindowObservation], focused rawFocus: UInt32?, frontmost: Bool,
                 activationPending: Bool = false, change: CatalogChange) {
+        let bundle = observations.first?.record.bundleId ?? entries.values.first { $0.pid == pid }?.observation.record.bundleId ?? ""
+        journal.trigger = .snapshot(pid: pid, bundleID: bundle)
         let incoming = Set(observations.map { $0.record.id })
         var replacements = Set<UInt32>()
         var hiddenReplacements = Set<UInt32>()
@@ -562,8 +574,9 @@ final class Workspaces {
         followExternalFocus(id)
     }
 
-    func remove(pid: Int32) {
+    @discardableResult func remove(pid: Int32) -> Int {
         let removed = entries.filter { $0.value.pid == pid }
+        journal.trigger = .appTerminated(pid: pid, bundleID: removed.values.first?.observation.record.bundleId ?? "")
         let affectsVisible = removed.contains { $0.value.workspace == status.active && !closeted.contains($0.key) }
         for id in removed.keys { forget(id) }
 
@@ -579,16 +592,19 @@ final class Workspaces {
             render(focusing: selection, relayout: false)
         }
         publish()
+        return removed.count
     }
 
-    private func perform(_ command: WorkspaceCommand) {
+    private func perform(_ command: WorkspaceCommand, recordReceipt: Bool = true) {
         guard status.enabled, !quitting, !pointerHeld else { return }
-        if pointerReconciling { pointerCommands.append(command); return }
         // A command right after the user selected another window acts on it.
-        if let selection = externalSelection, decisionPending {
+        if !pointerReconciling, let selection = externalSelection, decisionPending {
             cancelFocusDecision()
             followExternalSelection(pid: selection.pid, id: selection.id)
         }
+        journal.trigger = .command(command)
+        if recordReceipt { diagnostics.record(.command(command.text, workspace: status.active, rail: status.rail, focused: focused)) }
+        if pointerReconciling { pointerCommands.append(command); return }
         cancelFocusDecision()
         applyCommand(command) {
             handle(command) { [weak self] action in self?.applyCommand(command, action) }
@@ -946,6 +962,7 @@ final class Workspaces {
             rows[entry.pid, default: []].append(row)
         }
         for (pid, windows) in rows { store.update(pid: pid, windows: windows) }
+        journal.published(rows, focused: focused)
         if status != publishedStatus {
             publishedStatus = status
             onChange?()
@@ -1179,6 +1196,7 @@ final class Workspaces {
             cancelFocusDecision()
         } else {
             guard pointerHeld else { return }
+            journal.trigger = .pointerRelease
             pointerHeld = false
             pointerReconciling = true
             let generation = pointerGeneration
@@ -1231,7 +1249,7 @@ final class Workspaces {
         if unavailable || deferredRender { render(focusing: focused, relayout: false, takeFocus: unavailable, instant: true) }
         let commands = pointerCommands
         pointerCommands.removeAll()
-        for command in commands { perform(command) }
+        for command in commands { perform(command, recordReceipt: false) }
         restackLayer()
         publish()
     }

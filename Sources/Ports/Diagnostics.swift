@@ -10,6 +10,7 @@ package enum Diagnostic: Equatable, Sendable {
     case readFailed(pid: Int32, bundleID: String, attempts: Int)
     case configLoaded(state: String, revision: UInt64)
     case configError(line: Int, message: String)
+    case system(DiagnosticSystemEvent)
 
     package var level: DiagnosticLevel {
         switch self {
@@ -17,9 +18,68 @@ package enum Diagnostic: Equatable, Sendable {
         default: .notice
         }
     }
+
+    package var category: DiagnosticCategory {
+        switch self {
+        case .started, .enabled, .disabled, .quit: .lifecycle
+        case .appLaunched, .appTerminated, .readFailed: .apps
+        case .command: .commands
+        case .window, .focus: .windows
+        case .configLoaded, .configError: .config
+        case .system: .system
+        }
+    }
+
+    package var text: String {
+        switch self {
+        case let .started(version, permission, config):
+            "started version \(version), permission \(permission ? "granted" : "needed"), config \(config)"
+        case .enabled: "enabled"
+        case .disabled(let reason): "disabled: \(reason)"
+        case .quit: "quit"
+        case let .appLaunched(pid, bundle): "app launched \(bundle) pid \(pid)"
+        case let .appTerminated(pid, bundle, windows): "app terminated \(bundle) pid \(pid), \(windows) windows"
+        case let .command(command, workspace, rail, focused):
+            "command \(command), workspace \(workspace), rail \(rail.map(String.init) ?? "none"), focused \(focused.map(String.init) ?? "none")"
+        case let .window(change, after):
+            switch change {
+            case .appeared(let window):
+                "window \(window.identity) appeared \(window.classification), \(window.location), visible \(window.visible), \(after)"
+            case let .changed(from, to):
+                "window \(to.identity) changed from \(from.classification), \(from.location), visible \(from.visible) to \(to.classification), \(to.location), visible \(to.visible), \(after)"
+            case .gone(let window):
+                "window \(window.identity) gone from \(window.location), \(window.classification), visible \(window.visible), \(after)"
+            }
+        case let .focus(from, to, after):
+            "focus \(from.map(String.init) ?? "none") -> \(to.map(String.init) ?? "none"), \(after)"
+        case let .readFailed(pid, bundle, attempts): "read failed \(bundle) pid \(pid) after \(attempts) attempts"
+        case let .configLoaded(state, revision): "config loaded, state \(state), revision \(revision)"
+        case let .configError(line, message): "config error line \(line): \(message)"
+        case .system(let event):
+            switch event {
+            case .screenLocked: "screen locked"
+            case .screenUnlocked: "screen unlocked"
+            case .screenSaverStarted: "screen saver started"
+            case .screenSaverStopped: "screen saver stopped"
+            case .screensSlept: "screens slept"
+            case .screensWoke: "screens woke"
+            case .slept: "sleep"
+            case .woke: "wake"
+            case .sessionResigned: "session resigned active"
+            case .sessionBecameActive: "session became active"
+            case .spaceChanged: "active Space changed"
+            case .screenParametersChanged: "screen parameters changed"
+            }
+        }
+    }
 }
 
 package enum DiagnosticLevel: Sendable { case notice, error }
+package enum DiagnosticCategory: String, CaseIterable, Sendable { case lifecycle, apps, commands, windows, config, system }
+package enum DiagnosticSystemEvent: Sendable {
+    case screenLocked, screenUnlocked, screenSaverStarted, screenSaverStopped
+    case screensSlept, screensWoke, slept, woke, sessionResigned, sessionBecameActive, spaceChanged, screenParametersChanged
+}
 
 package enum WindowChange: Equatable, Sendable {
     case appeared(DiagnosticWindow)
@@ -43,6 +103,12 @@ package struct DiagnosticWindow: Equatable, Sendable {
         self.id = id; self.pid = pid; self.bundleID = bundleID
         self.state = state; self.reason = reason; self.workspace = workspace
         self.rail = rail; self.slot = slot; self.visible = visible
+    }
+
+    fileprivate var identity: String { "\(id) (\(bundleID)) pid \(pid)" }
+    fileprivate var classification: String { "\(state) (\(reason))" }
+    fileprivate var location: String {
+        "workspace \(workspace.map(String.init) ?? "none"), rail \(rail.map(String.init) ?? "none"), slot \(slot.map(String.init) ?? "none")"
     }
 }
 

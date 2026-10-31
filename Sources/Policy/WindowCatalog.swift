@@ -48,6 +48,7 @@ final class WindowCatalog {
     private let ax: any AccessibilityPort
     private let windowOrder: any WindowOrderPort
     private let scheduler: any SchedulingPort
+    private let diagnostics: any DiagnosticsPort
     private var lifecycle: (any ApplicationObservation)?
     private var apps: [Int32: AppWindows] = [:]
 
@@ -58,6 +59,7 @@ final class WindowCatalog {
         self.ax = ax
         self.windowOrder = windowOrder
         self.scheduler = scheduler
+        self.diagnostics = diagnostics
         self.fixtureBundleID = fixtureBundleID
         lifecycle = applications.observe { [weak self] event, app in self?.appChanged(event, app: app) }
         for app in applications.runningApplications { observe(app) }
@@ -70,7 +72,8 @@ final class WindowCatalog {
         if let existing = apps[pid] { existing.refresh(hidden: app.hidden); return }
         let generation = UUID()
         let worker = AppWindows(pid: pid, name: app.name ?? "Application", bundleId: app.bundleID ?? "",
-                                hidden: app.hidden, generation: generation, ax: ax, windowOrder: windowOrder, scheduler: scheduler) { [weak self, scheduler] rows, focused, frontmost, activationPending, change, activation in
+                                hidden: app.hidden, generation: generation, ax: ax, windowOrder: windowOrder, scheduler: scheduler,
+                                diagnostics: diagnostics) { [weak self, scheduler] rows, focused, frontmost, activationPending, change, activation in
             scheduler.main.async {
                 guard let self, let worker = self.apps[pid], worker.generation == generation else { return }
                 // An activation can wait behind a newer keyboard selection in
@@ -86,12 +89,16 @@ final class WindowCatalog {
 
     private func appChanged(_ event: ApplicationEvent, app: RunningApplication) {
         if event == .terminated {
-            apps.removeValue(forKey: app.pid)?.stop()
-            workspaces.remove(pid: app.pid)
+            let observed = apps.removeValue(forKey: app.pid)
+            observed?.stop()
+            let count = workspaces.remove(pid: app.pid)
+            if observed != nil { diagnostics.record(.appTerminated(pid: app.pid, bundleID: app.bundleID ?? "", windows: count)) }
             return
         }
         if event == .hidden { apps[app.pid]?.cancelPresentation() }
+        let newlyLaunched = event == .launched && apps[app.pid] == nil
         observe(app)
+        if newlyLaunched, apps[app.pid] != nil { diagnostics.record(.appLaunched(pid: app.pid, bundleID: app.bundleID ?? "")) }
         if event == .activated { apps[app.pid]?.refresh(change: .activation) }
     }
 
@@ -187,6 +194,7 @@ private final class AppWindows: @unchecked Sendable {
     private let ax: any AccessibilityPort
     private let windowOrder: any WindowOrderPort
     private let scheduler: any SchedulingPort
+    private let diagnostics: any DiagnosticsPort
     private let publish: @Sendable ([WindowObservation], UInt32?, Bool, Bool, CatalogChange, UUID?) -> Void
     // All mutable state below belongs to queue, including AX handles.
     private let application: AXElement
@@ -209,6 +217,7 @@ private final class AppWindows: @unchecked Sendable {
     private var pending: (any ScheduledWork)?
     private var settleGeneration: UInt64 = 0
     private var failedReads = 0
+    private var reportedReadFailure = false
     private var pointerReleaseCompletion: (@MainActor @Sendable () -> Void)?
     private var enhancedUIRestorePending = false
     private var enhancedUIRestoreRetry: (any ScheduledWork)?
@@ -238,7 +247,7 @@ private final class AppWindows: @unchecked Sendable {
     private var activationRequest = ActivationRequest.resolved
 
     init(pid: Int32, name: String, bundleId: String, hidden: Bool, generation: UUID,
-         ax: any AccessibilityPort, windowOrder: any WindowOrderPort, scheduler: any SchedulingPort,
+         ax: any AccessibilityPort, windowOrder: any WindowOrderPort, scheduler: any SchedulingPort, diagnostics: any DiagnosticsPort,
          publish: @escaping @Sendable ([WindowObservation], UInt32?, Bool, Bool, CatalogChange, UUID?) -> Void) {
         self.pid = pid
         self.name = name
@@ -250,6 +259,7 @@ private final class AppWindows: @unchecked Sendable {
         self.ax = ax
         self.windowOrder = windowOrder
         self.scheduler = scheduler
+        self.diagnostics = diagnostics
         presentationLock = scheduler.makeLock()
         application = ax.application(pid)
         queue = scheduler.serialLane(label: "tessel.ax.\(pid)")
@@ -304,6 +314,7 @@ private final class AppWindows: @unchecked Sendable {
             if change == .activation || self.change != .activation && change != .snapshot { self.change = change }
             if settle { beginSettling() }
             failedReads = 0
+            reportedReadFailure = false
             scheduleRead(after: 10)
         }
     }
@@ -443,6 +454,7 @@ private final class AppWindows: @unchecked Sendable {
             facts = next
             elementsByID = handles.filter { newIDs.contains($0.key) }
             failedReads = 0
+            reportedReadFailure = false
             publishSnapshot(replacing: replacements)
             finishPointerRelease()
             if !newIDs.subtracting(oldIDs).isEmpty {
@@ -457,6 +469,9 @@ private final class AppWindows: @unchecked Sendable {
             if failedReads < 4 {
                 failedReads += 1
                 scheduleRead(after: 50 << failedReads)
+            } else if !reportedReadFailure {
+                reportedReadFailure = true
+                diagnostics.record(.readFailed(pid: pid, bundleID: bundleId, attempts: 5))
             }
         }
     }
