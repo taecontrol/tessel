@@ -54,6 +54,29 @@ private final class NativeRootEvents: @unchecked Sendable {
         }
     }
 
+    @Test("a raise that times out during pending minimization lets it complete, then restores the window")
+    func raiseDuringPendingMinimize() throws {
+        let mac = SimulatedMac()
+        defer { mac.shutdown() }
+        let app = mac.launch(windows: 1)
+        let id = app.open(WindowSpec(pendingMinimizeRaise: .restoresAfterMinimize))
+        let ax = mac.ax, application = ax.application(app.pid)
+        let window = try #require(ax.copy(.windows, of: application).value?.elements?.first { ax.windowID($0).value == id })
+        let events = NativeRootEvents()
+        let observer = try #require(ax.observer(app.pid) { notification, _ in events.names.append(notification) }.value)
+        observer.start()
+        #expect(observer.add(.minimized, to: window) == .success)
+        #expect(observer.add(.restored, to: window) == .success)
+        app.beginMinimize(id)
+        #expect(ax.perform(.raise, on: window) == .cannotComplete)
+        #expect(ax.copy(.minimized, of: window).value?.bool == false)
+        app.finishMinimize(id, selecting: 1)
+        #expect(mac.settle() == .settled)
+        #expect(ax.copy(.minimized, of: window).value?.bool == false)
+        #expect(mac.isVisible(id) && mac.focusedWindow == id && mac.isMain(id))
+        #expect(events.names == [.minimized, .restored])
+    }
+
     @Test("survivor activation can precede process exit while the dying app's windows are gone", arguments: TerminationExitOrder.allCases, [false, true])
     func termination(_ exitOrder: TerminationExitOrder, _ automaticNotice: Bool) throws {
         let mac = SimulatedMac()

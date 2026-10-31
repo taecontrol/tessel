@@ -19,6 +19,10 @@ file. Inactive windows live in a hidden Space; quitting returns them to the
 current desktop. The read-only CLI lists windows, their classification and
 reason, workspace and rail membership.
 
+`tessel log --last 6h` reads the always-on diagnostics, including after Tessel
+quits; add `--json` for structured entries and crash-report paths. App identities
+appear in clear, titles never. Clean a log before sharing it publicly.
+
 The daily build registers to open at login on its first launch from
 `/Applications` or `~/Applications`. Turn it off with **Open at Login** in the
 menu bar. The development build never registers as a login item.

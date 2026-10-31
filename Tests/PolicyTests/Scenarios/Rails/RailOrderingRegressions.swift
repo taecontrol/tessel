@@ -31,6 +31,39 @@ import Testing
         }
     }
 
+    @Test("a raise that times out on a pending minimize follows the window macOS restores", arguments: [Layout.carousel])
+    func raiseDuringPendingMinimize(_ layout: Layout) {
+        for writes in WriteOrder.allCases {
+            requireScenario(Scenario.run("raise during pending minimize in \(layout)", writes: writes) { s in
+                let mac = s.mac, app = mac.launch(windows: 1)
+                let id = app.open(WindowSpec(pendingMinimizeRaise: .restoresAfterMinimize))
+                app.select(1)
+                let tessel = s.startTessel(layout)
+                s.settle()
+                tessel.press("focus right")
+                let held = mac.pause(after: .call("AccessibilityPort.set AXMain=true window \(id) \(app.alias)"))
+                if case .paused = held {} else { s.expect("the main write is outstanding: \(held)", false) }
+                mac.scheduler.resume()
+                let returning = mac.pause(after: .call("MainLane.async native event"))
+                if case .paused = returning {} else { s.expect("the main write is returning: \(returning)", false) }
+                app.beginMinimize(id)
+                mac.scheduler.resume()
+                let raised = mac.pause(after: .call("AccessibilityPort.perform AXRaise window \(id) \(app.alias)"))
+                if case .paused = raised {} else { s.expect("the raise lands on the pending minimization: \(raised)", false) }
+                mac.scheduler.resume()
+                let answered = mac.pause(after: .call("AccessibilityPort.copy AXFrontmost \(app.alias) pid=\(app.pid)"))
+                if case .paused = answered {} else { s.expect("the raise has answered: \(answered)", false) }
+                // The Dock completes the minimization before tessel can retry.
+                app.finishMinimize(id, selecting: 1)
+                s.expect("the timed-out raise left the minimization to complete", !mac.isVisible(id))
+                s.settle()
+                s.expect("the restored window is tiled again", tessel.windows.first { $0.id == id }?.state == .tiled)
+                s.expect("the restored window keeps its workspace", tessel.windows.first { $0.id == id }?.workspace == 1)
+                s.expect("the restored window is selected and visible", mac.focusedWindow == id && mac.isFullyOnScreen(id))
+            })
+        }
+    }
+
     @Test("a gap redraw cannot discard a pending cross-app native selection")
     func ownerReadSurvivesGapReload() {
         requireScenario(Scenario.run("owner revalidation across gap redraw", writes: .readsFirst) { s in

@@ -26,7 +26,7 @@ enum Layout: String, CaseIterable, Sendable { case carousel }
         self.input = input
         input.data = text.map { Data($0.utf8) }
         rows = PublishedRows(now: { mac.scheduler.now })
-        config = ConfigManager(path: "/scenario/tessel.toml", main: mac.scheduler.main, load: { [input] in
+        config = ConfigManager(path: "/scenario/tessel.toml", main: mac.scheduler.main, diagnostics: mac.diagnostics, load: { [input] in
             if input.unreadable { throw CocoaError(.fileReadNoPermission) }
             return input.data
         }, watch: { [input] in input.watchRequests += 1 })
@@ -34,8 +34,9 @@ enum Layout: String, CaseIterable, Sendable { case carousel }
                                 applications: mac.applications, ax: mac.ax, screens: mac.screens,
                                 windowOrder: mac.windowOrder, scheduler: mac.scheduler, hotkeys: keys,
                                 fixtureOnly: true, motionPreferences: mac.motionPreferences, stage: mac.stage,
-                                pointerActivity: mac.pointerActivity, map: mac.map) { try makeCloset?() ?? mac.closetPort }
-        catalog = WindowCatalog(workspaces: workspaces, applications: mac.applications, ax: mac.ax, windowOrder: mac.windowOrder, scheduler: mac.scheduler)
+                                pointerActivity: mac.pointerActivity, map: mac.map, diagnostics: mac.diagnostics) { try makeCloset?() ?? mac.closetPort }
+        catalog = WindowCatalog(workspaces: workspaces, applications: mac.applications, ax: mac.ax, windowOrder: mac.windowOrder,
+                                scheduler: mac.scheduler, diagnostics: mac.diagnostics)
         workspaces.catalog = catalog
         configurationPublications.append((mac.scheduler.now, config.status))
         config.onChange = { [weak self] status in

@@ -43,6 +43,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var permissionMonitor: PermissionMonitor?
     private var workspaces: Workspaces?
     private var termination: DispatchSourceSignal?
+    private let diagnostics = SystemDiagnostics()
+    private var systemEvents: SystemEvents?
     #if TESSEL_DEVELOPMENT
     private let capture = LaunchOptions.captureUI ? DevelopmentCapture() : nil
     #else
@@ -55,7 +57,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let applications = SystemApplications()
         let ax = SystemAccessibility()
         let file = ConfigFile()
-        let config = ConfigManager(path: file.file.path, main: scheduler.main, load: { try file.load() }, watch: { file.watch() })
+        let config = ConfigManager(path: file.file.path, main: scheduler.main, diagnostics: diagnostics,
+                                   load: { try file.load() }, watch: { file.watch() })
+        diagnostics.record(.started(version: BuildInfo.version, permission: trusted, config: config.status.state))
+        systemEvents = SystemEvents(diagnostics: diagnostics)
         file.onChange = { [weak config] in config?.scheduleReload() }
         self.config = config
         #if TESSEL_DEVELOPMENT
@@ -91,7 +96,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let workspaces = Workspaces(store: store, trusted: trusted, configuration: config.status.effective,
                                     applications: applications, ax: ax, screens: SystemScreen(), windowOrder: SystemWindowOrder(),
                                     scheduler: scheduler, hotkeys: SystemHotkeys(), fixtureOnly: LaunchOptions.fixtureOnly,
-                                    motionPreferences: SystemMotionPreferences(), stage: stage, pointerActivity: SystemPointerActivity(), map: map) {
+                                    motionPreferences: SystemMotionPreferences(), stage: stage, pointerActivity: SystemPointerActivity(), map: map,
+                                    diagnostics: diagnostics) {
             let closet = try SkyLightCloset(simulateMissing: LaunchOptions.missingSkyLight, simulateFailedHide: LaunchOptions.failedHide)
             skyLight = closet
             return closet
@@ -115,6 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateMenu()
         if trusted {
             windows = WindowCatalog(workspaces: workspaces, applications: applications, ax: ax, windowOrder: SystemWindowOrder(), scheduler: scheduler,
+                                    diagnostics: diagnostics,
                                     fixtureBundleID: LaunchOptions.fixtureOnly ? "com.taecontrol.tessel.fixture" : nil)
             workspaces.catalog = windows
         } else {
@@ -264,7 +271,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        workspaces?.disable(reason: "quit")
+        systemEvents?.stop()
+        if let workspaces { workspaces.disable(reason: "quit") }
+        else { diagnostics.record(.quit) }
         server?.stop()
     }
 }

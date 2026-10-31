@@ -352,11 +352,17 @@ final class FixtureContracts: NSObject {
     private func recordLifecycle(_ name: String, app: NSRunningApplication) {
         let pid = app.processIdentifier
         let known = knownApplications.keys.sorted().first { knownApplications[$0]?.isEqual(app) == true }
-        guard known != nil || knownProcesses.contains(pid) || app.bundleIdentifier == "com.taecontrol.tessel.fixture" && FixtureProbe.isFixture(pid) else { return }
-        knownProcesses.insert(pid)
-        if known == nil { knownApplications[pid] = app }
+        let fixture = known != nil || knownProcesses.contains(pid) || app.bundleIdentifier == "com.taecontrol.tessel.fixture" && FixtureProbe.isFixture(pid)
+        // macOS may promote an app outside the harness, such as Finder, when
+        // the active fixture terminates; record that activation without
+        // tracking the app.
+        guard fixture || name == NSWorkspace.didActivateApplicationNotification.rawValue else { return }
+        if fixture {
+            knownProcesses.insert(pid)
+            if known == nil { knownApplications[pid] = app }
+        }
         lifecycle.append(["name": name, "pid": pid, "knownPID": known ?? pid, "mainThread": Thread.isMainThread,
-                          "alivePIDs": knownProcesses.sorted().filter { kill($0, 0) == 0 }])
+                          "alivePIDs": knownProcesses.union([pid]).sorted().filter { kill($0, 0) == 0 }])
     }
 
     private func received(_ name: String, element: AXUIElement) {

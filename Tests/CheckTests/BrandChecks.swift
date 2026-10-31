@@ -70,7 +70,7 @@ import Testing
         #expect(try read("Sources/Shared/Protocol.swift").contains(#""tessel/tessel.toml""#))
         #expect(try read("Sources/Shared/IPC.swift").contains(#""/tmp/tessel-\(getuid())""#))
         #expect(try read("Sources/App/SocketServer.swift").contains(#""tessel.ipc""#))
-        #expect(try read("Sources/CLI/Main.swift").contains("Usage: tessel windows [--json] | tessel status [--json]"))
+        #expect(try read("Sources/CLI/Main.swift").contains("Usage: tessel windows [--json] | tessel status [--json] | tessel log [--json] [--last <n>m|h|d]"))
         for adr in ["0001-swift-for-build-and-verification-tooling", "0004-verify-policy-against-a-simulated-macos",
                     "0006-move-carousel-windows-through-captures-on-a-stage", "0007-capture-only-windows-that-are-drawn"] {
             #expect(!Self.lowercaseNameInProse(try read("docs/adr/\(adr).md")).isEmpty, "accepted ADR \(adr) keeps its original wording")
@@ -96,6 +96,7 @@ import Testing
             #expect(!Self.lowercaseNameInStrings(forbidden).isEmpty, "the interface guard must reject \(forbidden)")
         }
         for allowed in [#"DispatchQueue(label: "tessel.ipc")"#, #"print("Usage: tessel windows [--json] | tessel status [--json]")"#,
+                        #"print("Usage: tessel log [--json] [--last <n>m|h|d]")"#,
                         #"let path = "tessel/tessel.toml""#, #"// tessel is an experiment"#, #"Reply(error: "Tessel is starting")"#] {
             #expect(Self.lowercaseNameInStrings(allowed).isEmpty, "the interface guard must accept \(allowed)")
         }
@@ -119,7 +120,7 @@ import Testing
         let code = source.replacingOccurrences(of: #"(?s)/\*.*?\*/|//[^\r\n]*"#, with: " ", options: .regularExpression)
         return matches(of: #""(?:[^"\\\n]|\\.)*""#, in: code)
             // A command line names the executable, not the product.
-            .map { $0.replacingOccurrences(of: #"\btessel (?=windows\b|status\b)"#, with: "", options: .regularExpression) }
+            .map { $0.replacingOccurrences(of: #"\btessel (?=windows\b|status\b|log\b)"#, with: "", options: .regularExpression) }
             .filter { !matches(of: lowercaseName, in: $0).isEmpty }
     }
 

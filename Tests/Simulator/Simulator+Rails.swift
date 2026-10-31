@@ -19,6 +19,12 @@ extension SimulatedApp {
         guard mac.windows[window]?.minimizing == true else { return }
         mac.windows[window]?.minimizing = false
         mac.minimize(window, successor: successor)
+        guard mac.windows[window]?.restoresAfterMinimize == true else { return }
+        mac.windows[window]?.restoresAfterMinimize = false
+        mac.scheduler.nativeEvent { [mac] in
+            mac.action("restore window \(window) for the raise that timed out during its minimization")
+            mac.restoreWindow(window)
+        }
     }
     @MainActor package func deferNextActivation(completion: DeferredActivationCompletion = .focusWrite) {
         mac.assume(.deferredAXActivation)
@@ -131,6 +137,10 @@ extension SimulatedMac {
         }
         if windows[id]?.minimizing == true {
             assume(.minimizeFocusInterruption)
+            if raising && windows[id]?.spec.pendingMinimizeRaise == .restoresAfterMinimize {
+                windows[id]?.restoresAfterMinimize = true
+                return .cannotComplete
+            }
             windows[id]?.minimizing = false
         }
         let pid = windows[id]!.pid

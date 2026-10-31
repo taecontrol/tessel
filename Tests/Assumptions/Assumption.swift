@@ -115,7 +115,7 @@ package enum Assumption: String, CaseIterable, Sendable {
         case .nativeTabPublication: "A native tab's bar can identify its successor while AXWindows still lists the former root and AXFocusedWindow is temporarily unpublished."
         case .deferredAXActivation: "AX can accept activation before the app becomes active; pending activation may complete asynchronously, on a main or raise write, or on another activation request."
         case .activationKeyRestoration: "An AX activation can finish after the AXMain and AXRaise that follow it; when the selected window is in the closet, the app's previous key window becomes key again, and AXMain and AXRaise after the activation select the requested window."
-        case .minimizeFocusInterruption: "AX main or raise can cancel pending minimization; after completion main leaves it minimized, while raise restores it and may return cannotComplete before the restore finishes."
+        case .minimizeFocusInterruption: "AX main or raise can cancel pending minimization; after completion main leaves it minimized, while raise restores it and may return cannotComplete before the restore finishes. A raise that returns cannotComplete during pending minimization may let it complete and then restore the window."
         case .axFrontmostActivation: "AXFrontmost activation orders every window of the app above other apps' windows."
         }
     }

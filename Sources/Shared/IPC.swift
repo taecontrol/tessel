@@ -2,20 +2,25 @@ import CryptoKit
 import Darwin
 import Foundation
 
-struct Endpoint {
-    let directory: String
-    let path: String
-
-    init() {
-        directory = "/tmp/tessel-\(getuid())"
+enum Instance {
+    static let bundleID: String = {
         // Foundation loses the containing bundle when a secondary executable is
         // reached through a symlink. Resolve the real Contents/MacOS location.
         let bundleURL = Bundle.main.executableURL?.resolvingSymlinksInPath()
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let bundle = Bundle.main.bundleIdentifier ?? bundleURL.flatMap { Bundle(url: $0)?.bundleIdentifier }
             ?? "com.taecontrol.tessel.dev"
-        let namespace = bundle.hasSuffix(".cli") ? String(bundle.dropLast(4)) : bundle
-        let key = namespace + ":" + ConfigLocation.file.path
+        return bundle.hasSuffix(".cli") ? String(bundle.dropLast(4)) : bundle
+    }()
+}
+
+struct Endpoint {
+    let directory: String
+    let path: String
+
+    init() {
+        directory = "/tmp/tessel-\(getuid())"
+        let key = Instance.bundleID + ":" + ConfigLocation.file.path
         let hash = SHA256.hash(data: Data(key.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
         path = directory + "/" + hash + ".sock"
     }

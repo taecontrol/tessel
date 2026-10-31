@@ -28,11 +28,12 @@ open ".build/apps/Tessel Dev.app"
 ".build/apps/Tessel Dev.app/Contents/MacOS/tessel" status --json
 ```
 
-The read-only CLI accepts `windows [--json]` and `status [--json]`.
+The read-only CLI accepts `windows [--json]`, `status [--json]` and
+`log [--json] [--last <n>m|h|d]`.
 You can symlink this bundled CLI into a directory on your `PATH`.
 With a custom `XDG_CONFIG_HOME`, pass the same value to `open --env` and the CLI.
 The bundle ID and config path select the instance the CLI observes.
-Every JSON answer carries `answeredAt`: raw monotonic seconds
+Window and status JSON answers carry `answeredAt`: raw monotonic seconds
 (`CLOCK_MONOTONIC_RAW`, the clock `clock_gettime_nsec_np` reads) when Tessel
 read the state it reports. `status --json` has it at the top level, and each
 `windows --json` record repeats it. Text output is unchanged.
@@ -252,6 +253,34 @@ the signed harness permissions on its disposable desktop. Local runs retain
 the owner's signing identity and never provision the TCC database.
 
 ## Configuration and observation
+
+`tessel log` reads this build's macOS unified log, including after Tessel quits.
+It defaults to the last hour; use `--last 30m`, `--last 6h` or `--last 2d` for a
+different window. Text has one `HH:MM:SS level category message` line per entry,
+then matching crash-report paths under **Crash reports**. `--json` returns:
+
+```json
+{"entries":[{"date":"2026-10-30T15:34:56Z","level":"notice","category":"commands","pid":123,"message":"command workspace 2, workspace 1, rail 1, focused 42"}],"crashReports":[]}
+```
+
+Dates are ISO 8601. Each crash report has `path` and `date`, selected by its
+first-line `bundleID` and `timestamp` in `~/Library/Logs/DiagnosticReports`.
+The development CLI also accepts `--reports <dir>` for isolated fixtures; the
+daily build rejects it. The log subsystem uses the same bundle ID as the socket
+endpoint, keeping development and daily records separate. A development log can
+include several runs, distinguished by their PID.
+
+Diagnostics are always on, with no experiment flag, as explicitly agreed in
+[issue #62](https://github.com/taecontrol/tessel/issues/62), like the lifecycle
+default in #55. They record commands, changed window membership and
+classification, failures, configuration and lifecycle changes, and system
+notifications such as lock and sleep. Membership messages start with `window `;
+focus messages start with `focus ` in the same `windows` category. Only `notice`
+and `error` are written, with no entries while idle. macOS manages retention;
+it can vary from hours to days.
+
+App identities and bundle IDs appear in clear; window titles and contents are
+never read for diagnostics. Clean a log before pasting it into a public issue.
 
 The config is `$XDG_CONFIG_HOME/tessel/tessel.toml`, defaulting to
 `~/.config/tessel/tessel.toml`. An absent or empty file uses the carousel,
@@ -1127,7 +1156,7 @@ screenshot of a real machine is committed.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49, #51, #55, #57, #59 and #63.
+This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49, #51, #55, #57, #59, #62 and #63.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -1442,6 +1471,24 @@ counters. E6 tags the existing three resource scenes with unchanged budgets.
 | #59 E12 | T |
 | #59 E13 | T |
 | #59 E14 | T |
+| #62 E1 | J |
+| #62 E2 | J |
+| #62 E3 | P |
+| #62 E4 | P |
+| #62 E5 | P |
+| #62 E6 | P |
+| #62 E7 | P |
+| #62 E8 | P |
+| #62 E9 | P |
+| #62 E10 | J |
+| #62 E11 | X |
+| #62 E12 | J |
+| #62 E13 | J |
+| #62 E14 | J |
+| #62 E15 | P |
+| #62 E16 | R |
+| #62 E17 | J |
+| #62 E18 | P |
 | #63 E1 | J |
 | #63 E2 | J |
 | #63 E3 | J |
@@ -1453,6 +1500,7 @@ counters. E6 tags the existing three resource scenes with unchanged budgets.
 <!-- Pending capture: #59 E8 -->
 <!-- Pending capture: #59 E9 -->
 <!-- Pending capture: #59 E10 -->
+<!-- Pending capture: #62 E11 -->
 
 E21 has an opt-in executable capture in `CapturesCarousel.swift`; it needs a
 pixel recording of the stage before the owner can review it again. All mapped

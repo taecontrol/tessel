@@ -27,8 +27,10 @@ extension Acceptance {
                          Double(before.footprintBytes) / 1e6, Double(budget.footprintBytes) / 1e6))
             fflush(nil)
             try #require(before.footprintBytes < budget.footprintBytes, "Start footprint must be below the footprint limit")
+            let idleStart = Date()
             sleep(seconds: budget.windowSeconds)
             let after = try resources(harness.appPID)
+            let idleEnd = Date()
             let wakeups = after.interruptWakeups - before.interruptWakeups
             let cpu = after.cpuNanoseconds - before.cpuNanoseconds
             print(String(format: "%@: %.0f s idle: wakeups %llu (limit <= %llu), CPU %.3f ms (limit <= %.3f ms), footprint start/end %.2f/%.2f MB (limit < %.2f MB)",
@@ -40,6 +42,8 @@ extension Acceptance {
             try #require(wakeups <= budget.interruptWakeups, "Interrupt wakeups exceeded the wakeup limit")
             try #require(cpu <= budget.cpuNanoseconds, "CPU time exceeded the CPU limit")
             try #require(after.footprintBytes < budget.footprintBytes, "End footprint must be below the footprint limit")
+            let entries = try diagnosticEntryCount(subsystem: "com.taecontrol.tessel.dev", pid: harness.appPID, from: idleStart, through: idleEnd)
+            try #require(entries == 0, "the measured instance must record no diagnostic during the idle window")
             if let stageWorkBefore {
                 try #require(try harness.stageWork() == stageWorkBefore, "The app must capture and show nothing while idle")
             }
@@ -49,7 +53,7 @@ extension Acceptance {
             }
         }
 
-        @Test("#1 E22; #59 E5; #63 E6: idle resource budget") func e22TwentyIdleWindowsStayWithinWakeupCPUAndFootprintLimits() throws {
+        @Test("#1 E22; #59 E5; #62 E16; #63 E6: idle resource budget and no diagnostic entries") func e22TwentyIdleWindowsStayWithinWakeupCPUAndFootprintLimits() throws {
             // Discover an existing desktop in one snapshot. Opening twenty
             // windows under a live manager leaves arrival animations in flight.
             harness.stopApp()
