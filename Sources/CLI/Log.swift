@@ -83,7 +83,9 @@ enum Log {
     }
 
     private static func crashReports(in directory: URL, from start: Date, through end: Date) -> [Report] {
-        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        // Name files under the directory as given; URL enumeration resolves
+        // /var to /private/var, which would change the paths users passed.
+        let files = ((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []).map { directory.appending(path: $0) }
         let timestamp = DateFormatter()
         timestamp.locale = Locale(identifier: "en_US_POSIX")
         timestamp.dateFormat = "yyyy-MM-dd HH:mm:ss.SS Z"
