@@ -166,7 +166,7 @@ final class FixtureSession {
         var description: String { "cannot reach the fixture: errno \(code)" }
     }
 
-    init(directory: URL, number: Int, swiftUI: Bool = false, prohibited: Bool = false) throws {
+    init(directory: URL, number: Int, swiftUI: Bool = false, prohibited: Bool = false, accessory: Bool = false) throws {
         path = directory.appending(path: "f\(number).sock").path
         clientPath = directory.appending(path: "c\(number).sock").path
         socket = Darwin.socket(AF_UNIX, SOCK_DGRAM, 0)
@@ -184,7 +184,8 @@ final class FixtureSession {
         guard bound == 0 else { throw HarnessError("cannot bind the fixture client socket: errno \(errno)") }
         setTimeout(socket, seconds: margin)
         try run(["open", "-n"] + (swiftUI ? [] : ["-g"]) + ["--stdout", "/dev/null", "--stderr", "/dev/null", fixtureBundle.path, "--args", "--socket", path]
-                + (swiftUI ? ["--swiftui"] : []) + (prohibited ? ["--prohibited"] : []), timeout: margin, check: true)
+                + (swiftUI ? ["--swiftui"] : []) + (prohibited ? ["--prohibited"] : [])
+                + (accessory ? ["--accessory"] : []), timeout: margin, check: true)
         // The path can appear before bind attaches its socket. Keep one ping
         // in flight so a late startup reply cannot answer a later command.
         var sent = false
@@ -284,8 +285,8 @@ final class Harness {
     var fixture: FixtureSession!
     var otherFixtures: [FixtureSession] = []
 
-    func other(prohibited: Bool = false) throws -> FixtureSession {
-        let session = try FixtureSession(directory: directory, number: otherFixtures.count + 1, prohibited: prohibited)
+    func other(prohibited: Bool = false, accessory: Bool = false) throws -> FixtureSession {
+        let session = try FixtureSession(directory: directory, number: otherFixtures.count + 1, prohibited: prohibited, accessory: accessory)
         otherFixtures.append(session)
         return session
     }

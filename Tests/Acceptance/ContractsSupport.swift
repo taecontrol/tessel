@@ -160,6 +160,7 @@ struct NativeContractReply: Codable {
     let listed: Bool?
     let bundleMatches: Bool?
     let regular: Bool?
+    let accessory: Bool?
     let prohibited: Bool?
     let terminated: Bool?
     let lifecycle: [Event]?
@@ -217,8 +218,8 @@ extension Acceptance {
             return result
         }
 
-        func other(prohibited: Bool = false) throws -> FixtureSession {
-            try harness.other(prohibited: prohibited)
+        func other(prohibited: Bool = false, accessory: Bool = false) throws -> FixtureSession {
+            try harness.other(prohibited: prohibited, accessory: accessory)
         }
 
         @discardableResult
