@@ -96,9 +96,8 @@ final class WindowCatalog {
             return
         }
         if event == .hidden { apps[app.pid]?.cancelPresentation() }
-        let newlyLaunched = event == .launched && apps[app.pid] == nil
         observe(app)
-        if newlyLaunched, apps[app.pid] != nil { diagnostics.record(.appLaunched(pid: app.pid, bundleID: app.bundleID ?? "")) }
+        if event == .launched, apps[app.pid] != nil { diagnostics.record(.appLaunched(pid: app.pid, bundleID: app.bundleID ?? "")) }
         if event == .activated { apps[app.pid]?.refresh(change: .activation) }
     }
 
