@@ -43,6 +43,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var permissionMonitor: PermissionMonitor?
     private var workspaces: Workspaces?
     private var termination: DispatchSourceSignal?
+    private let diagnostics = SystemDiagnostics()
+    private var systemEvents: SystemEvents?
     #if TESSEL_DEVELOPMENT
     private let capture = LaunchOptions.captureUI ? DevelopmentCapture() : nil
     #else
@@ -55,9 +57,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let applications = SystemApplications()
         let ax = SystemAccessibility()
         let file = ConfigFile()
-        let diagnostics = PendingDiagnostics()
         let config = ConfigManager(path: file.file.path, main: scheduler.main, diagnostics: diagnostics,
                                    load: { try file.load() }, watch: { file.watch() })
+        diagnostics.record(.started(version: BuildInfo.version, permission: trusted, config: config.status.state))
+        systemEvents = SystemEvents(diagnostics: diagnostics)
         file.onChange = { [weak config] in config?.scheduleReload() }
         self.config = config
         #if TESSEL_DEVELOPMENT
@@ -268,13 +271,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        workspaces?.disable(reason: "quit")
+        systemEvents?.stop()
+        if let workspaces { workspaces.disable(reason: "quit") }
+        else { diagnostics.record(.quit) }
         server?.stop()
     }
 }
-
-// Phase-one acceptance glue; the unified-log adapter has not been implemented.
-private struct PendingDiagnostics: DiagnosticsPort { func record(_ diagnostic: Diagnostic) {} }
 
 #if !TESSEL_DEVELOPMENT
 extension AppDelegate: NSMenuDelegate {

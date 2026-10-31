@@ -2,11 +2,26 @@ import Foundation
 
 @main
 struct Main {
+    static let usage = "Usage: tessel windows [--json] | tessel status [--json] | tessel log [--json] [--last <n>m|h|d]" + reportsUsage
+    private static var reportsUsage: String {
+        #if TESSEL_DEVELOPMENT
+        " [--reports <dir>]"
+        #else
+        ""
+        #endif
+    }
+
     static func main() {
         let args = Array(CommandLine.arguments.dropFirst())
+        if args.first == "log" {
+            do { try Log.run(Array(args.dropFirst())) }
+            catch is Log.InvalidArguments { fail(usage, code: 2) }
+            catch { fail(error.localizedDescription) }
+            return
+        }
         guard let command = args.first, ["windows", "status"].contains(command),
               args.count == 1 || (args.count == 2 && args[1] == "--json") else {
-            fail("Usage: tessel windows [--json] | tessel status [--json]", code: 2)
+            fail(usage, code: 2)
         }
         let reply: Reply
         do { reply = try SocketIO.request(command) }
@@ -37,6 +52,7 @@ struct Main {
     static func printJSON(_ value: some Encodable) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
         print(String(decoding: try encoder.encode(value), as: UTF8.self))
     }
 

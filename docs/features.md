@@ -75,7 +75,7 @@ parked in a strip. TileMyMac uses Paneru's engine and exposes numbered rows.
 | Transparency for other apps' windows | — | — | — | Yes | Not without disabling SIP | No |
 | Modifier plus drag to move or resize | — | Plain dragging | Swipe to slide the strip | Yes | Event tap | No: keyboard only |
 | Binding modes | Yes | — | — | — | Feasible | Idea |
-| CLI, socket, events | Yes | URL commands | — | hyprctl | Feasible | CLI (#1); events: Idea |
+| CLI, socket, events | Yes | URL commands | — | hyprctl | Feasible | Read-only windows/status CLI (#1); always-on diagnostics with `tessel log` (#62); event subscriptions: Idea |
 | Layout chosen per workspace | — | — | — | Yes | Feasible | #3 |
 | Center a window | — | — | Yes | — | Feasible | Idea |
 | Copy a rule for the focused window | — | — | Yes (Paneru) | — | Feasible | Idea |
