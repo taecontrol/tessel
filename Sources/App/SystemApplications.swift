@@ -23,25 +23,46 @@ struct SystemApplications: ApplicationPort {
 @MainActor
 private final class SystemApplicationObservation: NSObject, ApplicationObservation {
     private let receive: @MainActor (ApplicationEvent, RunningApplication) -> Void
+    private var runningApplicationObservation: NSKeyValueObservation?
+    private var runningApplications: [NSRunningApplication] = []
     init(receive: @escaping @MainActor (ApplicationEvent, RunningApplication) -> Void) {
         self.receive = receive
         super.init()
+        // The catalog enumerates existing apps at startup. Only later PID
+        // changes are lifecycle events, including apps that never activate.
+        runningApplications = NSWorkspace.shared.runningApplications
+        runningApplicationObservation = NSWorkspace.shared.observe(\.runningApplications) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.applicationsChanged(NSWorkspace.shared.runningApplications) }
+        }
         let center = NSWorkspace.shared.notificationCenter
-        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didActivateApplicationNotification,
-                     NSWorkspace.didHideApplicationNotification, NSWorkspace.didUnhideApplicationNotification,
-                     NSWorkspace.didTerminateApplicationNotification] {
+        for name in [NSWorkspace.didActivateApplicationNotification, NSWorkspace.didHideApplicationNotification,
+                     NSWorkspace.didUnhideApplicationNotification] {
             center.addObserver(self, selector: #selector(changed(_:)), name: name, object: nil)
         }
     }
+
+    private func applicationsChanged(_ current: [NSRunningApplication]) {
+        let previous = runningApplications
+        runningApplications = current
+        // Read the complete list rather than trusting KVO's change kind or
+        // indexed payload. Replacing an array does not relaunch its survivors.
+        let oldPIDs = Set(previous.map(\.processIdentifier)), newPIDs = Set(current.map(\.processIdentifier))
+        for app in current where !oldPIDs.contains(app.processIdentifier) {
+            receive(.launched, SystemApplications.info(app))
+        }
+        for app in previous where !newPIDs.contains(app.processIdentifier) {
+            receive(.terminated, SystemApplications.info(app))
+        }
+    }
+
     @objc private func changed(_ notification: Notification) {
         guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
         let event: ApplicationEvent
         switch notification.name {
-        case NSWorkspace.didLaunchApplicationNotification: event = .launched
         case NSWorkspace.didActivateApplicationNotification: event = .activated
         case NSWorkspace.didHideApplicationNotification: event = .hidden
         case NSWorkspace.didUnhideApplicationNotification: event = .unhidden
-        default: event = .terminated
+        default: return
         }
         receive(event, SystemApplications.info(app))
     }

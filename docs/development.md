@@ -166,6 +166,14 @@ saved. Fixture replies reserve 64 KiB per socket because twenty-window AX
 observations exceed macOS's default 2 KiB datagram limit; no system socket
 settings change.
 
+Application launch and termination come only from KVO on
+`NSWorkspace.runningApplications`, including accessory apps that never activate.
+The main-thread adapter diffs the previous and current complete PID sets,
+independent of KVO change kind, so an array replacement preserves surviving
+apps. It does not replay the initial list: the catalog already enumerates it
+at startup and settles early AX reads. Activation, hide and unhide retain their
+NSWorkspace notifications; prohibited apps retain the catalog's metadata guard.
+
 Full setup observations allow 100 ms per AX read; focused-only observations use
 20 ms so a busy app can be sampled again. A timeout is an unanswered read, not
 proof that a window is absent or unfocused. The oracle reads the frontmost app
