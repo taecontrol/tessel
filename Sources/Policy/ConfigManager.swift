@@ -14,7 +14,8 @@ final class ConfigManager {
     private(set) var status: ConfigStatus
     var onChange: ((ConfigStatus) -> Void)?
 
-    init(path: String, main: any MainLane, load: @escaping () throws -> Data?, watch: @escaping () -> Void) {
+    init(path: String, main: any MainLane, diagnostics: any DiagnosticsPort,
+         load: @escaping () throws -> Data?, watch: @escaping () -> Void) {
         self.main = main
         self.load = load
         self.watch = watch

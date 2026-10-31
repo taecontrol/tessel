@@ -52,7 +52,7 @@ final class WindowCatalog {
     private var apps: [Int32: AppWindows] = [:]
 
     init(workspaces: Workspaces, applications: any ApplicationPort, ax: any AccessibilityPort, windowOrder: any WindowOrderPort,
-         scheduler: any SchedulingPort, fixtureBundleID: String? = nil) {
+         scheduler: any SchedulingPort, diagnostics: any DiagnosticsPort, fixtureBundleID: String? = nil) {
         self.workspaces = workspaces
         self.applications = applications
         self.ax = ax

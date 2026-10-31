@@ -158,7 +158,7 @@ final class Workspaces {
          windowOrder: any WindowOrderPort, scheduler: any SchedulingPort, hotkeys: any HotkeyInstalling,
          fixtureOnly: Bool = false, motionPreferences: (any MotionPreferencePort)? = nil,
          stage: (any MotionStagePort)? = nil, pointerActivity: (any PointerActivityPort)? = nil,
-         map: (any RailsMapPort)? = nil,
+         map: (any RailsMapPort)? = nil, diagnostics: any DiagnosticsPort,
          makeCloset: () throws -> any ClosetPort) {
         self.store = store
         self.trusted = trusted

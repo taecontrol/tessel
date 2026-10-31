@@ -14,8 +14,9 @@ import Testing
         let configuration = Configuration(experiments: ["workspaces": true])
         let workspaces = Workspaces(store: rows, trusted: true, configuration: configuration,
                                     applications: desktop, ax: ax, screens: desktop, windowOrder: desktop,
-                                    scheduler: scheduler, hotkeys: desktop) { desktop }
-        let catalog = WindowCatalog(workspaces: workspaces, applications: desktop, ax: ax, windowOrder: desktop, scheduler: scheduler)
+                                    scheduler: scheduler, hotkeys: desktop, diagnostics: SilentDiagnostics()) { desktop }
+        let catalog = WindowCatalog(workspaces: workspaces, applications: desktop, ax: ax, windowOrder: desktop,
+                                    scheduler: scheduler, diagnostics: SilentDiagnostics())
         workspaces.catalog = catalog
         #expect(workspaces.status.enabled)
         #expect(rows.windows[101]?.isEmpty == true)
@@ -23,6 +24,8 @@ import Testing
         withExtendedLifetime(catalog) {}
     }
 }
+
+private struct SilentDiagnostics: DiagnosticsPort { func record(_ diagnostic: Diagnostic) {} }
 
 @MainActor
 private final class Rows: WindowPublishing {

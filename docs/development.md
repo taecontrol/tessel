@@ -1127,7 +1127,7 @@ screenshot of a real machine is committed.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49, #51, #55, #57, #59 and #63.
+This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49, #51, #55, #57, #59, #62 and #63.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -1442,6 +1442,24 @@ counters. E6 tags the existing three resource scenes with unchanged budgets.
 | #59 E12 | T |
 | #59 E13 | T |
 | #59 E14 | T |
+| #62 E1 | J |
+| #62 E2 | J |
+| #62 E3 | P |
+| #62 E4 | P |
+| #62 E5 | P |
+| #62 E6 | P |
+| #62 E7 | P |
+| #62 E8 | P |
+| #62 E9 | P |
+| #62 E10 | J |
+| #62 E11 | X |
+| #62 E12 | J |
+| #62 E13 | J |
+| #62 E14 | J |
+| #62 E15 | P |
+| #62 E16 | R |
+| #62 E17 | J |
+| #62 E18 | P |
 | #63 E1 | J |
 | #63 E2 | J |
 | #63 E3 | J |
@@ -1453,6 +1471,7 @@ counters. E6 tags the existing three resource scenes with unchanged budgets.
 <!-- Pending capture: #59 E8 -->
 <!-- Pending capture: #59 E9 -->
 <!-- Pending capture: #59 E10 -->
+<!-- Pending capture: #62 E11 -->
 
 E21 has an opt-in executable capture in `CapturesCarousel.swift`; it needs a
 pixel recording of the stage before the owner can review it again. All mapped

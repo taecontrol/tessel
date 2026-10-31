@@ -55,7 +55,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let applications = SystemApplications()
         let ax = SystemAccessibility()
         let file = ConfigFile()
-        let config = ConfigManager(path: file.file.path, main: scheduler.main, load: { try file.load() }, watch: { file.watch() })
+        let diagnostics = PendingDiagnostics()
+        let config = ConfigManager(path: file.file.path, main: scheduler.main, diagnostics: diagnostics,
+                                   load: { try file.load() }, watch: { file.watch() })
         file.onChange = { [weak config] in config?.scheduleReload() }
         self.config = config
         #if TESSEL_DEVELOPMENT
@@ -91,7 +93,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let workspaces = Workspaces(store: store, trusted: trusted, configuration: config.status.effective,
                                     applications: applications, ax: ax, screens: SystemScreen(), windowOrder: SystemWindowOrder(),
                                     scheduler: scheduler, hotkeys: SystemHotkeys(), fixtureOnly: LaunchOptions.fixtureOnly,
-                                    motionPreferences: SystemMotionPreferences(), stage: stage, pointerActivity: SystemPointerActivity(), map: map) {
+                                    motionPreferences: SystemMotionPreferences(), stage: stage, pointerActivity: SystemPointerActivity(), map: map,
+                                    diagnostics: diagnostics) {
             let closet = try SkyLightCloset(simulateMissing: LaunchOptions.missingSkyLight, simulateFailedHide: LaunchOptions.failedHide)
             skyLight = closet
             return closet
@@ -115,6 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateMenu()
         if trusted {
             windows = WindowCatalog(workspaces: workspaces, applications: applications, ax: ax, windowOrder: SystemWindowOrder(), scheduler: scheduler,
+                                    diagnostics: diagnostics,
                                     fixtureBundleID: LaunchOptions.fixtureOnly ? "com.taecontrol.tessel.fixture" : nil)
             workspaces.catalog = windows
         } else {
@@ -268,6 +272,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         server?.stop()
     }
 }
+
+// Phase-one acceptance glue; the unified-log adapter has not been implemented.
+private struct PendingDiagnostics: DiagnosticsPort { func record(_ diagnostic: Diagnostic) {} }
 
 #if !TESSEL_DEVELOPMENT
 extension AppDelegate: NSMenuDelegate {
