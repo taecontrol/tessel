@@ -6,6 +6,13 @@ import Assumptions
 package enum PositionAcceptance: String, CaseIterable, Sendable { case requested, rightEdgeStrip, screenEdges }
 package enum OffDisplayMembership: String, CaseIterable, Sendable { case included, omitted }
 package enum MinimizedRaiseReply: String, CaseIterable, Sendable { case success, cannotComplete }
+/// How the Dock resolves an AXRaise that arrives while it is minimizing the window.
+package enum PendingMinimizeRaise: String, CaseIterable, Sendable {
+    /// The raise cancels the minimization and selects the window.
+    case cancels
+    /// The raise returns cannotComplete; the minimization completes, then the window restores.
+    case restoresAfterMinimize
+}
 
 package struct WindowSpec: Sendable {
     package var frame: CGRect
@@ -21,11 +28,13 @@ package struct WindowSpec: Sendable {
     package var offDisplayMembership: OffDisplayMembership
     package var closetHeightLoss: Double = 0
     package var minimizedRaiseReply: MinimizedRaiseReply
+    package var pendingMinimizeRaise: PendingMinimizeRaise
     package init(frame: CGRect = CGRect(x: 40, y: 60, width: 451, height: 400), subrole: String = "AXStandardWindow",
                  resizable: Bool = true, minimumSize: CGSize = CGSize(width: 1, height: 1),
                  maximumSize: CGSize = CGSize(width: 100_000, height: 100_000), parent: UInt32? = nil,
                  positionAcceptance: PositionAcceptance = .rightEdgeStrip, offDisplayMembership: OffDisplayMembership = .included,
-                 minimizedRaiseReply: MinimizedRaiseReply = .success, cgLayer: Int? = nil, popupParent: UInt32? = nil) {
+                 minimizedRaiseReply: MinimizedRaiseReply = .success, pendingMinimizeRaise: PendingMinimizeRaise = .cancels,
+                 cgLayer: Int? = nil, popupParent: UInt32? = nil) {
         self.frame = frame; self.subrole = subrole; self.resizable = resizable
         // Floating NSPanel utilities default to layer 3; apps can override it.
         self.cgLayer = cgLayer ?? (subrole == "AXFloatingWindow" ? 3 : 0); self.popupParent = popupParent
@@ -33,6 +42,7 @@ package struct WindowSpec: Sendable {
         self.positionAcceptance = positionAcceptance
         self.offDisplayMembership = offDisplayMembership
         self.minimizedRaiseReply = minimizedRaiseReply
+        self.pendingMinimizeRaise = pendingMinimizeRaise
     }
 }
 
@@ -150,7 +160,7 @@ package final class SimulatedMac: @unchecked Sendable {
         let id: UInt32, pid: Int32
         var spec: WindowSpec
         var minimized = false, fullscreen = false, closed = false
-        var minimizing = false
+        var minimizing = false, restoresAfterMinimize = false
         var spaces: Set<UInt64> = [1]
         var group: Int?
         /// Non-nil while AX geometry is ahead of the app-committed frame.

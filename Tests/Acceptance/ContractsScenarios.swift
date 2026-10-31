@@ -394,8 +394,9 @@ extension Acceptance.Contracts {
                         || attribute == "AXRaise" && !completedFirst && write.result == -25204)
                 }
                 if names == [will, did, restored] && flags == [false, true, false] {
-                    // A timed-out raise may already have started the restore.
-                    return attribute == "AXRaise" && events[1].sampledAt <= returnedAt && selected
+                    // A timed-out raise may already have started the restore,
+                    // or may let a pending minimize complete and restore it after.
+                    return attribute == "AXRaise" && (events[1].sampledAt <= returnedAt || write.result == -25204) && selected
                 }
                 return false
             }
