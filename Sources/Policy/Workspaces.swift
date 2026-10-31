@@ -596,14 +596,15 @@ final class Workspaces {
     }
 
     private func perform(_ command: WorkspaceCommand, recordReceipt: Bool = true) {
-        guard status.enabled, !quitting, !pointerHeld else { return }
+        guard status.enabled, !quitting else { return }
         // A command right after the user selected another window acts on it.
-        if !pointerReconciling, let selection = externalSelection, decisionPending {
+        if !pointerHeld, !pointerReconciling, let selection = externalSelection, decisionPending {
             cancelFocusDecision()
             followExternalSelection(pid: selection.pid, id: selection.id)
         }
         journal.trigger = .command(command)
         if recordReceipt { diagnostics.record(.command(command.text, workspace: status.active, rail: status.rail, focused: focused)) }
+        guard !pointerHeld else { return }
         if pointerReconciling { pointerCommands.append(command); return }
         cancelFocusDecision()
         applyCommand(command) {
