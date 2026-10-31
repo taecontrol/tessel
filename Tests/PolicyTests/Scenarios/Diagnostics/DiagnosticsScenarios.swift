@@ -99,6 +99,27 @@ import Testing
                         .focus(from: f.ids[0], to: f.ids[1], after: "after command workspace 1")))
                 }
             }
+
+            // Switching workspace shows or hides windows without moving them,
+            // so their entries are due to visibility alone. A hide is tagged
+            // with its command; a show is published by the snapshot that
+            // confirms the window on screen.
+            let original = f.tessel.status.active
+            for target in [original == 1 ? 2 : 1, original] {
+                f.mac.clearDiagnosticHistory()
+                s.step("switch to workspace \(target)") { f.tessel.press("workspace \(target)") }
+                s.settle()
+                let entries = DiagnosticsProof.values(f.mac)
+                let visibility = entries.compactMap { entry -> (DiagnosticWindow, DiagnosticWindow, String)? in
+                    guard case .window(.changed(let from, let to), let after) = entry, from.visible != to.visible,
+                          from.workspace == to.workspace, from.rail == to.rail, from.state == to.state, from.reason == to.reason
+                    else { return nil }
+                    return (from, to, after)
+                }
+                s.expect("workspace \(target) records a visibility-only change; actual \(entries)", !visibility.isEmpty)
+                s.expect("every window hidden by workspace \(target) names its command; actual \(entries)",
+                         visibility.allSatisfy { $0.1.visible || $0.2 == "after command workspace \(target)" })
+            }
         })
     }
 
