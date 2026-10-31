@@ -29,6 +29,8 @@ final class FixtureContracts: NSObject {
     private var knownProcesses = Set<pid_t>()
     private var knownApplications: [pid_t: NSRunningApplication] = [:]
     private var lifecycleCounts: [String: Int] = [:]
+    private var runningApplicationObservation: NSKeyValueObservation?
+    private var runningApplications: [NSRunningApplication] = []
     var spaces: FixtureSpaces?
     var moved = Set<UInt32>()
 
@@ -40,6 +42,8 @@ final class FixtureContracts: NSObject {
             stage.hideOverlay()
             stopObserving()
             NSWorkspace.shared.notificationCenter.removeObserver(self)
+            runningApplicationObservation = nil
+            runningApplications.removeAll()
             spaces?.stop(returning: liveMovedWindows())
             spaces = nil
             moved.removeAll()
@@ -49,6 +53,10 @@ final class FixtureContracts: NSObject {
             knownApplications.removeAll(); lifecycleCounts.removeAll()
             return [:]
         case "lifecycleStart":
+            runningApplications = NSWorkspace.shared.runningApplications
+            runningApplicationObservation = NSWorkspace.shared.observe(\.runningApplications) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.applicationsChanged(NSWorkspace.shared.runningApplications) }
+            }
             let names = [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification,
                          NSWorkspace.didActivateApplicationNotification, NSWorkspace.didHideApplicationNotification,
                          NSWorkspace.didUnhideApplicationNotification]
@@ -105,7 +113,8 @@ final class FixtureContracts: NSObject {
             knownApplications[pid] = app
             return ["alive": kill(pid, 0) == 0, "listed": NSWorkspace.shared.runningApplications.contains { $0.processIdentifier == pid },
                     "bundleMatches": app?.bundleIdentifier == "com.taecontrol.tessel.fixture",
-                    "regular": app?.activationPolicy == .regular, "prohibited": app?.activationPolicy == .prohibited,
+                    "regular": app?.activationPolicy == .regular, "accessory": app?.activationPolicy == .accessory,
+                    "prohibited": app?.activationPolicy == .prohibited,
                     "terminated": app?.isTerminated ?? true]
         case "activate":
             NSRunningApplication(processIdentifier: pid)?.activate()
@@ -325,12 +334,28 @@ final class FixtureContracts: NSObject {
     @objc private func applicationChanged(_ notification: Notification) {
         lifecycleCounts[notification.name.rawValue, default: 0] += 1
         guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+        recordLifecycle(notification.name.rawValue, app: app)
+    }
+
+    private func applicationsChanged(_ current: [NSRunningApplication]) {
+        let previous = runningApplications
+        runningApplications = current
+        let oldPIDs = Set(previous.map(\.processIdentifier)), newPIDs = Set(current.map(\.processIdentifier))
+        for app in current where !oldPIDs.contains(app.processIdentifier) {
+            recordLifecycle("runningApplications.arrived", app: app)
+        }
+        for app in previous where !newPIDs.contains(app.processIdentifier) {
+            recordLifecycle("runningApplications.departed", app: app)
+        }
+    }
+
+    private func recordLifecycle(_ name: String, app: NSRunningApplication) {
         let pid = app.processIdentifier
         let known = knownApplications.keys.sorted().first { knownApplications[$0]?.isEqual(app) == true }
         guard known != nil || knownProcesses.contains(pid) || app.bundleIdentifier == "com.taecontrol.tessel.fixture" && FixtureProbe.isFixture(pid) else { return }
         knownProcesses.insert(pid)
         if known == nil { knownApplications[pid] = app }
-        lifecycle.append(["name": notification.name.rawValue, "pid": pid, "knownPID": known ?? pid, "mainThread": Thread.isMainThread,
+        lifecycle.append(["name": name, "pid": pid, "knownPID": known ?? pid, "mainThread": Thread.isMainThread,
                           "alivePIDs": knownProcesses.sorted().filter { kill($0, 0) == 0 }])
     }
 

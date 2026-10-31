@@ -49,7 +49,7 @@ extension Acceptance {
             }
         }
 
-        @Test("#1 E22; #59 E5: idle resource budget") func e22TwentyIdleWindowsStayWithinWakeupCPUAndFootprintLimits() throws {
+        @Test("#1 E22; #59 E5; #63 E6: idle resource budget") func e22TwentyIdleWindowsStayWithinWakeupCPUAndFootprintLimits() throws {
             // Discover an existing desktop in one snapshot. Opening twenty
             // windows under a live manager leaves arrival animations in flight.
             harness.stopApp()
@@ -62,7 +62,7 @@ extension Acceptance {
             try verifyIdleResources("E22", stageWorkBefore: harness.stageWork())
         }
 
-        @Test("#2 E36: resources across ten workspaces") func e36TwentyWindowsAcrossTenWorkspacesKeepTheFoundationBudget() throws {
+        @Test("#2 E36; #63 E6: resources across ten workspaces") func e36TwentyWindowsAcrossTenWorkspacesKeepTheFoundationBudget() throws {
             try harness.reset()
             try desktop.configure(desktop.carousel, layout: "carousel")
             for index in 0..<20 {
@@ -90,7 +90,7 @@ extension Acceptance {
             sleep(seconds: 1)
             try verifyIdleResources("E36")
         }
-        @Test("#26 E24; #19 E28; #18 E26: carousel, a hidden layer and the enabled map keep the idle resource budget") func carouselAcrossWorkspacesKeepsTheIdleResourceBudget() throws {
+        @Test("#26 E24; #19 E28; #18 E26; #63 E6: carousel, a hidden layer and the enabled map keep the idle resource budget") func carouselAcrossWorkspacesKeepsTheIdleResourceBudget() throws {
             try harness.reset()
             // Thirty setup changes run instantly: each animated one costs a
             // capture. One animated

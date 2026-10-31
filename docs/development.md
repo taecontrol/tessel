@@ -1119,7 +1119,7 @@ screenshot of a real machine is committed.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49, #51, #55, #57 and #59.
+This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49, #51, #55, #57, #59 and #63.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -1138,6 +1138,13 @@ C tests live in `Tests/Acceptance/Contracts*.swift`; T in `Tests/CheckTests/` or
 Contracts declare their assumption IDs as well as any mapped native example. The E20 integrity check
 rejects missing tags, unmapped tags, duplicate map rows and tags in another
 layer. Every mapped ID must have a tagged test in its own layer.
+
+For #63, `JourneysApplications.swift` checks accessory quit, crash and discovery
+without activation (E1–E3), plus a regular exit's exact surviving windows,
+contiguous slots and single-key traversal (E5). The native `application-lifecycle`
+contract counts each regular and accessory KVO arrival and departure once (E4);
+the journey checks their published effect without adding production event
+counters. E6 tags the existing three resource scenes with unchanged budgets.
 
 | Example | Layer |
 | --- | --- |
@@ -1427,6 +1434,12 @@ layer. Every mapped ID must have a tagged test in its own layer.
 | #59 E12 | T |
 | #59 E13 | T |
 | #59 E14 | T |
+| #63 E1 | J |
+| #63 E2 | J |
+| #63 E3 | J |
+| #63 E4 | C |
+| #63 E5 | J |
+| #63 E6 | R |
 <!-- Pending capture: #33 E20 -->
 <!-- Pending capture: #36 E8 -->
 <!-- Pending capture: #59 E8 -->

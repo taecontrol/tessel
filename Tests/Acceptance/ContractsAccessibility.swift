@@ -3,17 +3,23 @@ import Foundation
 import Testing
 
 extension Acceptance.Contracts {
-    @Test("application-lifecycle: launch, metadata and termination", contract(.applicationLifecycle))
+    @Test("#63 E4: application-lifecycle: KVO reports regular and accessory app arrival and departure once on main", contract(.applicationLifecycle))
     func applicationLifecycle() throws {
         try native("lifecycleStart")
-        for prohibited in [false, true] {
-            let target = try other(prohibited: prohibited), pid = target.pid
-            try requireFinalState("native fixture metadata with prohibited=\(prohibited)") {
+        for (prohibited, accessory) in [(false, false), (false, true), (true, false)] {
+            let target = try other(prohibited: prohibited, accessory: accessory), pid = target.pid
+            try requireFinalState("native fixture metadata with prohibited=\(prohibited), accessory=\(accessory)") {
                 let metadata = try native("metadata", session: target)
                 return metadata.alive == true && metadata.listed == true && metadata.bundleMatches == true
-                    && metadata.regular == !prohibited && metadata.prohibited == prohibited && metadata.terminated == false
+                    && metadata.regular == (!prohibited && !accessory) && metadata.accessory == accessory
+                    && metadata.prohibited == prohibited && metadata.terminated == false
             }
             if !prohibited {
+                try requireFinalState("the fixture's runningApplications KVO arrival") {
+                    try native("lifecycle").lifecycle?.contains { $0.pid == pid && $0.name == "runningApplications.arrived" } == true
+                }
+            }
+            if !prohibited && !accessory {
                 try requireFinalState("the regular fixture launch notification") {
                     try native("lifecycle").lifecycle?.contains { $0.pid == pid && $0.name == "NSWorkspaceDidLaunchApplicationNotification" && $0.mainThread } == true
                 }
@@ -23,14 +29,30 @@ extension Acceptance.Contracts {
             target.disconnect()
             harness.otherFixtures.removeAll { $0 === target }
             if !prohibited {
+                try requireFinalState("the fixture's runningApplications KVO departure") {
+                    try native("lifecycle").lifecycle?.contains { $0.pid == pid && $0.name == "runningApplications.departed" } == true
+                }
+            }
+            if !prohibited && !accessory {
                 try requireFinalState("the regular fixture termination notification") {
                     try native("lifecycle").lifecycle?.contains { $0.pid == pid && $0.name == "NSWorkspaceDidTerminateApplicationNotification" && $0.mainThread } == true
                 }
             }
             let events = try #require(try native("lifecycle").lifecycle).filter { $0.pid == pid }
+            if !prohibited {
+                for name in ["runningApplications.arrived", "runningApplications.departed"] {
+                    let matching = events.filter { $0.name == name }
+                    try #require(matching.count == 1 && matching.allSatisfy { $0.mainThread && $0.knownPID == pid },
+                                 "\(name) must report exactly one transition of the fixture pid on main")
+                }
+            }
             for name in ["NSWorkspaceDidLaunchApplicationNotification", "NSWorkspaceDidTerminateApplicationNotification"] {
                 let matching = events.filter { $0.name == name }
                 try #require(matching.count <= 1 && matching.allSatisfy { $0.mainThread && $0.knownPID == pid })
+                if !prohibited {
+                    try #require(matching.count == (accessory ? 0 : 1),
+                                 "\(name) must report regular fixtures and omit accessory fixtures")
+                }
             }
         }
     }

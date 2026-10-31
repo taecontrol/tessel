@@ -212,13 +212,15 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 parent.beginSheet(sheet)
             } else {
                 let background = command["background"] as? Bool ?? false
-                let window = makeWindow(key: key, kind: kind, title: command["title"] as? String, show: !background, color: command["color"] as? Int)
+                let withoutActivating = command["withoutActivating"] as? Bool ?? false
+                let window = makeWindow(key: key, kind: kind, title: command["title"] as? String, show: !background && !withoutActivating, color: command["color"] as? Int)
                 if let fraction = command["widthFraction"] as? Double, let screen = NSScreen.screens.first {
                     var frame = window.frame
                     frame.size.width = ((screen.visibleFrame.width - 20) * fraction).rounded(.down)
                     window.setFrame(frame, display: true)
                 }
-                if background { window.orderBack(nil) }
+                if withoutActivating { window.orderFrontRegardless() }
+                else if background { window.orderBack(nil) }
             }
         case "replaceChromeDescendant":
             guard let content = windows[key]?.contentView,
@@ -905,6 +907,7 @@ struct Main {
         }
         let app = FixtureApplication.shared
         if args.contains("--prohibited"), !app.setActivationPolicy(.prohibited) { exit(6) }
+        if args.contains("--accessory"), !app.setActivationPolicy(.accessory) { exit(6) }
         let delegate = Fixture()
         app.delegate = delegate
         withExtendedLifetime(delegate) { app.run() }
