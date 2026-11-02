@@ -130,7 +130,8 @@ enum SocketIO {
         let request: String
         if command == "restart" {
             guard let replacing, replacing > 0 else { throw IPCError.invalidMessage }
-            request = "restart \(deadline) \(replacing)"
+            // Milliseconds keep the line within the server's 32-byte command limit.
+            request = "restart \(deadline / 1_000_000) \(replacing)"
         } else { request = command }
         try writeLine(Data(request.utf8), to: fd, until: deadline)
         return try JSONDecoder().decode(Reply.self, from: readLine(fd, limit: 1_048_576, until: deadline))

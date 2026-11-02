@@ -42,7 +42,7 @@ extension Acceptance.Journeys {
         try step("a delayed CLI request for the previous pid joins its ready replacement (transport wiring)") {
             let pair = try #require(cliRestart)
             let client = try StreamClient(path: harness.endpoint(), timeout: margin)
-            let deadline = DispatchTime.now().uptimeNanoseconds + 10_000_000_000
+            let deadline = (DispatchTime.now().uptimeNanoseconds + 10_000_000_000) / 1_000_000
             try client.send(Data("restart \(deadline) \(pair.old)\n".utf8))
             struct Reply: Decodable { let restarted: pid_t?; let error: String? }
             let reply = try JSONDecoder().decode(Reply.self, from: client.readLine(limit: 4096))

@@ -45,14 +45,16 @@ final class SocketServer: @unchecked Sendable {
         defer { close(client) }
         let deadline = DispatchTime.now().uptimeNanoseconds + 500_000_000
         do {
-            let data = try SocketIO.readLine(client, limit: 48, until: deadline)
+            let data = try SocketIO.readLine(client, limit: 32, until: deadline)
             guard let command = String(data: data, encoding: .utf8) else { return }
             let reply: Reply
             if command.hasPrefix("restart ") {
                 let fields = command.split(separator: " ", omittingEmptySubsequences: false)
-                guard fields.count == 3, let sentDeadline = UInt64(fields[1]),
+                guard fields.count == 3, let sentMilliseconds = UInt64(fields[1]),
                       let replacing = Int32(fields[2]), replacing > 0 else { return }
-                let requestedDeadline = min(sentDeadline, DispatchTime.now().uptimeNanoseconds + RestartWait.timeoutNanoseconds)
+                let sentDeadline = sentMilliseconds.multipliedReportingOverflow(by: 1_000_000)
+                let requestedDeadline = min(sentDeadline.overflow ? .max : sentDeadline.partialValue,
+                                            DispatchTime.now().uptimeNanoseconds + RestartWait.timeoutNanoseconds)
                 // Do not let a queued command turn a startup refusal into a restart.
                 if let error = respond("status").error { reply = Reply(error: error) }
                 else {
