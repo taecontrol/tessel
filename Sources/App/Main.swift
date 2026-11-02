@@ -68,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let diagnostics = SystemDiagnostics()
     private lazy var restart = Restart(pid: getpid(), now: { DispatchTime.now().uptimeNanoseconds }, record: diagnostics.record,
                                        launch: { done in SystemRelaunch.launch { done($0) } },
+                                       cancel: { pid in kill(pid, SIGTERM) },
                                        quit: { [weak self] in self?.quit() })
     private var systemEvents: SystemEvents?
     #if TESSEL_DEVELOPMENT

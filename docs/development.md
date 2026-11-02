@@ -1205,7 +1205,11 @@ runner. Policy owns concurrent joins (E8), deadline expiry under virtual time
 (E10), and starting/quitting refusals (E12). E1 observes the ready replacement
 and returned windows with the shared 5 s final-state margin, without a separate
 elapsed-time assertion. E10 proves the CLI's exact 10 s deadline without a
-real-system wait. E14 captures the enabled and disabled menus with
+real-system wait. Policy also proves that launch acceptance after every CLI
+deadline (E10) or ordinary Quit (E12) cancels only that launch's replacement,
+while a fresh handoff keeps its accepted replacement. The waiting process has
+SIGTERM's default disposition; setup installs its cleanup handler only after
+the previous pid exits. E14 captures the enabled and disabled menus with
 `TESSEL_CAPTURE_WORKSPACES=1 scripts/verify captureRestartMenuForOwnerReview`,
 including the observer's ordered menu titles and Restart's AX key equivalent.
 The CI-only permission-denial step checks that Restart is present as

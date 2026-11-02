@@ -28,6 +28,7 @@ enum SystemRelaunch {
     private static var timeout: DispatchSourceTimer?
 
     /// Called after AppKit finishes launching; no endpoint or window setup may precede it.
+    /// SIGTERM keeps its default disposition until setup installs the cleanup handler.
     static func awaitPrevious(ready: @escaping @MainActor () -> Void,
                               abandoned: @escaping @MainActor (Int32) -> Void) -> Bool {
         guard let pid = LaunchOptions.restartAfter else { return false }

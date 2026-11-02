@@ -299,6 +299,8 @@ import Testing
         launches += 1
         events.append("launch")
         completions.append(done)
+    }, cancel: { [unowned self] pid in
+        cancellations.append(pid)
     }, quit: { [unowned self] in
         quits += 1
         events.append("quit")

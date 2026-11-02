@@ -32,16 +32,19 @@ final class Restart {
     private let now: () -> UInt64
     private let record: (Diagnostic) -> Void
     private let launch: @MainActor (@escaping (Result<Int32, RestartLaunchError>) -> Void) -> Void
+    private let cancel: (Int32) -> Void
     private let quit: () -> Void
 
     init(pid: Int32, now: @escaping () -> UInt64,
          record: @escaping (Diagnostic) -> Void,
          launch: @escaping @MainActor (_ done: @escaping (Result<Int32, RestartLaunchError>) -> Void) -> Void,
+         cancel: @escaping (Int32) -> Void,
          quit: @escaping () -> Void) {
         self.pid = pid
         self.now = now
         self.record = record
         self.launch = launch
+        self.cancel = cancel
         self.quit = quit
     }
 
@@ -77,13 +80,21 @@ final class Restart {
     }
 
     private func completed(_ result: Result<Int32, RestartLaunchError>) {
-        guard case .launching(let waiters) = phase else { return }
+        guard case .launching(let waiters) = phase else {
+            if case .quitting(nil) = phase, case .success(let pid) = result { cancel(pid) }
+            return
+        }
         let pending = waiters.filter { request in request.deadline.map({ now() < $0 }) ?? true }
         switch result {
         case .success(let pid):
             // A late LaunchServices callback must not quit on behalf of CLI
-            // requests that have all expired. The replacement will abandon us.
-            guard !pending.isEmpty else { phase = .idle; return }
+            // requests that have all expired. Cancel the waiting replacement
+            // so a later quit or restart cannot let it set up.
+            guard !pending.isEmpty else {
+                phase = .idle
+                cancel(pid)
+                return
+            }
             phase = .quitting(newPID: pid)
             for request in pending { request.reply(.restarted(pid: pid)) }
             quit()
