@@ -87,8 +87,9 @@ extension Acceptance.Journeys {
             try #require(result.status != 0 && result.error.contains("Accessibility permission needed"))
             try desktop.expectMenu("Accessibility permission needed", open: true)
             try desktop.expectMenu("Open Accessibility Settings…", open: true)
+            try desktop.expectMenu("Restart Tessel", open: true)
         }
-        try step("granting Accessibility relaunches the app (wiring, CI runner only)") {
+        try step("#67 E13 granting Accessibility uses the shared restart path (CI runner only)") {
             try run([provision], timeout: 30, check: true)
             let status = try finalValue { () throws -> Status? in
                 do {
@@ -99,6 +100,10 @@ extension Acceptance.Journeys {
                 } catch is ProcessTimeout { return nil }
             }
             let granted = try #require(status, "a fresh process must report Accessibility granted within the margin")
+            harness.trackRestartedApp(granted.pid)
+            try requireFinalState("permission recovery records its shared restart source") {
+                try harness.lifecycleEntries(pids: [initialPID]).contains { $0.message == "restart requested from permission" }
+            }
             try desktop.expectMenu("Accessibility permission granted", open: true, pid: granted.pid)
             harness.stopApp()
             try harness.startApp(fixtureReady: false)

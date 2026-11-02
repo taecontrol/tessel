@@ -2,7 +2,7 @@ import Foundation
 
 @main
 struct Main {
-    static let usage = "Usage: tessel windows [--json] | tessel status [--json] | tessel log [--json] [--last <n>m|h|d]" + reportsUsage
+    static let usage = "Usage: tessel windows [--json] | tessel status [--json] | tessel log [--json] [--last <n>m|h|d]\(reportsUsage) | tessel restart"
     private static var reportsUsage: String {
         #if TESSEL_DEVELOPMENT
         " [--reports <dir>]"
@@ -13,6 +13,11 @@ struct Main {
 
     static func main() {
         let args = Array(CommandLine.arguments.dropFirst())
+        if args.first == "restart" {
+            guard args.count == 1 else { fail(usage, code: 2) }
+            restart()
+            return
+        }
         if args.first == "log" {
             do { try Log.run(Array(args.dropFirst())) }
             catch is Log.InvalidArguments { fail(usage, code: 2) }
@@ -47,6 +52,45 @@ struct Main {
                 }
             } else { fail("Invalid response from Tessel") }
         } catch { fail("Could not encode Tessel's response") }
+    }
+
+    private static func restart() {
+        let initial = request("status")
+        let old: AppStatus
+        switch initial {
+        case .failure(let error): fail(error.cliMessage)
+        case .success(let reply):
+            if let error = reply.error { fail(error) }
+            guard let status = reply.status else { fail(RestartWait.notRunning) }
+            old = status
+        }
+        let deadline = DispatchTime.now().uptimeNanoseconds + RestartWait.timeoutNanoseconds
+        var wait = RestartWait(oldPID: old.pid, deadline: deadline)
+        var step = wait.replied(request("restart", deadline: deadline, replacing: old.pid))
+        while true {
+            switch step {
+            case .done(let pid): print(RestartWait.restarted(pid)); return
+            case .fail(let message): fail(message)
+            case .wait: break
+            }
+            let now = DispatchTime.now().uptimeNanoseconds
+            if now >= deadline {
+                step = wait.probed(.failure(.timeout), now: now)
+                continue
+            }
+            let probe = request("status", deadline: min(deadline, now + 750_000_000))
+            let answered = DispatchTime.now().uptimeNanoseconds
+            step = wait.probed(probe, now: answered)
+            if step == .wait, answered < deadline {
+                Thread.sleep(forTimeInterval: min(0.05, Double(deadline - answered) / 1e9))
+            }
+        }
+    }
+
+    private static func request(_ command: String, deadline: UInt64? = nil, replacing: Int32? = nil) -> Result<Reply, IPCError> {
+        do { return .success(try SocketIO.request(command, deadline: deadline, replacing: replacing)) }
+        catch let error as IPCError { return .failure(error) }
+        catch { return .failure(.invalidMessage) }
     }
 
     static func printJSON(_ value: some Encodable) throws {

@@ -381,6 +381,12 @@ final class Fixture: NSObject, NSApplicationDelegate {
             let open = command["open"] as? Bool ?? false
             if open && command["press"] as? Bool != false { _ = AXUIElementPerformAction(item, kAXPressAction as CFString) }
             let expected = command["expected"] as? String ?? ""
+            let pressTitle = command["pressTitle"] as? String
+            let readItems = open && command["readItems"] as? Bool == true
+            var pressItem: AXUIElement?
+            var titles: [String] = []
+            var restartKeyEquivalent: String?
+            var restartKeyEquivalentError: Int32?
             var found = false
             var inspected = 0
             func inspect(_ element: AXUIElement, depth: Int) {
@@ -389,12 +395,25 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 // Only menu-item titles are read. Window titles are never queried.
                 let role = FixtureProbe.value(element, kAXRoleAttribute) as? String
                 let attribute = role == kAXMenuItemRole ? kAXTitleAttribute : kAXDescriptionAttribute
+                if readItems, role == kAXMenuItemRole,
+                   let title = FixtureProbe.value(element, kAXTitleAttribute) as? String, !title.isEmpty {
+                    titles.append(title)
+                    if title == "Restart Tessel" {
+                        var value: CFTypeRef?
+                        restartKeyEquivalentError = AXUIElementCopyAttributeValue(element, kAXMenuItemCmdCharAttribute as CFString, &value).rawValue
+                        restartKeyEquivalent = value as? String
+                    }
+                }
+                if role == kAXMenuItemRole, let pressTitle,
+                   FixtureProbe.value(element, kAXTitleAttribute) as? String == pressTitle { pressItem = element }
                 if (open ? role == kAXMenuItemRole : role == kAXMenuBarItemRole),
                    let text = FixtureProbe.value(element, attribute) as? String,
                    (command["suffix"] as? Bool == true ? text.hasSuffix(expected) : text.contains(expected)) { found = true }
                 for child in FixtureProbe.value(element, kAXChildrenAttribute) as? [AXUIElement] ?? [] { inspect(child, depth: depth + 1) }
             }
             inspect(item, depth: 0)
+            var pressed = false
+            if open, let pressItem { pressed = AXUIElementPerformAction(pressItem, kAXPressAction as CFString) == .success }
             let menus = (FixtureProbe.value(item, kAXChildrenAttribute) as? [AXUIElement] ?? [])
                 .filter { FixtureProbe.value($0, kAXRoleAttribute) as? String == kAXMenuRole }
             if open && command["keepOpen"] as? Bool != true {
@@ -404,6 +423,48 @@ final class Fixture: NSObject, NSApplicationDelegate {
             }
             var reply = snapshot
             reply["menuContains"] = found
+            if pressTitle != nil { reply["menuPressed"] = pressed }
+            if readItems {
+                reply["menuTitles"] = titles
+                if let restartKeyEquivalent { reply["restartKeyEquivalent"] = restartKeyEquivalent }
+                if let restartKeyEquivalentError { reply["restartKeyEquivalentError"] = restartKeyEquivalentError }
+            }
+            return reply
+        case "alert":
+            guard let pid = command["pid"] as? Int32,
+                  FixtureProbe.hasSignature(pid, identifier: "com.taecontrol.tessel.dev"),
+                  let expected = command["expected"] as? String, !expected.isEmpty else {
+                return ["error": "alert inspection accepts the development app and a nonempty reason only"]
+            }
+            let application = AXUIElementCreateApplication(pid)
+            AXUIElementSetMessagingTimeout(application, 0.2)
+            var found = false
+            var inspected = 0
+            func containsReason(_ element: AXUIElement, depth: Int) -> Bool {
+                guard depth < 8, inspected < 100 else { return false }
+                inspected += 1
+                // Read only this development app's alert text, never window titles.
+                if FixtureProbe.value(element, kAXRoleAttribute) as? String == kAXStaticTextRole,
+                   let text = FixtureProbe.value(element, kAXValueAttribute) as? String, text.contains(expected) { return true }
+                return (FixtureProbe.value(element, kAXChildrenAttribute) as? [AXUIElement] ?? [])
+                    .contains { containsReason($0, depth: depth + 1) }
+            }
+            for window in FixtureProbe.value(application, kAXWindowsAttribute) as? [AXUIElement] ?? [] {
+                let subrole = FixtureProbe.value(window, kAXSubroleAttribute) as? String
+                guard subrole == kAXDialogSubrole || subrole == kAXSystemDialogSubrole else { continue }
+                guard containsReason(window, depth: 0) else { continue }
+                found = true
+                if command["dismiss"] as? Bool == true {
+                    guard let button = FixtureProbe.value(window, kAXDefaultButtonAttribute), CFGetTypeID(button) == AXUIElementGetTypeID() else {
+                        return ["error": "the development alert has no default button"]
+                    }
+                    guard AXUIElementPerformAction(button as! AXUIElement, kAXPressAction as CFString) == .success else {
+                        return ["error": "the development alert's default button could not be pressed"]
+                    }
+                }
+            }
+            var reply = snapshot
+            reply["alertContains"] = found
             return reply
         case "hotkey":
             // A missed hotkey must never type in a real user's app, even on failure.

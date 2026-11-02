@@ -1,7 +1,14 @@
+package enum RestartSource: String, CaseIterable, Sendable {
+    case menu, cli, permission
+}
+
 // Payloads contain identifiers and Tessel's vocabulary, never AX text.
 package enum Diagnostic: Equatable, Sendable {
     case started(version: String, permission: Bool, config: String)
     case enabled, disabled(reason: String), quit
+    case restartRequested(from: RestartSource)
+    case restartFailed(reason: String)
+    case restartAbandoned(previous: Int32)
     case appLaunched(pid: Int32, bundleID: String)
     case appTerminated(pid: Int32, bundleID: String, windows: Int)
     case command(String, workspace: Int, rail: Int?, focused: UInt32?)
@@ -14,7 +21,7 @@ package enum Diagnostic: Equatable, Sendable {
 
     package var level: DiagnosticLevel {
         switch self {
-        case .disabled, .readFailed, .configError: .error
+        case .disabled, .readFailed, .configError, .restartFailed, .restartAbandoned: .error
         default: .notice
         }
     }
@@ -22,6 +29,7 @@ package enum Diagnostic: Equatable, Sendable {
     package var category: DiagnosticCategory {
         switch self {
         case .started, .enabled, .disabled, .quit: .lifecycle
+        case .restartRequested, .restartFailed, .restartAbandoned: .lifecycle
         case .appLaunched, .appTerminated, .readFailed: .apps
         case .command: .commands
         case .window, .focus: .windows
@@ -37,6 +45,9 @@ package enum Diagnostic: Equatable, Sendable {
         case .enabled: "enabled"
         case .disabled(let reason): "disabled: \(reason)"
         case .quit: "quit"
+        case .restartRequested(let source): "restart requested from \(source.rawValue)"
+        case .restartFailed(let reason): "restart failed: \(reason)"
+        case .restartAbandoned(let pid): "restart abandoned: previous instance \(pid) still running"
         case let .appLaunched(pid, bundle): "app launched \(bundle) pid \(pid)"
         case let .appTerminated(pid, bundle, windows): "app terminated \(bundle) pid \(pid), \(windows) windows"
         case let .command(command, workspace, rail, focused):

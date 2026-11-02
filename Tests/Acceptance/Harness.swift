@@ -102,6 +102,11 @@ struct FixtureReply: Decodable {
     let keyCount: Int?
     let clicks: [String: Int]?
     let menuContains: Bool?
+    let menuPressed: Bool?
+    let menuTitles: [String]?
+    let restartKeyEquivalent: String?
+    let restartKeyEquivalentError: Int32?
+    let alertContains: Bool?
     let ready: Bool?
     let active: Bool?
     let contract: NativeContractReply?
@@ -354,7 +359,7 @@ final class Harness {
     /// value reaches tessel through its argument domain, which NSWorkspace reads
     /// before the user's. Nothing outside this launch changes, so neither
     /// cleanup nor an interrupted run has anything to restore.
-    func startApp(fixtureReady: Bool = true, arguments: [String] = [], reduceMotion: Bool = false) throws {
+    func startApp(fixtureReady: Bool = true, arguments: [String] = [], reduceMotion: Bool = false, waitUntilReady: Bool = true) throws {
         let capture = ["TESSEL_CAPTURE_WORKSPACES", "TESSEL_CAPTURE_MAP"].contains {
             ProcessInfo.processInfo.environment[$0] == "1"
         } ? ["--test-capture-ui"] : []
@@ -367,6 +372,8 @@ final class Harness {
         }
         appPID = pid
         appReduceMotion = reduceMotion
+        // The previous-process guard must be observed before any endpoint exists.
+        guard waitUntilReady else { return }
         guard try finalState({ try invoke("status", "--json").status == 0 }) else {
             throw HarnessError("signed development app did not expose its status endpoint")
         }
@@ -402,6 +409,42 @@ final class Harness {
     }
 
     var appIsRunning: Bool { !processIDs(appExecutable).isEmpty }
+
+    func trackRestartedApp(_ pid: pid_t) {
+        appPID = pid
+    }
+
+    /// Uses the shared final-state margin, including temporary socket absence
+    /// while the old process quits. A starting reply is not a ready replacement.
+    func waitForRestart(previous: pid_t) throws -> Status {
+        let next = try finalValue { () throws -> Status? in
+            do {
+                let result = try invoke("status", "--json")
+                guard result.status == 0 else { return nil }
+                let value = try JSONDecoder().decode(Status.self, from: result.outputData)
+                return value.pid != previous ? value : nil
+            } catch is ProcessTimeout { return nil }
+        }
+        let status = try #require(next, "a different pid must answer ready status within the shared final-state margin")
+        trackRestartedApp(status.pid)
+        return status
+    }
+
+    struct LifecycleEntry: Decodable {
+        let pid: pid_t
+        let message: String
+    }
+
+    /// Query through the bundled CLI, then retain only the harness's own pids.
+    /// An empty report directory excludes the owner's crash-report paths.
+    func lifecycleEntries(pids: [pid_t]) throws -> [LifecycleEntry] {
+        let reports = directory.appending(path: "restart-reports")
+        try FileManager.default.createDirectory(at: reports, withIntermediateDirectories: true)
+        let result = try invoke("log", "--json", "--last", "5m", "--reports", reports.path)
+        try #require(result.status == 0, "restart lifecycle diagnostics must be readable through the CLI")
+        struct Document: Decodable { let entries: [LifecycleEntry] }
+        return try JSONDecoder().decode(Document.self, from: result.outputData).entries.filter { pids.contains($0.pid) }
+    }
 
     func invoke(_ arguments: String...) throws -> ProcessResult {
         try invoke(arguments)

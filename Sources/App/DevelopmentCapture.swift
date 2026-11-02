@@ -1,7 +1,7 @@
 #if TESSEL_DEVELOPMENT
 import AppKit
 
-/// Export the running app's own views for E37 and #18 E28. No screen recording, other app
+/// Export the running app's own views for E37, #18 E28 and #67 E14. No screen recording, other app
 /// windows, or WindowServer screenshots are involved. Created only with both
 /// --test-fixture-only and --test-capture-ui in the development build.
 @MainActor
@@ -35,13 +35,16 @@ final class DevelopmentCapture: NSObject, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        guard !enabled else { return }
+        let enabled = enabled
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(100)) { [weak self] in
-            guard let self, !self.enabled else { return }
+            guard let self, self.enabled == enabled else { return }
             // NSApp.windows contains only this process's own windows. AppKit's
             // popup menu has a public NSWindow/NSView surface at this level.
             for window in NSApp.windows where window.isVisible && window.level == .popUpMenu {
-                if let view = window.contentView { self.export(view, name: "E37-disabled-menu") }
+                if let view = window.contentView {
+                    self.export(view, name: enabled ? "E14-enabled-menu" : "E14-disabled-menu")
+                    if !enabled { self.export(view, name: "E37-disabled-menu") }
+                }
             }
         }
     }

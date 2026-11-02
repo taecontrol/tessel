@@ -28,8 +28,15 @@ open ".build/apps/Tessel Dev.app"
 ".build/apps/Tessel Dev.app/Contents/MacOS/tessel" status --json
 ```
 
-The read-only CLI accepts `windows [--json]`, `status [--json]` and
+The CLI's read-only commands are `windows [--json]`, `status [--json]` and
 `log [--json] [--last <n>m|h|d]`.
+
+`tessel restart` restarts the running instance and prints
+`Tessel restarted (pid N)` only after the replacement answers ready status.
+It exits 1 if Tessel is not running, is starting or quitting, cannot launch a
+replacement, or has no ready replacement within 10 s. It never starts a stopped
+Tessel or kills a process. **Restart Tessel** in the menu uses the same handoff;
+both paths return all windows to rail 1 of workspace 1 without preserving layout.
 You can symlink this bundled CLI into a directory on your `PATH`.
 With a custom `XDG_CONFIG_HOME`, pass the same value to `open --env` and the CLI.
 The bundle ID and config path select the instance the CLI observes.
@@ -142,6 +149,27 @@ Tessel is observed through its bundled CLI. The harness cleans up its own
 processes and data. It always passes `--test-fixture-only`, so only fixture
 processes are observed or managed, including crash recovery. The daily build
 rejects that argument. Another Tessel instance can contaminate these fixtures.
+
+Restarts use LaunchServices to open a new instance of the same signed bundle,
+carrying `XDG_CONFIG_HOME` and every accepted `--test-` argument (plus the harness's
+process-local `-reduceMotion` preference). A restart's handoff quits the old
+instance only after the launch is accepted. Ordinary Quit and SIGTERM instead
+wait for an outstanding launch callback, for at most 2 s, cancelling its
+replacement before terminating. If that bound expires before LaunchServices
+replies, Quit proceeds without a replacement pid to cancel; a replacement
+launched after this process exits can still treat the exit as a handoff.
+After AppKit finishes launching, the new instance waits on a process-exit
+notification before creating its socket, menu or window catalog.
+If the old pid still lives after 10 s, the replacement logs
+`restart abandoned: previous instance <pid> still running` and exits. The
+development-only `--test-failed-relaunch` and `--test-short-restart-wait` require
+`--test-fixture-only`; they respectively refuse a relaunch and shorten the
+previous-process wait to 1 s. Both builds accept `--restart-after <pid>` for the
+handoff, and the daily build rejects every `--test-` argument.
+The CLI restart request carries the pid observed by its initial status query.
+If another caller has already replaced that pid, the ready replacement answers
+the delayed request without restarting again. A fresh CLI invocation observes
+the replacement's pid and can restart it normally.
 
 The harness owns the Reduce Motion Given rather than inheriting the desktop's
 setting; GitHub's macOS images turn Reduce Motion on, which made every carousel
@@ -563,10 +591,11 @@ change when motion is off. No capture or timer remains at rest; the overlay
 stays ordered in, empty and transparent, so the next show draws at once.
 
 SIGTERM, the Quit menu and permission relaunch clear the stage at once, then
-drain outstanding ScreenCaptureKit requests for at most 500 ms before asking
-AppKit to terminate. Cleanup then returns managed windows and exits. Exiting
-during a capture can leave replayd checking a dead client's audit token
-and showing an approval alert. The capture-settled callback or one-shot deadline,
+drain outstanding ScreenCaptureKit requests for at most 500 ms. The drain runs
+alongside any outstanding restart-launch wait described above; both must finish
+before asking AppKit to terminate. Cleanup then returns managed windows and
+exits. Exiting during a capture can leave replayd checking a dead client's audit
+token and showing an approval alert. The capture-settled callback or one-shot deadline,
 whichever arrives first, completes the drain exactly once; repeated quit requests
 do not extend it or repeat cleanup. The limit leaves margin over normal
 15–100 ms captures and the measured 230 ms cold start, without letting a stuck
@@ -1156,7 +1185,7 @@ screenshot of a real machine is committed.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49, #51, #55, #57, #59, #62 and #63.
+This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49, #51, #55, #57, #59, #62, #63 and #67.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -1175,6 +1204,26 @@ C tests live in `Tests/Acceptance/Contracts*.swift`; T in `Tests/CheckTests/` or
 Contracts declare their assumption IDs as well as any mapped native example. The E20 integrity check
 rejects missing tags, unmapped tags, duplicate map rows and tags in another
 layer. Every mapped ID must have a tagged test in its own layer.
+
+For #67, the crash-and-quit journey owns restart wiring through the AX menu
+and bundled CLI (E1–E7, E9, E11); permission recovery owns E13 on the disposable
+runner. Policy owns concurrent joins (E8), deadline expiry under virtual time
+(E10), and starting/quitting refusals (E12). E1 observes the ready replacement
+and returned windows with the shared 5 s final-state margin, without a separate
+elapsed-time assertion. E10 proves the CLI's exact 10 s deadline without a
+real-system wait. Policy also proves that launch acceptance after every CLI
+deadline (E10) or ordinary Quit (E12) cancels only that launch's replacement,
+while a fresh handoff keeps its accepted replacement. Quit waits for the launch
+result before finishing, bounded at exactly 2 s under virtual time; a later
+result still cancels its replacement if the old process is alive. With no
+outstanding launch, including an accepted handoff, Quit proceeds immediately.
+The waiting process has SIGTERM's default disposition; setup installs its cleanup
+handler only after the previous pid exits. E14 captures the enabled and disabled menus with
+`TESSEL_CAPTURE_WORKSPACES=1 scripts/verify captureRestartMenuForOwnerReview`,
+including the observer's ordered menu titles and Restart's AX key equivalent.
+The CI-only permission-denial step checks that Restart is present as
+supplementary wiring evidence; its permission-needed menu still needs a capture
+on an Accessibility-denied runner. E15 remains an owner capture of the daily build.
 
 For #63, `JourneysApplications.swift` checks accessory quit, crash and discovery
 without activation (E1–E3), plus a regular exit's exact surviving windows,
@@ -1495,17 +1544,34 @@ counters. E6 tags the existing three resource scenes with unchanged budgets.
 | #63 E4 | C |
 | #63 E5 | J |
 | #63 E6 | R |
+| #67 E1 | J |
+| #67 E2 | J |
+| #67 E3 | J |
+| #67 E4 | J |
+| #67 E5 | J |
+| #67 E6 | J |
+| #67 E7 | J |
+| #67 E8 | P |
+| #67 E9 | J |
+| #67 E10 | P |
+| #67 E11 | J |
+| #67 E12 | P |
+| #67 E13 | J |
+| #67 E14 | X |
+| #67 E15 | X |
 <!-- Pending capture: #33 E20 -->
 <!-- Pending capture: #36 E8 -->
 <!-- Pending capture: #59 E8 -->
 <!-- Pending capture: #59 E9 -->
 <!-- Pending capture: #59 E10 -->
 <!-- Pending capture: #62 E11 -->
+<!-- Pending capture: #67 E14 -->
+<!-- Pending capture: #67 E15 -->
 
 E21 has an opt-in executable capture in `CapturesCarousel.swift`; it needs a
-pixel recording of the stage before the owner can review it again. All mapped
-rows have executable coverage. E15 owns J: the native mixed-app landing and
-activation assertions. E14 and E16 own P; their untagged journey steps check
+pixel recording of the stage before the owner can review it again. Mapped rows
+without a pending-capture marker have executable coverage. E15 owns J: the native
+mixed-app landing and activation assertions. E14 and E16 own P; their untagged journey steps check
 wiring.
 
 All deterministic carousel examples run directly against the simulated stage:

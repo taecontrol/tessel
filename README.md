@@ -73,9 +73,10 @@ full screen width, or as wide as its app allows.
 
 The first time you open Tessel from Applications, it adds itself to your
 login items. To turn that off, use **Open at Login** in its menu bar menu.
-Choose **Quit Tessel** in the same menu to quit. When Tessel quits, it brings
-every window from every workspace back to your current desktop, so no window
-stays hidden.
+Choose **Restart Tessel** in the same menu to start fresh, or **Quit Tessel** to
+quit. Both bring every window from every workspace back to your current
+desktop, so no window stays hidden. Restart puts them on rail 1 of workspace 1,
+without keeping their previous layout.
 
 ## Keys
 
