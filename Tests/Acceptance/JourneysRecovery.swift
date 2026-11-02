@@ -63,7 +63,11 @@ extension Acceptance.Journeys {
             try desktop.key(2, send: true)
             try requireFinalState("the first tile is on workspace 2") { try harness.row(ids[0])?.workspace == 2 }
             try desktop.key(1)
-            try desktop.activate(key: "w2")
+            // Finish the workspace handoff before selecting the next tile
+            // through Tessel, so its focus decision precedes the float key.
+            try desktop.expectFocus(ids[1])
+            try desktop.post(kVK_ANSI_L)
+            try desktop.expectFocus(ids[2])
             try desktop.post(kVK_ANSI_F)
             try requireFinalState("the third standard fixture is manually floating") { try harness.row(ids[2])?.state == "floats" }
             try desktop.post(kVK_ANSI_Z)
