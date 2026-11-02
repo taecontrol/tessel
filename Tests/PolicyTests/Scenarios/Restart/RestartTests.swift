@@ -195,6 +195,39 @@ import Testing
                 == .fail("Tessel could not restart: Launch denied"))
     }
 
+    @Test("ordinary Quit refuses pending restart callers and ignores the later launch completion")
+    func quitInterruptsPendingLaunch() throws {
+        let rig = RestartRig()
+        rig.request(.menu, name: "menu")
+        rig.request(.cli, name: "cli")
+        rig.restart.quitting()
+        for name in ["menu", "cli"] {
+            #expect(rig.outcomes[name] == [.refused("Tessel is quitting")])
+        }
+        try rig.complete(.success(202))
+        #expect(rig.launches == 1 && rig.quits == 0)
+        for name in ["menu", "cli"] {
+            #expect(rig.outcomes[name] == [.refused("Tessel is quitting")])
+        }
+    }
+
+    @Test("a ready but unrelated process cannot complete an acknowledged restart")
+    func waitRequiresAcceptedPID() {
+        var wait = RestartWait(oldPID: 101, deadline: 10_000_000_000)
+        #expect(wait.replied(.success(Reply(restarted: 202))) == .wait)
+        #expect(wait.probed(.success(status(303)), now: 1) == .wait)
+        #expect(wait.probed(.success(status(202)), now: 2) == .done(pid: 202))
+    }
+
+    @Test("the production restart budget waits until exactly ten seconds")
+    func productionTimeoutIsTenSeconds() {
+        let start: UInt64 = 4_000_000_000
+        var wait = RestartWait(oldPID: 101, deadline: start + RestartWait.timeoutNanoseconds)
+        #expect(wait.probed(.failure(.unavailable), now: start + 9_999_999_999) == .wait)
+        #expect(wait.probed(.failure(.unavailable), now: start + 10_000_000_000)
+                == .fail("Tessel did not restart within 10 s"))
+    }
+
     private func status(_ pid: Int32) -> Reply {
         Reply(status: AppStatus(permission: "granted", config: ConfigStatus(path: "/fixture/tessel.toml"), version: "fixture", pid: pid))
     }
