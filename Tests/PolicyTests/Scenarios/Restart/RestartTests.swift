@@ -1,4 +1,5 @@
 import Ports
+import Simulator
 import Testing
 @testable import Policy
 
@@ -168,6 +169,87 @@ import Testing
         #expect(rig.outcomes["pending"] == [.refused("Tessel is quitting")])
     }
 
+    @Test("#67 E12: Quit waits for launch completion and cancels an accepted replacement before finishing",
+          arguments: [true, false])
+    func quitWaitsForLaunchCompletion(accepted: Bool) {
+        let rig = RestartRig()
+        defer { rig.scheduler.shutdown() }
+        rig.request(.menu, name: "pending")
+        rig.restart.quitting {
+            #expect(rig.cancellations == (accepted ? [202] : []))
+            rig.quitCompletions.append(rig.scheduler.now)
+        }
+        #expect(rig.quitCompletions.isEmpty)
+        rig.request(.cli, name: "after quit")
+        #expect(rig.outcomes["pending"] == [.refused("Tessel is quitting")])
+        #expect(rig.outcomes["after quit"] == [.refused("Tessel is quitting")])
+        rig.scheduler.main.after(milliseconds: 500) {
+            #expect(rig.quitCompletions.isEmpty)
+            let result: Result<Int32, RestartLaunchError> = accepted ? .success(202) : .failure(RestartLaunchError(reason: "Launch denied"))
+            #expect(throws: Never.self) { try rig.complete(result) }
+            #expect(rig.quitCompletions == [500])
+        }
+        rig.scheduler.main.after(milliseconds: 3_000) {
+            #expect(rig.quitCompletions == [500], "the bound must not finish Quit a second time")
+        }
+        #expect(rig.scheduler.run() == .settled)
+        #expect(rig.quits == 0, "an interrupted launch must not request a handoff quit")
+    }
+
+    @Test("#67 E12: Quit finishes immediately without a launch, including an accepted restart handoff",
+          arguments: [false, true])
+    func quitWithoutPendingLaunchFinishesImmediately(handoff: Bool) throws {
+        let rig = RestartRig()
+        defer { rig.scheduler.shutdown() }
+        if handoff {
+            rig.request(.menu, name: "restart")
+            try rig.complete(.success(202))
+        }
+        rig.restart.quitting { rig.quitCompletions.append(rig.scheduler.now) }
+        #expect(rig.quitCompletions == [0])
+        #expect(rig.scheduler.run() == .settled)
+        #expect(rig.scheduler.now == 0, "Quit must not schedule a wait when no launch is outstanding")
+        #expect(rig.quitCompletions == [0])
+        #expect(rig.cancellations.isEmpty, "a handoff must keep its accepted replacement")
+    }
+
+    @Test("#67 E12: an unfinished launch bounds Quit at two virtual seconds, once per caller")
+    func quitWaitIsBoundedAtTwoSeconds() {
+        let rig = RestartRig()
+        defer { rig.scheduler.shutdown() }
+        rig.request(.menu, name: "pending")
+        rig.restart.quitting { rig.quitCompletions.append(rig.scheduler.now) }
+        #expect(rig.quitCompletions.isEmpty)
+        rig.scheduler.main.after(milliseconds: 1_000) {
+            rig.restart.quitting { rig.quitCompletions.append(rig.scheduler.now) }
+            #expect(rig.quitCompletions.isEmpty, "repeated Quit must join the same launch wait")
+        }
+        rig.scheduler.main.after(milliseconds: 1_999) { #expect(rig.quitCompletions.isEmpty) }
+        rig.scheduler.main.after(milliseconds: 2_001) { #expect(rig.quitCompletions == [2_000, 2_000]) }
+        rig.scheduler.main.after(milliseconds: 4_000) { #expect(rig.quitCompletions == [2_000, 2_000]) }
+        #expect(rig.scheduler.run() == .settled)
+        #expect(rig.quits == 0)
+    }
+
+    @Test("#67 E10: a launch completing after the Quit bound still cancels its replacement if this process lives")
+    func launchAfterQuitBoundStillCancelsReplacement() {
+        let rig = RestartRig()
+        defer { rig.scheduler.shutdown() }
+        let deadline = rig.now + 10_000_000_000
+        rig.request(.cli, name: "expired", deadline: deadline)
+        rig.now = deadline
+        rig.restart.quitting { rig.quitCompletions.append(rig.scheduler.now) }
+        rig.scheduler.main.after(milliseconds: 2_001) {
+            #expect(rig.quitCompletions == [2_000])
+            #expect(throws: Never.self) { try rig.complete(.success(202)) }
+            #expect(rig.cancellations == [202])
+            #expect(rig.quitCompletions == [2_000], "a late completion must not finish Quit again")
+        }
+        #expect(rig.scheduler.run() == .settled)
+        #expect(rig.quits == 0)
+        #expect(rig.outcomes["expired"] == nil)
+    }
+
     @Test("#67 E10: a fresh handoff after an expired launch never cancels the replacement it quits for")
     func freshHandoffDoesNotCancelReplacement() throws {
         let rig = RestartRig()
@@ -275,11 +357,22 @@ import Testing
     }
 }
 
+// Model the current app's termination boundary until Restart owns its wait:
+// quitting() returns and the app may terminate as soon as its drain finishes.
+private extension Restart {
+    func quitting(then done: @escaping () -> Void) {
+        quitting()
+        done()
+    }
+}
+
 /// A virtual monotonic clock and controlled launch completion, with no OS model.
 @MainActor private final class RestartRig {
     let pid: Int32
     init(pid: Int32 = 101) { self.pid = pid }
     var now: UInt64 = 4_000_000_000
+    let scheduler = BatonScheduler()
+    var quitCompletions: [Int] = []
     var launches = 0
     var cancellations: [Int32] = []
     var quits = 0
