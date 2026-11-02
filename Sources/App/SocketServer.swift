@@ -7,9 +7,12 @@ final class SocketServer: @unchecked Sendable {
     private var source: DispatchSourceRead?
     private var lockFD: Int32 = -1
     private let respond: @Sendable (String) -> Reply
+    private let restart: @MainActor @Sendable (UInt64, @escaping @Sendable (Reply) -> Void) -> Void
 
-    init(respond: @escaping @Sendable (String) -> Reply) throws {
+    init(respond: @escaping @Sendable (String) -> Reply,
+         restart: @escaping @MainActor @Sendable (UInt64, @escaping @Sendable (Reply) -> Void) -> Void) throws {
         self.respond = respond
+        self.restart = restart
         try endpoint.prepareDirectory()
         lockFD = open(endpoint.path + ".lock", O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard lockFD >= 0 else { throw IPCError.unsafeEndpoint }
@@ -44,8 +47,22 @@ final class SocketServer: @unchecked Sendable {
         do {
             let data = try SocketIO.readLine(client, limit: 32, until: deadline)
             guard let command = String(data: data, encoding: .utf8) else { return }
-            let reply = respond(command)
-            try SocketIO.writeLine(JSONEncoder().encode(reply), to: client, until: deadline)
+            let reply: Reply
+            if command.hasPrefix("restart ") {
+                guard let sentDeadline = UInt64(command.dropFirst(8)) else { return }
+                let requestedDeadline = min(sentDeadline, DispatchTime.now().uptimeNanoseconds + RestartWait.timeoutNanoseconds)
+                // Do not let a queued command turn a startup refusal into a restart.
+                if let error = respond("status").error { reply = Reply(error: error) }
+                else {
+                    let pending = PendingReply()
+                    DispatchQueue.main.async { self.restart(requestedDeadline, pending.complete) }
+                    reply = pending.wait(until: requestedDeadline)
+                }
+            } else { reply = respond(command) }
+            // LaunchServices may take longer than the read-only budget. Give the
+            // accepted reply its own bounded write after the coordinator replies.
+            let writeDeadline = DispatchTime.now().uptimeNanoseconds + 500_000_000
+            try SocketIO.writeLine(JSONEncoder().encode(reply), to: client, until: writeDeadline)
         } catch { /* A stalled or disconnected client cannot block another query. */ }
     }
 
@@ -60,6 +77,25 @@ final class SocketServer: @unchecked Sendable {
     }
 
     deinit { stop() }
+}
+
+/// Only the socket worker waits; the main thread publishes once and keeps quitting.
+private final class PendingReply: @unchecked Sendable {
+    private let lock = NSLock()
+    private let semaphore = DispatchSemaphore(value: 0)
+    private var reply: Reply?
+
+    func complete(_ value: Reply) {
+        lock.withLock { reply = value }
+        semaphore.signal()
+    }
+
+    func wait(until deadline: UInt64) -> Reply {
+        guard semaphore.wait(timeout: DispatchTime(uptimeNanoseconds: deadline)) == .success else {
+            return Reply(error: RestartWait.timedOut)
+        }
+        return lock.withLock { reply! }
+    }
 }
 
 /// The CLI serves only committed snapshots. It never waits for an AX round trip.

@@ -27,7 +27,29 @@ enum LaunchOptions {
     static var missingSkyLight: Bool { fixtureOnly && CommandLine.arguments.contains("--test-missing-skylight") }
     static var failedHide: Bool { fixtureOnly && CommandLine.arguments.contains("--test-failed-hide") }
     static var captureUI: Bool { fixtureOnly && CommandLine.arguments.contains("--test-capture-ui") }
+    static var failedRelaunch: Bool { fixtureOnly && CommandLine.arguments.contains("--test-failed-relaunch") }
+    static var shortRestartWait: Bool { fixtureOnly && CommandLine.arguments.contains("--test-short-restart-wait") }
+    static let restartAfter: Int32? = {
+        let args = CommandLine.arguments
+        guard let index = args.firstIndex(of: "--restart-after") else { return nil }
+        guard args.filter({ $0 == "--restart-after" }).count == 1,
+              args.indices.contains(index + 1), let pid = Int32(args[index + 1]), pid > 0 else { exit(2) }
+        return pid
+    }()
+
+    static var restartArguments: [String] {
+        let args = CommandLine.arguments
+        var carried = args.filter { $0.hasPrefix("--test-") }
+        // Preserve the harness's process-local motion preference as well as its
+        // fixture isolation; never inherit the desktop's preference on restart.
+        if fixtureOnly, let index = args.firstIndex(of: "-reduceMotion"), args.indices.contains(index + 1) {
+            carried += [args[index], args[index + 1]]
+        }
+        return carried
+    }
+
     static func validate() {
+        _ = restartAfter
         let tests = CommandLine.arguments.filter { $0.hasPrefix("--test-") }
         guard tests.isEmpty || fixtureOnly && tests.allSatisfy({ ["--test-fixture-only", "--test-missing-skylight", "--test-failed-hide", "--test-capture-ui", "--test-failed-relaunch", "--test-short-restart-wait"].contains($0) }) else { exit(2) }
     }
@@ -44,6 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var workspaces: Workspaces?
     private var termination: DispatchSourceSignal?
     private let diagnostics = SystemDiagnostics()
+    private lazy var restart = Restart(now: { DispatchTime.now().uptimeNanoseconds }, record: diagnostics.record,
+                                       launch: { done in SystemRelaunch.launch { done($0) } },
+                                       quit: { [weak self] in self?.quit() })
     private var systemEvents: SystemEvents?
     #if TESSEL_DEVELOPMENT
     private let capture = LaunchOptions.captureUI ? DevelopmentCapture() : nil
@@ -53,6 +78,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let trusted = AXIsProcessTrusted()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if SystemRelaunch.awaitPrevious(ready: { [weak self] in self?.setUp() }, abandoned: { [weak self] pid in
+            self?.diagnostics.record(.restartAbandoned(previous: pid))
+            NSApp.terminate(nil)
+        }) { return }
+        setUp()
+    }
+
+    private func setUp() {
         let scheduler = SystemScheduler()
         let applications = SystemApplications()
         let ax = SystemAccessibility()
@@ -90,7 +123,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             map.onCapture = { [weak self] in self?.capture?.update(map: $0) }
         }
         #endif
-        do { server = try SocketServer { store.reply(to: $0) } }
+        do {
+            server = try SocketServer(respond: { store.reply(to: $0) }, restart: { [weak self] deadline, reply in
+                guard let self else { reply(Reply(error: "Tessel is quitting")); return }
+                self.restart.request(.cli, deadline: deadline) { outcome in
+                    switch outcome {
+                    case .restarted(let pid): reply(Reply(restarted: pid))
+                    case .failed(let reason): reply(Reply(error: RestartWait.launchFailed(reason)))
+                    case .refused(let reason): reply(Reply(error: reason))
+                    }
+                }
+            })
+        }
         catch { NSApp.terminate(nil); return }
         var skyLight: SkyLightCloset?
         let workspaces = Workspaces(store: store, trusted: trusted, configuration: config.status.effective,
@@ -125,7 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                     fixtureBundleID: LaunchOptions.fixtureOnly ? "com.taecontrol.tessel.fixture" : nil)
             workspaces.catalog = windows
         } else {
-            let monitor = PermissionMonitor { [weak self] in self?.relaunch() }
+            let monitor = PermissionMonitor { [weak self] in self?.requestRestart(.permission) }
             permissionMonitor = monitor
             monitor.start()
         }
@@ -209,6 +253,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reload.target = self
         menu.addItem(withTitle: config.status.path, action: nil, keyEquivalent: "")
         menu.addItem(.separator())
+        let restartItem = menu.addItem(withTitle: "Restart Tessel", action: #selector(restartTessel), keyEquivalent: "")
+        restartItem.target = self
         let quitItem = menu.addItem(withTitle: "Quit Tessel", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         if existingMenu == nil { statusItem?.menu = menu }
@@ -223,6 +269,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func reloadConfig() { config?.reload() }
 
+    @objc private func restartTessel() { requestRestart(.menu) }
+
+    private func requestRestart(_ source: RestartSource) {
+        restart.request(source, deadline: nil) { outcome in
+            guard case .failed(let reason) = outcome else { return }
+            // Let the coordinator fail every CLI waiter before a modal alert
+            // keeps this callback on the stack until the owner dismisses it.
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                if source == .permission {
+                    alert.messageText = "Reopen Tessel to use Accessibility"
+                    alert.informativeText = "The permission is granted. Quit and open Tessel again."
+                } else {
+                    alert.messageText = "Tessel could not restart"
+                    alert.informativeText = reason
+                }
+                alert.runModal()
+            }
+        }
+    }
+
     #if !TESSEL_DEVELOPMENT
     @objc private func changeOpenAtLogin() {
         store?.changeOpenAtLogin(loginItem.perform)
@@ -231,6 +298,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     #endif
 
     @objc private func quit() {
+        restart.quitting()
         guard let workspaces else { NSApp.terminate(nil); return }
         // Return to the main queue while draining. AppKit's terminateLater
         // wait cannot reenter the queue running the SIGTERM handler.
@@ -240,27 +308,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
-        }
-    }
-
-    private func relaunch() {
-        server?.stop()
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        var arguments = ["-n", "-g"]
-        if let configHome = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"] {
-            arguments += ["--env", "XDG_CONFIG_HOME=" + configHome]
-        }
-        arguments.append(Bundle.main.bundleURL.path)
-        if LaunchOptions.fixtureOnly { arguments += ["--args", "--test-fixture-only"] }
-        process.arguments = arguments
-        do { try process.run(); quit() }
-        catch {
-            // Leave a useful menu if LaunchServices cannot relaunch the bundle.
-            let alert = NSAlert()
-            alert.messageText = "Reopen Tessel to use Accessibility"
-            alert.informativeText = "The permission is granted. Quit and open Tessel again."
-            alert.runModal()
         }
     }
 

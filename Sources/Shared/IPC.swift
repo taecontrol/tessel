@@ -106,8 +106,9 @@ enum SocketIO {
         return getpeereid(fd, &uid, &gid) == 0 && uid == getuid()
     }
 
-    static func request(_ command: String) throws -> Reply {
-        let timing = SocketDeadline.request(now: { DispatchTime.now().uptimeNanoseconds })
+    static func request(_ command: String, deadline: UInt64? = nil) throws -> Reply {
+        let timing = deadline.map { SocketDeadline(until: $0, now: { DispatchTime.now().uptimeNanoseconds }) }
+            ?? SocketDeadline.request(now: { DispatchTime.now().uptimeNanoseconds })
         let deadline = timing.nanoseconds
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw IPCError.unavailable }
@@ -122,7 +123,10 @@ enum SocketIO {
             guard getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &length) == 0, error == 0 else { throw IPCError.unavailable }
         }
         guard sameUser(fd) else { throw IPCError.unsafeEndpoint }
-        try writeLine(Data(command.utf8), to: fd, until: deadline)
+        // Both processes use the same monotonic clock. Carry the CLI's deadline
+        // so a request queued on the main thread cannot act after it expires.
+        let request = command == "restart" ? "restart \(deadline)" : command
+        try writeLine(Data(request.utf8), to: fd, until: deadline)
         return try JSONDecoder().decode(Reply.self, from: readLine(fd, limit: 1_048_576, until: deadline))
     }
 }

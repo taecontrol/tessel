@@ -28,8 +28,15 @@ open ".build/apps/Tessel Dev.app"
 ".build/apps/Tessel Dev.app/Contents/MacOS/tessel" status --json
 ```
 
-The read-only CLI accepts `windows [--json]`, `status [--json]` and
+The CLI's read-only commands are `windows [--json]`, `status [--json]` and
 `log [--json] [--last <n>m|h|d]`.
+
+`tessel restart` restarts the running instance and prints
+`Tessel restarted (pid N)` only after the replacement answers ready status.
+It exits 1 if Tessel is not running, is starting or quitting, cannot launch a
+replacement, or has no ready replacement within 10 s. It never starts a stopped
+Tessel or kills a process. **Restart Tessel** in the menu uses the same handoff;
+both paths return all windows to rail 1 of workspace 1 without preserving layout.
 You can symlink this bundled CLI into a directory on your `PATH`.
 With a custom `XDG_CONFIG_HOME`, pass the same value to `open --env` and the CLI.
 The bundle ID and config path select the instance the CLI observes.
@@ -142,6 +149,18 @@ Tessel is observed through its bundled CLI. The harness cleans up its own
 processes and data. It always passes `--test-fixture-only`, so only fixture
 processes are observed or managed, including crash recovery. The daily build
 rejects that argument. Another Tessel instance can contaminate these fixtures.
+
+Restarts use LaunchServices to open a new instance of the same signed bundle,
+carrying `XDG_CONFIG_HOME` and every accepted `--test-` argument (plus the harness's
+process-local `-reduceMotion` preference). The old instance quits only after the
+launch is accepted. After AppKit finishes launching, the new instance waits on a
+process-exit notification before creating its socket, menu or window catalog.
+If the old pid still lives after 10 s, the replacement logs
+`restart abandoned: previous instance <pid> still running` and exits. The
+development-only `--test-failed-relaunch` and `--test-short-restart-wait` require
+`--test-fixture-only`; they respectively refuse a relaunch and shorten the
+previous-process wait to 1 s. Both builds accept `--restart-after <pid>` for the
+handoff, and the daily build rejects every `--test-` argument.
 
 The harness owns the Reduce Motion Given rather than inheriting the desktop's
 setting; GitHub's macOS images turn Reduce Motion on, which made every carousel
@@ -1182,7 +1201,8 @@ runner. Policy owns concurrent joins (E8), deadline expiry under virtual time
 (E10), and starting/quitting refusals (E12). E1 observes the ready replacement
 and returned windows with the shared 5 s final-state margin, without a separate
 elapsed-time assertion. E10 proves the CLI's exact 10 s deadline without a
-real-system wait. E14 and E15 are captures outside this test-only change.
+real-system wait. E14 (menu states) and E15 (the owner's daily build) remain
+captures to collect on an authorized desktop.
 
 For #63, `JourneysApplications.swift` checks accessory quit, crash and discovery
 without activation (E1–E3), plus a regular exit's exact surviving windows,

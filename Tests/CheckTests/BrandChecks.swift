@@ -120,7 +120,7 @@ import Testing
         let code = source.replacingOccurrences(of: #"(?s)/\*.*?\*/|//[^\r\n]*"#, with: " ", options: .regularExpression)
         return matches(of: #""(?:[^"\\\n]|\\.)*""#, in: code)
             // A command line names the executable, not the product.
-            .map { $0.replacingOccurrences(of: #"\btessel (?=windows\b|status\b|log\b)"#, with: "", options: .regularExpression) }
+            .map { $0.replacingOccurrences(of: #"\btessel (?=windows\b|status\b|log\b|restart\b)"#, with: "", options: .regularExpression) }
             .filter { !matches(of: lowercaseName, in: $0).isEmpty }
     }
 
