@@ -1545,17 +1545,20 @@ counters. E6 tags the existing three resource scenes with unchanged budgets.
 | #67 E12 | P |
 | #67 E13 | J |
 | #67 E14 | X |
+| #67 E15 | X |
 <!-- Pending capture: #33 E20 -->
 <!-- Pending capture: #36 E8 -->
 <!-- Pending capture: #59 E8 -->
 <!-- Pending capture: #59 E9 -->
 <!-- Pending capture: #59 E10 -->
 <!-- Pending capture: #62 E11 -->
+<!-- Pending capture: #67 E14 -->
+<!-- Pending capture: #67 E15 -->
 
 E21 has an opt-in executable capture in `CapturesCarousel.swift`; it needs a
-pixel recording of the stage before the owner can review it again. All mapped
-rows have executable coverage. E15 owns J: the native mixed-app landing and
-activation assertions. E14 and E16 own P; their untagged journey steps check
+pixel recording of the stage before the owner can review it again. Mapped rows
+without a pending-capture marker have executable coverage. E15 owns J: the native
+mixed-app landing and activation assertions. E14 and E16 own P; their untagged journey steps check
 wiring.
 
 All deterministic carousel examples run directly against the simulated stage:
