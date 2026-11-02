@@ -29,7 +29,7 @@ enum LaunchOptions {
     static var captureUI: Bool { fixtureOnly && CommandLine.arguments.contains("--test-capture-ui") }
     static func validate() {
         let tests = CommandLine.arguments.filter { $0.hasPrefix("--test-") }
-        guard tests.isEmpty || fixtureOnly && tests.allSatisfy({ ["--test-fixture-only", "--test-missing-skylight", "--test-failed-hide", "--test-capture-ui"].contains($0) }) else { exit(2) }
+        guard tests.isEmpty || fixtureOnly && tests.allSatisfy({ ["--test-fixture-only", "--test-missing-skylight", "--test-failed-hide", "--test-capture-ui", "--test-failed-relaunch", "--test-short-restart-wait"].contains($0) }) else { exit(2) }
     }
 }
 

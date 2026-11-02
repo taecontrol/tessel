@@ -179,6 +179,7 @@ struct Reply: Codable, Sendable {
     var windows: [WindowRecord]?
     var status: AppStatus?
     var error: String?
+    var restarted: Int32? = nil
 }
 
 enum ConfigLocation {

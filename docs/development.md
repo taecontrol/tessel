@@ -1156,7 +1156,7 @@ screenshot of a real machine is committed.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49, #51, #55, #57, #59, #62 and #63.
+This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49, #51, #55, #57, #59, #62, #63 and #67.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -1175,6 +1175,14 @@ C tests live in `Tests/Acceptance/Contracts*.swift`; T in `Tests/CheckTests/` or
 Contracts declare their assumption IDs as well as any mapped native example. The E20 integrity check
 rejects missing tags, unmapped tags, duplicate map rows and tags in another
 layer. Every mapped ID must have a tagged test in its own layer.
+
+For #67, the crash-and-quit journey owns restart wiring through the AX menu
+and bundled CLI (E1–E7, E9, E11); permission recovery owns E13 on the disposable
+runner. Policy owns concurrent joins (E8), deadline expiry under virtual time
+(E10), and starting/quitting refusals (E12). E1 observes the ready replacement
+and returned windows with the shared 5 s final-state margin, without a separate
+elapsed-time assertion. E10 proves the CLI's exact 10 s deadline without a
+real-system wait. E14 and E15 are captures outside this test-only change.
 
 For #63, `JourneysApplications.swift` checks accessory quit, crash and discovery
 without activation (E1–E3), plus a regular exit's exact surviving windows,
@@ -1495,6 +1503,19 @@ counters. E6 tags the existing three resource scenes with unchanged budgets.
 | #63 E4 | C |
 | #63 E5 | J |
 | #63 E6 | R |
+| #67 E1 | J |
+| #67 E2 | J |
+| #67 E3 | J |
+| #67 E4 | J |
+| #67 E5 | J |
+| #67 E6 | J |
+| #67 E7 | J |
+| #67 E8 | P |
+| #67 E9 | J |
+| #67 E10 | P |
+| #67 E11 | J |
+| #67 E12 | P |
+| #67 E13 | J |
 <!-- Pending capture: #33 E20 -->
 <!-- Pending capture: #36 E8 -->
 <!-- Pending capture: #59 E8 -->

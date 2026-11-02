@@ -144,6 +144,27 @@ struct Desktop {
         }
     }
 
+    func pressMenuItem(_ title: String) throws {
+        let pid = harness.appPID
+        try harness.observer.command("menu", ["pid": pid, "open": true, "keepOpen": true])
+        defer { _ = try? harness.observer.command("menu", ["pid": pid, "open": true, "press": false]) }
+        try requireFinalState("the requested development menu item") {
+            try harness.observer.command("menu", ["pid": pid, "open": true, "press": false,
+                "keepOpen": true, "expected": title]).menuContains == true
+        }
+        // Never retry a successful action: a second press could restart again.
+        let reply = try harness.observer.command("menu", ["pid": pid, "open": true, "press": false, "pressTitle": title])
+        guard reply.menuPressed == true else { throw HarnessError("the observer could not press the requested development menu item") }
+    }
+
+    func expectRestartAlert(reason: String) throws {
+        try requireFinalState("the restart failure alert includes the launch reason") {
+            try harness.observer.command("alert", ["pid": harness.appPID, "expected": reason]).alertContains == true
+        }
+        let dismissed = try harness.observer.command("alert", ["pid": harness.appPID, "expected": reason, "dismiss": true])
+        guard dismissed.alertContains == true else { throw HarnessError("the development alert disappeared before dismissal") }
+    }
+
     func expectInside(_ ids: [UInt32]) throws {
         try requireFinalState("every managed fixture returned inside the visible desktop") {
             let observation = try observe()
@@ -183,7 +204,7 @@ struct Desktop {
         return (a, b)
     }
 
-    func railSetup(_ widths: [Double] = Array(repeating: 0.45, count: 5), firstIn firstSession: FixtureSession? = nil, duration: Int = 80, reduceMotion: Bool = false, palette: Bool = false, video: Int? = nil, configuration: String = "") throws -> [UInt32] {
+    func railSetup(_ widths: [Double] = Array(repeating: 0.45, count: 5), firstIn firstSession: FixtureSession? = nil, duration: Int = 80, reduceMotion: Bool = false, palette: Bool = false, video: Int? = nil, configuration: String = "", arguments: [String] = []) throws -> [UInt32] {
         harness.stopApp()
         let ids = try widths.enumerated().map { index, width in
             let session = index == 0 ? firstSession ?? fixture : fixture
@@ -193,7 +214,7 @@ struct Desktop {
         }
         try activate(firstSession, key: "w0")
         try writeConfig(configuration + "[animation]\nduration = \(duration)\n")
-        try harness.startApp(fixtureReady: false, reduceMotion: reduceMotion)
+        try harness.startApp(fixtureReady: false, arguments: arguments, reduceMotion: reduceMotion)
         try requireFinalState("every rail setup window listed") { Set(try harness.rows().map(\.id)) == Set(ids) }
         // The focused first window keeps its width at the rail's left end.
         var last = "no observation"
