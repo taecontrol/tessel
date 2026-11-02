@@ -177,9 +177,12 @@ import Testing
         rig.request(.menu, name: "pending")
         rig.restart.quitting {
             #expect(rig.cancellations == (accepted ? [202] : []))
+            #expect(!rig.scheduler.pendingMainDelays.contains(2_000),
+                    "the launch-wait timer must be cancelled before Quit continues")
             rig.quitCompletions.append(rig.scheduler.now)
         }
         #expect(rig.quitCompletions.isEmpty)
+        #expect(rig.scheduler.pendingMainDelays == [2_000])
         rig.request(.cli, name: "after quit")
         #expect(rig.outcomes["pending"] == [.refused("Tessel is quitting")])
         #expect(rig.outcomes["after quit"] == [.refused("Tessel is quitting")])
@@ -188,6 +191,9 @@ import Testing
             let result: Result<Int32, RestartLaunchError> = accepted ? .success(202) : .failure(RestartLaunchError(reason: "Launch denied"))
             #expect(throws: Never.self) { try rig.complete(result) }
             #expect(rig.quitCompletions == [500])
+            var repeatedQuitFinished = false
+            rig.restart.quitting { repeatedQuitFinished = true }
+            #expect(repeatedQuitFinished, "a completed launch wait must not hold a later Quit")
         }
         rig.scheduler.main.after(milliseconds: 3_000) {
             #expect(rig.quitCompletions == [500], "the bound must not finish Quit a second time")
@@ -225,7 +231,12 @@ import Testing
             #expect(rig.quitCompletions.isEmpty, "repeated Quit must join the same launch wait")
         }
         rig.scheduler.main.after(milliseconds: 1_999) { #expect(rig.quitCompletions.isEmpty) }
-        rig.scheduler.main.after(milliseconds: 2_001) { #expect(rig.quitCompletions == [2_000, 2_000]) }
+        rig.scheduler.main.after(milliseconds: 2_001) {
+            #expect(rig.quitCompletions == [2_000, 2_000])
+            var repeatedQuitFinished = false
+            rig.restart.quitting { repeatedQuitFinished = true }
+            #expect(repeatedQuitFinished, "an expired launch wait must not hold a later Quit")
+        }
         rig.scheduler.main.after(milliseconds: 4_000) { #expect(rig.quitCompletions == [2_000, 2_000]) }
         #expect(rig.scheduler.run() == .settled)
         #expect(rig.quits == 0)
