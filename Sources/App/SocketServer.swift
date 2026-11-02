@@ -7,10 +7,10 @@ final class SocketServer: @unchecked Sendable {
     private var source: DispatchSourceRead?
     private var lockFD: Int32 = -1
     private let respond: @Sendable (String) -> Reply
-    private let restart: @MainActor @Sendable (UInt64, @escaping @Sendable (Reply) -> Void) -> Void
+    private let restart: @MainActor @Sendable (Int32, UInt64, @escaping @Sendable (Reply) -> Void) -> Void
 
     init(respond: @escaping @Sendable (String) -> Reply,
-         restart: @escaping @MainActor @Sendable (UInt64, @escaping @Sendable (Reply) -> Void) -> Void) throws {
+         restart: @escaping @MainActor @Sendable (Int32, UInt64, @escaping @Sendable (Reply) -> Void) -> Void) throws {
         self.respond = respond
         self.restart = restart
         try endpoint.prepareDirectory()
@@ -45,17 +45,19 @@ final class SocketServer: @unchecked Sendable {
         defer { close(client) }
         let deadline = DispatchTime.now().uptimeNanoseconds + 500_000_000
         do {
-            let data = try SocketIO.readLine(client, limit: 32, until: deadline)
+            let data = try SocketIO.readLine(client, limit: 48, until: deadline)
             guard let command = String(data: data, encoding: .utf8) else { return }
             let reply: Reply
             if command.hasPrefix("restart ") {
-                guard let sentDeadline = UInt64(command.dropFirst(8)) else { return }
+                let fields = command.split(separator: " ", omittingEmptySubsequences: false)
+                guard fields.count == 3, let sentDeadline = UInt64(fields[1]),
+                      let replacing = Int32(fields[2]), replacing > 0 else { return }
                 let requestedDeadline = min(sentDeadline, DispatchTime.now().uptimeNanoseconds + RestartWait.timeoutNanoseconds)
                 // Do not let a queued command turn a startup refusal into a restart.
                 if let error = respond("status").error { reply = Reply(error: error) }
                 else {
                     let pending = PendingReply()
-                    DispatchQueue.main.async { self.restart(requestedDeadline, pending.complete) }
+                    DispatchQueue.main.async { self.restart(replacing, requestedDeadline, pending.complete) }
                     reply = pending.wait(until: requestedDeadline)
                 }
             } else { reply = respond(command) }

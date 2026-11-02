@@ -161,6 +161,10 @@ development-only `--test-failed-relaunch` and `--test-short-restart-wait` requir
 `--test-fixture-only`; they respectively refuse a relaunch and shorten the
 previous-process wait to 1 s. Both builds accept `--restart-after <pid>` for the
 handoff, and the daily build rejects every `--test-` argument.
+The CLI restart request carries the pid observed by its initial status query.
+If another caller has already replaced that pid, the ready replacement answers
+the delayed request without restarting again. A fresh CLI invocation observes
+the replacement's pid and can restart it normally.
 
 The harness owns the Reduce Motion Given rather than inheriting the desktop's
 setting; GitHub's macOS images turn Reduce Motion on, which made every carousel

@@ -106,7 +106,7 @@ enum SocketIO {
         return getpeereid(fd, &uid, &gid) == 0 && uid == getuid()
     }
 
-    static func request(_ command: String, deadline: UInt64? = nil) throws -> Reply {
+    static func request(_ command: String, deadline: UInt64? = nil, replacing: Int32? = nil) throws -> Reply {
         let timing = deadline.map { SocketDeadline(until: $0, now: { DispatchTime.now().uptimeNanoseconds }) }
             ?? SocketDeadline.request(now: { DispatchTime.now().uptimeNanoseconds })
         let deadline = timing.nanoseconds
@@ -125,7 +125,13 @@ enum SocketIO {
         guard sameUser(fd) else { throw IPCError.unsafeEndpoint }
         // Both processes use the same monotonic clock. Carry the CLI's deadline
         // so a request queued on the main thread cannot act after it expires.
-        let request = command == "restart" ? "restart \(deadline)" : command
+        // The observed pid prevents an overlapping caller from restarting the
+        // replacement when this connection reaches it instead of the old app.
+        let request: String
+        if command == "restart" {
+            guard let replacing, replacing > 0 else { throw IPCError.invalidMessage }
+            request = "restart \(deadline) \(replacing)"
+        } else { request = command }
         try writeLine(Data(request.utf8), to: fd, until: deadline)
         return try JSONDecoder().decode(Reply.self, from: readLine(fd, limit: 1_048_576, until: deadline))
     }

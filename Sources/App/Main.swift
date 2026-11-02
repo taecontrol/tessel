@@ -66,7 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var workspaces: Workspaces?
     private var termination: DispatchSourceSignal?
     private let diagnostics = SystemDiagnostics()
-    private lazy var restart = Restart(now: { DispatchTime.now().uptimeNanoseconds }, record: diagnostics.record,
+    private lazy var restart = Restart(pid: getpid(), now: { DispatchTime.now().uptimeNanoseconds }, record: diagnostics.record,
                                        launch: { done in SystemRelaunch.launch { done($0) } },
                                        quit: { [weak self] in self?.quit() })
     private var systemEvents: SystemEvents?
@@ -124,9 +124,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         #endif
         do {
-            server = try SocketServer(respond: { store.reply(to: $0) }, restart: { [weak self] deadline, reply in
+            server = try SocketServer(respond: { store.reply(to: $0) }, restart: { [weak self] replacing, deadline, reply in
                 guard let self else { reply(Reply(error: "Tessel is quitting")); return }
-                self.restart.request(.cli, deadline: deadline) { outcome in
+                self.restart.request(.cli, replacing: replacing, deadline: deadline) { outcome in
                     switch outcome {
                     case .restarted(let pid): reply(Reply(restarted: pid))
                     case .failed(let reason): reply(Reply(error: RestartWait.launchFailed(reason)))

@@ -39,6 +39,16 @@ extension Acceptance.Journeys {
             let ready = try restartThroughCLI()
             cliRestart = (old, ready.pid)
         }
+        try step("a delayed CLI request for the previous pid joins its ready replacement (transport wiring)") {
+            let pair = try #require(cliRestart)
+            let client = try StreamClient(path: harness.endpoint(), timeout: margin)
+            let deadline = DispatchTime.now().uptimeNanoseconds + 10_000_000_000
+            try client.send(Data("restart \(deadline) \(pair.old)\n".utf8))
+            struct Reply: Decodable { let restarted: pid_t?; let error: String? }
+            let reply = try JSONDecoder().decode(Reply.self, from: client.readLine(limit: 4096))
+            try #require(reply.error == nil && reply.restarted == pair.new)
+            try #require(try harness.status().pid == pair.new)
+        }
         try step("#67 E4; #67 E5 restart markers precede old-pid quit, which precedes new-pid startup and window management") {
             let menu = try #require(menuRestart), cli = try #require(cliRestart)
             for (source, pair) in [("menu", menu), ("cli", cli)] {

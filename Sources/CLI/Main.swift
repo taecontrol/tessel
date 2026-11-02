@@ -66,7 +66,7 @@ struct Main {
         }
         let deadline = DispatchTime.now().uptimeNanoseconds + RestartWait.timeoutNanoseconds
         var wait = RestartWait(oldPID: old.pid, deadline: deadline)
-        var step = wait.replied(request("restart", deadline: deadline))
+        var step = wait.replied(request("restart", deadline: deadline, replacing: old.pid))
         while true {
             switch step {
             case .done(let pid): print(RestartWait.restarted(pid)); return
@@ -87,8 +87,8 @@ struct Main {
         }
     }
 
-    private static func request(_ command: String, deadline: UInt64? = nil) -> Result<Reply, IPCError> {
-        do { return .success(try SocketIO.request(command, deadline: deadline)) }
+    private static func request(_ command: String, deadline: UInt64? = nil, replacing: Int32? = nil) -> Result<Reply, IPCError> {
+        do { return .success(try SocketIO.request(command, deadline: deadline, replacing: replacing)) }
         catch let error as IPCError { return .failure(error) }
         catch { return .failure(.invalidMessage) }
     }

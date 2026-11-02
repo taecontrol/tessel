@@ -28,15 +28,17 @@ final class Restart {
     }
 
     private var phase = Phase.idle
+    private let pid: Int32
     private let now: () -> UInt64
     private let record: (Diagnostic) -> Void
     private let launch: @MainActor (@escaping (Result<Int32, RestartLaunchError>) -> Void) -> Void
     private let quit: () -> Void
 
-    init(now: @escaping () -> UInt64,
+    init(pid: Int32, now: @escaping () -> UInt64,
          record: @escaping (Diagnostic) -> Void,
          launch: @escaping @MainActor (_ done: @escaping (Result<Int32, RestartLaunchError>) -> Void) -> Void,
          quit: @escaping () -> Void) {
+        self.pid = pid
         self.now = now
         self.record = record
         self.launch = launch
@@ -44,11 +46,14 @@ final class Restart {
     }
 
     /// Expired CLI requests are dropped, including ones queued behind a busy main thread.
-    func request(_ source: RestartSource, deadline: UInt64?, reply: @escaping (Outcome) -> Void) {
+    func request(_ source: RestartSource, replacing: Int32? = nil, deadline: UInt64?, reply: @escaping (Outcome) -> Void) {
         guard deadline.map({ now() < $0 }) ?? true else { return }
         let request = Request(deadline: deadline, reply: reply)
         switch phase {
         case .idle:
+            // Another CLI may have replaced the observed process between this
+            // caller's status probe and its restart connection.
+            if let replacing, replacing != pid { reply(.restarted(pid: pid)); return }
             phase = .launching([request])
             record(.restartRequested(from: source))
             launch { [weak self] result in self?.completed(result) }

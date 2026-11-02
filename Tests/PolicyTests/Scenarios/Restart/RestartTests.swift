@@ -3,6 +3,21 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct RestartTests {
+    @Test("overlapping CLI requests that reach the replacement join it; a fresh invocation can restart it")
+    func delayedCLIRequestJoinsReplacement() throws {
+        let rig = RestartRig(pid: 202)
+        rig.request(.cli, name: "delayed", replacing: 101)
+        #expect(rig.outcomes["delayed"] == [.restarted(pid: 202)])
+        #expect(rig.launches == 0 && rig.quits == 0)
+        #expect(rig.diagnostics.isEmpty)
+        rig.request(.cli, name: "fresh", replacing: 202)
+        #expect(rig.launches == 1)
+        try rig.complete(.success(303))
+        #expect(rig.outcomes["fresh"] == [.restarted(pid: 303)])
+        #expect(rig.outcomes["delayed"] == [.restarted(pid: 202)])
+        #expect(rig.quits == 1)
+    }
+
     @Test("#67 E8: simultaneous CLI requests launch once, reply with the same pid, then quit once")
     func concurrentCLIRequestsShareOneLaunch() throws {
         let rig = RestartRig()
@@ -187,6 +202,8 @@ import Testing
 
 /// A virtual monotonic clock and controlled launch completion, with no OS model.
 @MainActor private final class RestartRig {
+    let pid: Int32
+    init(pid: Int32 = 101) { self.pid = pid }
     var now: UInt64 = 4_000_000_000
     var launches = 0
     var quits = 0
@@ -195,7 +212,7 @@ import Testing
     var outcomes: [String: [Restart.Outcome]] = [:]
     private var completions: [(Result<Int32, RestartLaunchError>) -> Void] = []
 
-    lazy var restart = Restart(now: { [unowned self] in now }, record: { [unowned self] diagnostic in
+    lazy var restart = Restart(pid: pid, now: { [unowned self] in now }, record: { [unowned self] diagnostic in
         diagnostics.append(diagnostic)
         switch diagnostic {
         case .restartRequested(let source): events.append("requested \(source.rawValue)")
@@ -211,8 +228,8 @@ import Testing
         events.append("quit")
     })
 
-    func request(_ source: RestartSource, name: String, deadline: UInt64? = nil) {
-        restart.request(source, deadline: deadline ?? (source == .cli ? now + 10_000_000_000 : nil)) { [unowned self] outcome in
+    func request(_ source: RestartSource, name: String, replacing: Int32? = nil, deadline: UInt64? = nil) {
+        restart.request(source, replacing: replacing, deadline: deadline ?? (source == .cli ? now + 10_000_000_000 : nil)) { [unowned self] outcome in
             events.append("reply \(name)")
             outcomes[name, default: []].append(outcome)
         }
