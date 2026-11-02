@@ -382,7 +382,11 @@ final class Fixture: NSObject, NSApplicationDelegate {
             if open && command["press"] as? Bool != false { _ = AXUIElementPerformAction(item, kAXPressAction as CFString) }
             let expected = command["expected"] as? String ?? ""
             let pressTitle = command["pressTitle"] as? String
+            let readItems = open && command["readItems"] as? Bool == true
             var pressItem: AXUIElement?
+            var titles: [String] = []
+            var restartKeyEquivalent: String?
+            var restartKeyEquivalentError: Int32?
             var found = false
             var inspected = 0
             func inspect(_ element: AXUIElement, depth: Int) {
@@ -391,6 +395,15 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 // Only menu-item titles are read. Window titles are never queried.
                 let role = FixtureProbe.value(element, kAXRoleAttribute) as? String
                 let attribute = role == kAXMenuItemRole ? kAXTitleAttribute : kAXDescriptionAttribute
+                if readItems, role == kAXMenuItemRole,
+                   let title = FixtureProbe.value(element, kAXTitleAttribute) as? String, !title.isEmpty {
+                    titles.append(title)
+                    if title == "Restart Tessel" {
+                        var value: CFTypeRef?
+                        restartKeyEquivalentError = AXUIElementCopyAttributeValue(element, kAXMenuItemCmdCharAttribute as CFString, &value).rawValue
+                        restartKeyEquivalent = value as? String
+                    }
+                }
                 if role == kAXMenuItemRole, let pressTitle,
                    FixtureProbe.value(element, kAXTitleAttribute) as? String == pressTitle { pressItem = element }
                 if (open ? role == kAXMenuItemRole : role == kAXMenuBarItemRole),
@@ -411,6 +424,11 @@ final class Fixture: NSObject, NSApplicationDelegate {
             var reply = snapshot
             reply["menuContains"] = found
             if pressTitle != nil { reply["menuPressed"] = pressed }
+            if readItems {
+                reply["menuTitles"] = titles
+                if let restartKeyEquivalent { reply["restartKeyEquivalent"] = restartKeyEquivalent }
+                if let restartKeyEquivalentError { reply["restartKeyEquivalentError"] = restartKeyEquivalentError }
+            }
             return reply
         case "alert":
             guard let pid = command["pid"] as? Int32,

@@ -1201,8 +1201,12 @@ runner. Policy owns concurrent joins (E8), deadline expiry under virtual time
 (E10), and starting/quitting refusals (E12). E1 observes the ready replacement
 and returned windows with the shared 5 s final-state margin, without a separate
 elapsed-time assertion. E10 proves the CLI's exact 10 s deadline without a
-real-system wait. E14 (menu states) and E15 (the owner's daily build) remain
-captures to collect on an authorized desktop.
+real-system wait. E14 captures the enabled and disabled menus with
+`TESSEL_CAPTURE_WORKSPACES=1 scripts/verify captureRestartMenuForOwnerReview`,
+including the observer's ordered menu titles and Restart's AX key equivalent.
+The CI-only permission-denial step checks that Restart is present as
+supplementary wiring evidence; its permission-needed menu still needs a capture
+on an Accessibility-denied runner. E15 remains an owner capture of the daily build.
 
 For #63, `JourneysApplications.swift` checks accessory quit, crash and discovery
 without activation (E1–E3), plus a regular exit's exact surviving windows,
@@ -1536,6 +1540,7 @@ counters. E6 tags the existing three resource scenes with unchanged budgets.
 | #67 E11 | J |
 | #67 E12 | P |
 | #67 E13 | J |
+| #67 E14 | X |
 <!-- Pending capture: #33 E20 -->
 <!-- Pending capture: #36 E8 -->
 <!-- Pending capture: #59 E8 -->

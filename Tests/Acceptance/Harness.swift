@@ -103,6 +103,9 @@ struct FixtureReply: Decodable {
     let clicks: [String: Int]?
     let menuContains: Bool?
     let menuPressed: Bool?
+    let menuTitles: [String]?
+    let restartKeyEquivalent: String?
+    let restartKeyEquivalentError: Int32?
     let alertContains: Bool?
     let ready: Bool?
     let active: Bool?

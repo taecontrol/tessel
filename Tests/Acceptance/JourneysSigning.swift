@@ -87,6 +87,7 @@ extension Acceptance.Journeys {
             try #require(result.status != 0 && result.error.contains("Accessibility permission needed"))
             try desktop.expectMenu("Accessibility permission needed", open: true)
             try desktop.expectMenu("Open Accessibility Settings…", open: true)
+            try desktop.expectMenu("Restart Tessel", open: true)
         }
         try step("#67 E13 granting Accessibility uses the shared restart path (CI runner only)") {
             try run([provision], timeout: 30, check: true)
