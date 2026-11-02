@@ -59,7 +59,9 @@ extension Acceptance.Journeys {
         }
         try step("#67 E3 restart reveals a workspace-2 tile and a hidden manually floating window on the current desktop") {
             try desktop.clear()
-            let ids = try desktop.railSetup(Array(repeating: 1.0 / 3, count: 3), duration: 0)
+            // Moving a tile to the layer gives it half the desktop width.
+            // Leave room for that observed width when restart tiles it again.
+            let ids = try desktop.railSetup([0.2, 0.2, 0.5], duration: 0)
             try desktop.key(2, send: true)
             try requireFinalState("the first tile is on workspace 2") { try harness.row(ids[0])?.workspace == 2 }
             try desktop.key(1)
