@@ -4,6 +4,33 @@ import Testing
 @testable import Policy
 
 @Suite @MainActor struct RestartTests {
+    @Test("the full deadline and pid ranges fit the 32-byte command payload without losing precision")
+    func restartWireBounds() throws {
+        let request = RestartRequest(deadline: .max, replacing: .max)
+        #expect(request.command.utf8.count <= 32, "readLine excludes the newline from its limit")
+        let decoded = try #require(RestartRequest(command: request.command))
+        #expect(decoded.deadline == UInt64.max)
+        #expect(decoded.replacing == Int32.max)
+    }
+
+    @Test("#67 E8; #67 E10: a delayed wire request can join during its deadline's final millisecond")
+    func delayedWireRequestKeepsFullDeadline() throws {
+        let rig = RestartRig(pid: 202)
+        let deadline: UInt64 = 14_000_999_999
+        let command = RestartRequest(deadline: deadline, replacing: 101).command
+        let decoded = try #require(RestartRequest(command: command))
+        rig.now = 14_000_500_000
+        rig.request(.cli, name: "delayed", replacing: decoded.replacing, deadline: decoded.deadline)
+        #expect(rig.outcomes["delayed"] == [.restarted(pid: 202)])
+        var wait = RestartWait(oldPID: 101, deadline: deadline)
+        #expect(wait.replied(.success(Reply(restarted: 202))) == .wait)
+        #expect(wait.probed(.success(status(202)), now: rig.now) == .done(pid: 202))
+        rig.now = deadline
+        rig.request(.cli, name: "expired", replacing: decoded.replacing, deadline: decoded.deadline)
+        #expect(rig.outcomes["expired"] == nil)
+        #expect(rig.launches == 0 && rig.quits == 0)
+    }
+
     @Test("overlapping CLI requests that reach the replacement join it; a fresh invocation can restart it")
     func delayedCLIRequestJoinsReplacement() throws {
         let rig = RestartRig(pid: 202)

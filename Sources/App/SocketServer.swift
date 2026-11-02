@@ -49,17 +49,14 @@ final class SocketServer: @unchecked Sendable {
             guard let command = String(data: data, encoding: .utf8) else { return }
             let reply: Reply
             if command.hasPrefix("restart ") {
-                let fields = command.split(separator: " ", omittingEmptySubsequences: false)
-                guard fields.count == 3, let sentMilliseconds = UInt64(fields[1]),
-                      let replacing = Int32(fields[2]), replacing > 0 else { return }
-                let sentDeadline = sentMilliseconds.multipliedReportingOverflow(by: 1_000_000)
-                let requestedDeadline = min(sentDeadline.overflow ? .max : sentDeadline.partialValue,
+                guard let request = RestartRequest(command: command) else { return }
+                let requestedDeadline = min(request.deadline,
                                             DispatchTime.now().uptimeNanoseconds + RestartWait.timeoutNanoseconds)
                 // Do not let a queued command turn a startup refusal into a restart.
                 if let error = respond("status").error { reply = Reply(error: error) }
                 else {
                     let pending = PendingReply()
-                    DispatchQueue.main.async { self.restart(replacing, requestedDeadline, pending.complete) }
+                    DispatchQueue.main.async { self.restart(request.replacing, requestedDeadline, pending.complete) }
                     reply = pending.wait(until: requestedDeadline)
                 }
             } else { reply = respond(command) }
