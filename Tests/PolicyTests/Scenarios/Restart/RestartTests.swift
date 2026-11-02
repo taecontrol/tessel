@@ -144,6 +144,48 @@ import Testing
         #expect(rig.quits == 1)
     }
 
+    @Test("#67 E10: a launch accepted after every CLI deadline cancels only its replacement without quitting")
+    func expiredLaunchCancelsReplacement() throws {
+        let rig = RestartRig()
+        let deadline = rig.now + 10_000_000_000
+        rig.request(.cli, name: "first", deadline: deadline - 1)
+        rig.request(.cli, name: "second", deadline: deadline)
+        rig.now = deadline
+        try rig.complete(.success(202))
+        #expect(rig.cancellations == [202])
+        #expect(rig.quits == 0)
+        #expect(rig.outcomes.isEmpty)
+    }
+
+    @Test("#67 E12: ordinary Quit during a launch cancels the replacement when it is accepted")
+    func quitDuringLaunchCancelsReplacement() throws {
+        let rig = RestartRig()
+        rig.request(.menu, name: "pending")
+        rig.restart.quitting()
+        try rig.complete(.success(202))
+        #expect(rig.cancellations == [202])
+        #expect(rig.quits == 0)
+        #expect(rig.outcomes["pending"] == [.refused("Tessel is quitting")])
+    }
+
+    @Test("#67 E10: a fresh handoff after an expired launch never cancels the replacement it quits for")
+    func freshHandoffDoesNotCancelReplacement() throws {
+        let rig = RestartRig()
+        let deadline = rig.now + 10_000_000_000
+        rig.request(.cli, name: "expired", deadline: deadline)
+        rig.now = deadline
+        try rig.complete(.success(202))
+        rig.request(.menu, name: "fresh")
+        try rig.complete(.success(303))
+        rig.restart.quitting()
+        rig.request(.cli, name: "joining")
+        #expect(rig.cancellations == [202], "cancel only the orphan, never the accepted handoff pid or this instance")
+        #expect(rig.quits == 1)
+        #expect(rig.outcomes["expired"] == nil)
+        #expect(rig.outcomes["fresh"] == [.restarted(pid: 303)])
+        #expect(rig.outcomes["joining"] == [.restarted(pid: 303)])
+    }
+
     @Test("an accepted launch reply is not CLI success until the new pid answers ready status")
     func launchReplyWaitsForReadiness() {
         var wait = RestartWait(oldPID: 101, deadline: 10_000_000_000)
@@ -239,6 +281,7 @@ import Testing
     init(pid: Int32 = 101) { self.pid = pid }
     var now: UInt64 = 4_000_000_000
     var launches = 0
+    var cancellations: [Int32] = []
     var quits = 0
     var diagnostics: [Diagnostic] = []
     var events: [String] = []
