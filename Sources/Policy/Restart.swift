@@ -28,20 +28,24 @@ final class Restart {
     }
 
     private var phase = Phase.idle
+    private var quitWaiters: [() -> Void] = []
+    private var quitDeadline: (any ScheduledWork)?
     private let pid: Int32
     private let now: () -> UInt64
+    private let main: any MainLane
     private let record: (Diagnostic) -> Void
     private let launch: @MainActor (@escaping (Result<Int32, RestartLaunchError>) -> Void) -> Void
     private let cancel: (Int32) -> Void
     private let quit: () -> Void
 
-    init(pid: Int32, now: @escaping () -> UInt64,
+    init(pid: Int32, now: @escaping () -> UInt64, main: any MainLane,
          record: @escaping (Diagnostic) -> Void,
          launch: @escaping @MainActor (_ done: @escaping (Result<Int32, RestartLaunchError>) -> Void) -> Void,
          cancel: @escaping (Int32) -> Void,
          quit: @escaping () -> Void) {
         self.pid = pid
         self.now = now
+        self.main = main
         self.record = record
         self.launch = launch
         self.cancel = cancel
@@ -68,20 +72,44 @@ final class Restart {
         }
     }
 
-    func quitting() {
-        if case .quitting = phase { return }
-        let pending: [Request]
-        if case .launching(let waiters) = phase { pending = waiters }
-        else { pending = [] }
-        phase = .quitting(newPID: nil)
-        for request in pending where request.deadline.map({ now() < $0 }) ?? true {
-            request.reply(.refused("Tessel is quitting"))
+    /// Refuses new restarts, then calls `done` once after handling an outstanding
+    /// launch or waiting at most 2 s. An accepted handoff has no launch to await.
+    func quitting(then done: @escaping () -> Void) {
+        switch phase {
+        case .idle:
+            phase = .quitting(newPID: nil)
+            done()
+        case .quitting:
+            if quitDeadline != nil { quitWaiters.append(done) }
+            else { done() }
+        case .launching(let pending):
+            phase = .quitting(newPID: nil)
+            quitWaiters.append(done)
+            // Quit must proceed if LaunchServices never replies. If we exit
+            // before its callback, a later replacement can still treat that
+            // exit as a handoff: we have no pid to cancel until the reply.
+            quitDeadline = main.after(milliseconds: 2_000) { [weak self] in self?.finishQuitting() }
+            for request in pending where request.deadline.map({ now() < $0 }) ?? true {
+                request.reply(.refused("Tessel is quitting"))
+            }
         }
+    }
+
+    private func finishQuitting() {
+        guard quitDeadline != nil else { return }
+        quitDeadline?.cancel()
+        quitDeadline = nil
+        let ready = quitWaiters
+        quitWaiters.removeAll()
+        for done in ready { done() }
     }
 
     private func completed(_ result: Result<Int32, RestartLaunchError>) {
         guard case .launching(let waiters) = phase else {
-            if case .quitting(nil) = phase, case .success(let pid) = result { cancel(pid) }
+            if case .quitting(nil) = phase {
+                if case .success(let pid) = result { cancel(pid) }
+                finishQuitting()
+            }
             return
         }
         let pending = waiters.filter { request in request.deadline.map({ now() < $0 }) ?? true }

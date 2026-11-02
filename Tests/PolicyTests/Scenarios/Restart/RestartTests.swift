@@ -51,7 +51,7 @@ import Testing
         rig.request(source == .menu ? .cli : .menu, name: "joining")
         #expect(rig.launches == 1)
         try rig.complete(.success(202))
-        rig.restart.quitting()
+        rig.restart.quitting {}
         rig.request(source, name: "late")
         #expect(rig.launches == 1, "quitting for restart retains its accepted pid")
         #expect(rig.quits == 1)
@@ -65,7 +65,7 @@ import Testing
           arguments: [RestartSource.menu, .cli])
     func ordinaryQuitRefusesRestart(_ source: RestartSource) {
         let rig = RestartRig()
-        rig.restart.quitting()
+        rig.restart.quitting {}
         rig.request(source, name: "after quit")
         #expect(rig.outcomes["after quit"] == [.refused("Tessel is quitting")])
         #expect(rig.launches == 0)
@@ -162,7 +162,7 @@ import Testing
     func quitDuringLaunchCancelsReplacement() throws {
         let rig = RestartRig()
         rig.request(.menu, name: "pending")
-        rig.restart.quitting()
+        rig.restart.quitting {}
         try rig.complete(.success(202))
         #expect(rig.cancellations == [202])
         #expect(rig.quits == 0)
@@ -259,7 +259,7 @@ import Testing
         try rig.complete(.success(202))
         rig.request(.menu, name: "fresh")
         try rig.complete(.success(303))
-        rig.restart.quitting()
+        rig.restart.quitting {}
         rig.request(.cli, name: "joining")
         #expect(rig.cancellations == [202], "cancel only the orphan, never the accepted handoff pid or this instance")
         #expect(rig.quits == 1)
@@ -324,7 +324,7 @@ import Testing
         let rig = RestartRig()
         rig.request(.menu, name: "menu")
         rig.request(.cli, name: "cli")
-        rig.restart.quitting()
+        rig.restart.quitting {}
         for name in ["menu", "cli"] {
             #expect(rig.outcomes[name] == [.refused("Tessel is quitting")])
         }
@@ -357,15 +357,6 @@ import Testing
     }
 }
 
-// Model the current app's termination boundary until Restart owns its wait:
-// quitting() returns and the app may terminate as soon as its drain finishes.
-private extension Restart {
-    func quitting(then done: @escaping () -> Void) {
-        quitting()
-        done()
-    }
-}
-
 /// A virtual monotonic clock and controlled launch completion, with no OS model.
 @MainActor private final class RestartRig {
     let pid: Int32
@@ -381,7 +372,7 @@ private extension Restart {
     var outcomes: [String: [Restart.Outcome]] = [:]
     private var completions: [(Result<Int32, RestartLaunchError>) -> Void] = []
 
-    lazy var restart = Restart(pid: pid, now: { [unowned self] in now }, record: { [unowned self] diagnostic in
+    lazy var restart = Restart(pid: pid, now: { [unowned self] in now }, main: scheduler.main, record: { [unowned self] diagnostic in
         diagnostics.append(diagnostic)
         switch diagnostic {
         case .restartRequested(let source): events.append("requested \(source.rawValue)")

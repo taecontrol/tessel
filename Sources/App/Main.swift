@@ -65,8 +65,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var permissionMonitor: PermissionMonitor?
     private var workspaces: Workspaces?
     private var termination: DispatchSourceSignal?
+    private var quitting = false
     private let diagnostics = SystemDiagnostics()
-    private lazy var restart = Restart(pid: getpid(), now: { DispatchTime.now().uptimeNanoseconds }, record: diagnostics.record,
+    private lazy var restart = Restart(pid: getpid(), now: { DispatchTime.now().uptimeNanoseconds }, main: SystemScheduler().main,
+                                       record: diagnostics.record,
                                        launch: { done in SystemRelaunch.launch { done($0) } },
                                        cancel: { pid in kill(pid, SIGTERM) },
                                        quit: { [weak self] in self?.quit() })
@@ -299,11 +301,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     #endif
 
     @objc private func quit() {
-        restart.quitting()
-        guard let workspaces else { NSApp.terminate(nil); return }
+        guard !quitting else { return }
+        quitting = true
+        // Drain captures and settle any pending restart launch in parallel.
+        let pending = DispatchGroup()
+        pending.enter()
+        pending.enter()
+        restart.quitting { pending.leave() }
+        if let workspaces { workspaces.prepareToQuit { pending.leave() } }
+        else { pending.leave() }
         // Return to the main queue while draining. AppKit's terminateLater
         // wait cannot reenter the queue running the SIGTERM handler.
-        workspaces.prepareToQuit { NSApp.terminate(nil) }
+        pending.notify(queue: .main) { NSApp.terminate(nil) }
     }
 
     @objc private func openSettings() {

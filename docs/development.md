@@ -152,9 +152,14 @@ rejects that argument. Another Tessel instance can contaminate these fixtures.
 
 Restarts use LaunchServices to open a new instance of the same signed bundle,
 carrying `XDG_CONFIG_HOME` and every accepted `--test-` argument (plus the harness's
-process-local `-reduceMotion` preference). The old instance quits only after the
-launch is accepted. After AppKit finishes launching, the new instance waits on a
-process-exit notification before creating its socket, menu or window catalog.
+process-local `-reduceMotion` preference). A restart's handoff quits the old
+instance only after the launch is accepted. Ordinary Quit and SIGTERM instead
+wait for an outstanding launch callback, for at most 2 s, cancelling its
+replacement before terminating. If that bound expires before LaunchServices
+replies, Quit proceeds without a replacement pid to cancel; a replacement
+launched after this process exits can still treat the exit as a handoff.
+After AppKit finishes launching, the new instance waits on a process-exit
+notification before creating its socket, menu or window catalog.
 If the old pid still lives after 10 s, the replacement logs
 `restart abandoned: previous instance <pid> still running` and exits. The
 development-only `--test-failed-relaunch` and `--test-short-restart-wait` require
@@ -586,10 +591,11 @@ change when motion is off. No capture or timer remains at rest; the overlay
 stays ordered in, empty and transparent, so the next show draws at once.
 
 SIGTERM, the Quit menu and permission relaunch clear the stage at once, then
-drain outstanding ScreenCaptureKit requests for at most 500 ms before asking
-AppKit to terminate. Cleanup then returns managed windows and exits. Exiting
-during a capture can leave replayd checking a dead client's audit token
-and showing an approval alert. The capture-settled callback or one-shot deadline,
+drain outstanding ScreenCaptureKit requests for at most 500 ms. The drain runs
+alongside any outstanding restart-launch wait described above; both must finish
+before asking AppKit to terminate. Cleanup then returns managed windows and
+exits. Exiting during a capture can leave replayd checking a dead client's audit
+token and showing an approval alert. The capture-settled callback or one-shot deadline,
 whichever arrives first, completes the drain exactly once; repeated quit requests
 do not extend it or repeat cleanup. The limit leaves margin over normal
 15–100 ms captures and the measured 230 ms cold start, without letting a stuck
@@ -1207,9 +1213,12 @@ and returned windows with the shared 5 s final-state margin, without a separate
 elapsed-time assertion. E10 proves the CLI's exact 10 s deadline without a
 real-system wait. Policy also proves that launch acceptance after every CLI
 deadline (E10) or ordinary Quit (E12) cancels only that launch's replacement,
-while a fresh handoff keeps its accepted replacement. The waiting process has
-SIGTERM's default disposition; setup installs its cleanup handler only after
-the previous pid exits. E14 captures the enabled and disabled menus with
+while a fresh handoff keeps its accepted replacement. Quit waits for the launch
+result before finishing, bounded at exactly 2 s under virtual time; a later
+result still cancels its replacement if the old process is alive. With no
+outstanding launch, including an accepted handoff, Quit proceeds immediately.
+The waiting process has SIGTERM's default disposition; setup installs its cleanup
+handler only after the previous pid exits. E14 captures the enabled and disabled menus with
 `TESSEL_CAPTURE_WORKSPACES=1 scripts/verify captureRestartMenuForOwnerReview`,
 including the observer's ordered menu titles and Restart's AX key equivalent.
 The CI-only permission-denial step checks that Restart is present as
