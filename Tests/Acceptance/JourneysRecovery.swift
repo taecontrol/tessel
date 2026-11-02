@@ -121,6 +121,7 @@ extension Acceptance.Journeys {
             try desktop.expectInside(ids)
         }
         try step("#2 E28 quit returns managed windows and releases hotkeys") {
+            try desktop.clear()
             let (a, b) = try desktop.split()
             harness.stopApp()
             try desktop.expectInside([a, b])
