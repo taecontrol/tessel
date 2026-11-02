@@ -21,7 +21,7 @@ package enum Diagnostic: Equatable, Sendable {
 
     package var level: DiagnosticLevel {
         switch self {
-        case .disabled, .readFailed, .configError: .error
+        case .disabled, .readFailed, .configError, .restartFailed, .restartAbandoned: .error
         default: .notice
         }
     }
@@ -45,8 +45,9 @@ package enum Diagnostic: Equatable, Sendable {
         case .enabled: "enabled"
         case .disabled(let reason): "disabled: \(reason)"
         case .quit: "quit"
-        // Inert declarations for the restart acceptance tests; delivery supplies the text.
-        case .restartRequested, .restartFailed, .restartAbandoned: ""
+        case .restartRequested(let source): "restart requested from \(source.rawValue)"
+        case .restartFailed(let reason): "restart failed: \(reason)"
+        case .restartAbandoned(let pid): "restart abandoned: previous instance \(pid) still running"
         case let .appLaunched(pid, bundle): "app launched \(bundle) pid \(pid)"
         case let .appTerminated(pid, bundle, windows): "app terminated \(bundle) pid \(pid), \(windows) windows"
         case let .command(command, workspace, rail, focused):

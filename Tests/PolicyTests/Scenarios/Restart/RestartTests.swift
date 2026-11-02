@@ -113,6 +113,22 @@ import Testing
         #expect(rig.quits == 1)
     }
 
+    @Test("#67 E10: a launch accepted after every CLI deadline cannot quit the old instance later")
+    func expiredLaunchCannotQuitLater() throws {
+        let rig = RestartRig()
+        let deadline = rig.now + 10_000_000_000
+        rig.request(.cli, name: "expired", deadline: deadline)
+        rig.now = deadline
+        try rig.complete(.success(202))
+        #expect(rig.quits == 0)
+        #expect(rig.outcomes["expired"] == nil)
+        rig.request(.menu, name: "fresh")
+        #expect(rig.launches == 2)
+        try rig.complete(.success(303))
+        #expect(rig.outcomes["fresh"] == [.restarted(pid: 303)])
+        #expect(rig.quits == 1)
+    }
+
     @Test("an accepted launch reply is not CLI success until the new pid answers ready status")
     func launchReplyWaitsForReadiness() {
         var wait = RestartWait(oldPID: 101, deadline: 10_000_000_000)
