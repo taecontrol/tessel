@@ -131,6 +131,19 @@ before a GUI session starts. The script sets `TESSEL_ACCEPTANCE=1`; a direct
 `TESSEL_ACCEPTANCE=1 swift build --build-tests` compiles these suites without
 launching them.
 
+The `locked-session-windows` contract (#69 E4) is attended, because the harness
+cannot lock or unlock the screen. Run it alone and follow its one printed
+instruction:
+
+```sh
+TESSEL_CONTRACT_LOCKED_SESSION=1 scripts/verify lockedSessionWindows
+```
+
+Lock the screen, wait ten seconds and unlock it. The signed observer reads one
+fixture window every 2 ms throughout, asking the session for its lock report
+around each read. Every other run skips this contract. Run it again when its
+assumption changes or on a new macOS version.
+
 All real-system state checks use the single generous 5 s `margin` in
 `Tests/Acceptance/Support.swift`, including setup, lifecycle, CLI transport,
 contracts and captures. Their final-state API accepts no per-call deadline.
@@ -403,6 +416,20 @@ The group's last fill result also follows its front; an ordinary show retries
 that result without resizing the group merely because another tab was selected.
 The close fixture can retain a closed NSWindow object to verify that revalidation
 still retires its AX window.
+
+While the screen is locked, macOS answers every window as it answers a closed
+one: AXWindows and AXFocusedWindow answer, in place of each window, an element
+that is not its handle and has no window ID, and a retained handle answers
+illegalArgument with ID 0 for the window ID and invalidUIElement for
+attributes, while WindowServer keeps listing the window (#69). A read made then would retire every window. The catalog therefore asks
+the session whether the screen is locked before each read and again before
+committing it, and changes nothing when either answer is yes. Such a read is
+not a failure: it is not retried and logs nothing. The lock state comes from
+the CG session dictionary, never from `com.apple.screenIsLocked`, which any
+process can post. `com.apple.screenIsUnlocked` only wakes the catalog, which
+then rereads every app, so a window that closed or opened under the lock is
+reconciled. A render that runs under the lock, such as the one an app's exit
+starts, finds its windows invalid and stays unfinished until the next command.
 
 Policy scenarios prove workspace decisions; real journeys drive Carbon and
 observe AX frames/focus and CG visibility independently. The trusted fixture
@@ -1185,7 +1212,7 @@ screenshot of a real machine is committed.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49, #51, #55, #57, #59, #62, #63 and #67.
+This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49, #51, #55, #57, #59, #62, #63, #67 and #69.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -1559,6 +1586,10 @@ counters. E6 tags the existing three resource scenes with unchanged budgets.
 | #67 E13 | J |
 | #67 E14 | X |
 | #67 E15 | X |
+| #69 E1 | P |
+| #69 E2 | P |
+| #69 E3 | P |
+| #69 E4 | C |
 <!-- Pending capture: #33 E20 -->
 <!-- Pending capture: #36 E8 -->
 <!-- Pending capture: #59 E8 -->

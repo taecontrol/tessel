@@ -47,21 +47,30 @@ final class WindowCatalog {
     private let applications: any ApplicationPort
     private let ax: any AccessibilityPort
     private let windowOrder: any WindowOrderPort
+    private let session: any SessionPort
     private let scheduler: any SchedulingPort
     private let diagnostics: any DiagnosticsPort
     private var lifecycle: (any ApplicationObservation)?
+    private var unlock: (any SessionObservation)?
     private var apps: [Int32: AppWindows] = [:]
 
     init(workspaces: Workspaces, applications: any ApplicationPort, ax: any AccessibilityPort, windowOrder: any WindowOrderPort,
-         scheduler: any SchedulingPort, diagnostics: any DiagnosticsPort, fixtureBundleID: String? = nil) {
+         session: any SessionPort, scheduler: any SchedulingPort, diagnostics: any DiagnosticsPort, fixtureBundleID: String? = nil) {
         self.workspaces = workspaces
         self.applications = applications
         self.ax = ax
         self.windowOrder = windowOrder
+        self.session = session
         self.scheduler = scheduler
         self.diagnostics = diagnostics
         self.fixtureBundleID = fixtureBundleID
         lifecycle = applications.observe { [weak self] event, app in self?.appChanged(event, app: app) }
+        // No read is believed while the screen is locked, and a window can
+        // open or close meanwhile without another event.
+        unlock = session.observeUnlock { [weak self] in
+            guard let self else { return }
+            for pid in self.apps.keys.sorted() { self.apps[pid]?.refresh() }
+        }
         for app in applications.runningApplications { observe(app) }
     }
 
@@ -72,8 +81,8 @@ final class WindowCatalog {
         if let existing = apps[pid] { existing.refresh(hidden: app.hidden); return }
         let generation = UUID()
         let worker = AppWindows(pid: pid, name: app.name ?? "Application", bundleId: app.bundleID ?? "",
-                                hidden: app.hidden, generation: generation, ax: ax, windowOrder: windowOrder, scheduler: scheduler,
-                                diagnostics: diagnostics) { [weak self, scheduler] rows, focused, frontmost, activationPending, change, activation in
+                                hidden: app.hidden, generation: generation, ax: ax, windowOrder: windowOrder, session: session,
+                                scheduler: scheduler, diagnostics: diagnostics) { [weak self, scheduler] rows, focused, frontmost, activationPending, change, activation in
             scheduler.main.async {
                 guard let self, let worker = self.apps[pid], worker.generation == generation else { return }
                 // An activation can wait behind a newer keyboard selection in
@@ -192,6 +201,7 @@ private final class AppWindows: @unchecked Sendable {
     private let queue: any SerialLane
     private let ax: any AccessibilityPort
     private let windowOrder: any WindowOrderPort
+    private let session: any SessionPort
     private let scheduler: any SchedulingPort
     private let diagnostics: any DiagnosticsPort
     private let publish: @Sendable ([WindowObservation], UInt32?, Bool, Bool, CatalogChange, UUID?) -> Void
@@ -246,7 +256,8 @@ private final class AppWindows: @unchecked Sendable {
     private var activationRequest = ActivationRequest.resolved
 
     init(pid: Int32, name: String, bundleId: String, hidden: Bool, generation: UUID,
-         ax: any AccessibilityPort, windowOrder: any WindowOrderPort, scheduler: any SchedulingPort, diagnostics: any DiagnosticsPort,
+         ax: any AccessibilityPort, windowOrder: any WindowOrderPort, session: any SessionPort, scheduler: any SchedulingPort,
+         diagnostics: any DiagnosticsPort,
          publish: @escaping @Sendable ([WindowObservation], UInt32?, Bool, Bool, CatalogChange, UUID?) -> Void) {
         self.pid = pid
         self.name = name
@@ -257,6 +268,7 @@ private final class AppWindows: @unchecked Sendable {
         self.publish = publish
         self.ax = ax
         self.windowOrder = windowOrder
+        self.session = session
         self.scheduler = scheduler
         self.diagnostics = diagnostics
         presentationLock = scheduler.makeLock()
@@ -357,6 +369,10 @@ private final class AppWindows: @unchecked Sendable {
 
     private func readSnapshot() {
         guard !stopped else { return }
+        // A locked session answers every window as closed, with the codes of
+        // a real closure (locked-session-windows). Skip the read without
+        // counting a failure: the unlock rereads every app.
+        guard !session.screenLocked() else { return }
         if enhancedUIRestorePending, enhancedUIRestoreRetry == nil { restoreEnhancedUI() }
         updateSubscriptions([application], using: &appSubscriptions)
         do {
@@ -411,6 +427,9 @@ private final class AppWindows: @unchecked Sendable {
                   windows.allSatisfy({ window in confirmed.contains { window == $0 } }) else {
                 throw AXReadError.changed
             }
+            // The lock can begin after the check above and before the first
+            // answer; the whole read then describes closed windows.
+            guard !session.screenLocked() else { return }
             // AXWindows may still include the former tab root before the
             // focused replacement is read. Retire it using the previous bar
             // identity, before the new snapshot loses that relationship.

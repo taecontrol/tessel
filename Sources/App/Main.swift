@@ -167,8 +167,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         updateMenu()
         if trusted {
-            windows = WindowCatalog(workspaces: workspaces, applications: applications, ax: ax, windowOrder: SystemWindowOrder(), scheduler: scheduler,
-                                    diagnostics: diagnostics,
+            windows = WindowCatalog(workspaces: workspaces, applications: applications, ax: ax, windowOrder: SystemWindowOrder(),
+                                    session: SystemSession(), scheduler: scheduler, diagnostics: diagnostics,
                                     fixtureBundleID: LaunchOptions.fixtureOnly ? "com.taecontrol.tessel.fixture" : nil)
             workspaces.catalog = windows
         } else {

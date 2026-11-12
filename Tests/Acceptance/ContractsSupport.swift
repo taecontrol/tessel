@@ -74,6 +74,37 @@ struct NativeContractReply: Codable {
     }
     struct WindowListing: Codable { let frame: [Double]; let onScreen: Bool }
     let windowListing: WindowListing?
+    /// The attended locked-session contract's samples, as runs of equal ticks.
+    struct LockWatch: Codable {
+        struct Run: Codable {
+            /// The session's lock report before the list read, between the reads and after the handle read.
+            let locked: [Bool]
+            let listError: Int32
+            let listIsArray: Bool
+            let roots: Int
+            let listsHandle: Bool
+            let listsID: Bool
+            let rootIDError: Int32
+            let rootID: UInt32
+            let rootRoleError: Int32
+            let hiddenError: Int32
+            let focusedError: Int32
+            let focusedIsListed: Bool
+            let frontmostError: Int32
+            let handleIDError: Int32
+            let handleID: UInt32
+            let handleRoleError: Int32
+            let windowServerLists: Bool
+            let onScreen: Bool
+            let count: Int
+            let first: Double
+            let last: Double
+        }
+        struct Event: Codable { let name: String; let locked: Bool; let at: Double }
+        let runs: [Run]
+        let events: [Event]
+    }
+    let lockWatch: LockWatch?
     let placementGap: PlacementGap?
     let sampledAt: Double?
     struct Window: Codable {

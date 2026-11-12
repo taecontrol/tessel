@@ -57,9 +57,11 @@ package enum Assumption: String, CaseIterable, Sendable {
     case reduceMotionNotifications = "reduce-motion-notifications"
     case pointerPressNotifications = "pointer-press-notifications"
     case axResizeAnchoring = "ax-resize-anchoring"
+    case lockedSessionWindows = "locked-session-windows"
 
     package var statement: String {
         switch self {
+        case .lockedSessionWindows: "While the CG session dictionary reports the screen locked, AXWindows and AXFocusedWindow answer, in place of each window, an element that is not its handle and has no window ID (illegalArgument, ID 0); a retained handle answers illegalArgument with ID 0 for the window ID and invalidUIElement for attributes, although WindowServer still lists the window. A read between two unlocked reports answers truthfully, and com.apple.screenIsUnlocked arrives once the report is unlocked."
         case .mapOverlay: "Showing the map window never changes focus or the frontmost app and lets the pointer through."
         case .enhancedUIResize: "With AXEnhancedUserInterface enabled, a size followed by position loses the size; disabling it around the write and restoring it preserves the requested geometry. AppKit may apply the flag while returning notImplemented."
         case .axResizeAnchoring: "AXSize can be constrained by the current positive x and by the current top against the screen bottom; moving first allows the requested size."

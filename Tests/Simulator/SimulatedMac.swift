@@ -134,6 +134,8 @@ package final class SimulatedMac: @unchecked Sendable {
     var unlisted = Set<UInt32>()
     var listingHistory: [ListingRead] = []
     var commits: [WindowServerCommit] = []
+    var screenLocked = false
+    var unlocks: [WeakUnlock] = []
 
     struct AppState {
         let pid: Int32, alias: String, bundleID: String
