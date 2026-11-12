@@ -4,6 +4,7 @@ Date: 2026-10-29
 Status: Accepted
 
 Amends [ADR-0008](0008-gate-real-system-changes-on-local-evidence.md).
+Amended by [ADR-0011](0011-give-the-permissions-job-nine-minutes.md): Permissions has nine minutes.
 
 ## Context
 
