@@ -256,6 +256,15 @@ final class Fixture: NSObject, NSApplicationDelegate {
             let status = makeWindow(key: "status", kind: "dialog", show: false)
             status.level = .statusBar
             status.orderFront(nil)
+            // A panel its app shows without taking the keyboard, like a recorder.
+            let quiet = NSPanel(contentRect: NSRect(x: 620, y: 180, width: 240, height: 60),
+                                styleMask: [.nonactivatingPanel, .fullSizeContentView], backing: .buffered, defer: false)
+            quiet.isReleasedWhenClosed = false
+            quiet.isFloatingPanel = true
+            quiet.hidesOnDeactivate = false
+            quiet.animationBehavior = .none
+            quiet.orderFrontRegardless()
+            windows["quiet"] = quiet
             ordinary.makeKeyAndOrderFront(nil)
         case "detachTab": windows[key]?.moveTabToNewWindow(nil)
         case "tab": windows[key]?.makeKeyAndOrderFront(nil)

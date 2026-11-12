@@ -178,7 +178,10 @@ private struct WindowFacts {
         // AXFullScreen remains authoritative while a native transition exposes
         // a temporary root with an unknown subrole.
         else if fullscreen { state = .fullscreen; reason = "native fullscreen" }
-        else if !["AXStandardWindow", "AXDialog", "AXSystemDialog", "AXFloatingWindow"].contains(subrole) {
+        // AXSystemDialog and AXSystemFloatingWindow are panels that never
+        // activate their app; focusing one would take the keyboard from the
+        // window its app means to leave in front.
+        else if !["AXStandardWindow", "AXDialog", "AXFloatingWindow"].contains(subrole) {
             state = .ignored; reason = subrole
         }
         else if minimized { state = .minimized; reason = "minimized" }

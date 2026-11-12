@@ -121,7 +121,6 @@ import Testing
             let app = s.mac.launch()
             let cases: [(WindowSpec, String)] = [
                 (WindowSpec(subrole: "AXDialog"), "AXDialog"),
-                (WindowSpec(subrole: "AXSystemDialog"), "AXSystemDialog"),
                 // This example retains the app's explicit normal-level override.
                 (WindowSpec(subrole: "AXFloatingWindow", cgLayer: 0), "AXFloatingWindow"),
                 (WindowSpec(resizable: false), "fixed size"),
@@ -160,6 +159,34 @@ import Testing
             let trace = Array(s.mac.scheduler.trace.dropFirst(start))
             s.expect("tessel never activates the alert app", !trace.contains { ($0.contains("set AXFrontmost=true") || $0.contains("ApplicationPort.activate ")) && $0.contains(alerts.alias + " ") })
             s.expect("the alert receives no AX writes or closet moves", !LayerFixture.axWrites(in: trace).contains { $0.contains("window \(alert) ") } && !s.mac.visibilityChanges.flatMap(\.windows).contains(alert))
+        })
+    }
+
+    @Test("a background app's non-activating panel is ignored, stays visible and never takes focus", arguments: [0, 3])
+    func nonActivatingPanelDoesNotStealFocus(_ level: Int) {
+        requireLayer(Scenario.run("background non-activating panel, level=\(level)") { s in
+            let app = s.mac.launch(windows: 1), tool = s.mac.launch()
+            let tile = app.windows[0]
+            app.select(tile)
+            let t = s.startTessel(.carousel); s.settle()
+            let before = s.mac.frame(tile), start = s.mac.scheduler.trace.count
+            s.mac.clearMotionHistory()
+            // AppKit reports an NSPanel with the nonactivatingPanel style as AXSystemDialog.
+            let panel = tool.open(WindowSpec(subrole: "AXSystemDialog", resizable: false, cgLayer: level), background: true)
+            let frame = s.mac.frame(panel)
+            s.settle()
+            let row = t.windows.first { $0.id == panel }
+            s.expect("the panel is ignored by its subrole", row?.state.rawValue == "ignored" && row?.reason == "AXSystemDialog")
+            s.expect("the panel has no workspace, rail or slot", row?.workspace == nil && row?.rail == nil && row?.slot == nil)
+            s.expect("showing the panel preserves focus and the frontmost app", s.mac.focusedWindow == tile && s.mac.frontmostApp == app.pid)
+            let state = encodedObject(t.status)["layer"] as? [String: Any]
+            s.expect("the panel never enters the layer", state?["state"] as? String == "hidden" && state?["focused"] as? Bool == false)
+            s.expect("the panel stays visible where its app put it", s.mac.isVisible(panel) && !s.mac.isInCloset(panel) && s.mac.frame(panel) == frame)
+            tool.close(panel); s.settle()
+            s.expect("closing the panel preserves focus, app and tile geometry", s.mac.focusedWindow == tile && s.mac.frontmostApp == app.pid && s.mac.frame(tile) == before)
+            let trace = Array(s.mac.scheduler.trace.dropFirst(start))
+            s.expect("tessel never activates the panel's app", !trace.contains { ($0.contains("set AXFrontmost=true") || $0.contains("ApplicationPort.activate ")) && $0.contains(tool.alias + " ") })
+            s.expect("the panel receives no AX writes or closet moves", !LayerFixture.axWrites(in: trace).contains { $0.contains("window \(panel) ") } && !s.mac.visibilityChanges.flatMap(\.windows).contains(panel))
         })
     }
 }
