@@ -6,6 +6,10 @@ extension SimulatedMac {
     enum Node: Hashable, Sendable {
         case application(Int32), window(UInt32), bar(Int), tab(Int, Int), desktop
         case foundation(UInt32, FoundationNode)
+        /// What AXWindows and AXFocusedWindow answer for a window while the
+        /// screen is locked: an element that is not the window's handle and
+        /// has no window ID. Only its ID lookup is modeled.
+        case lockedRoot(UInt32)
     }
     final class Handle: AXElementIdentity, @unchecked Sendable {
         unowned let mac: SimulatedMac
@@ -24,7 +28,7 @@ extension SimulatedMac {
     func pid(_ node: Node) -> Int32? {
         switch node {
         case .application(let pid): pid
-        case .window(let id): windows[id]?.pid
+        case .window(let id), .lockedRoot(let id): windows[id]?.pid
         case .foundation(let id, _): windows[id]?.pid
         case .bar(let group), .tab(let group, _): groups[group].flatMap { windows[$0.selected]?.pid }
         case .desktop: 10
@@ -35,6 +39,7 @@ extension SimulatedMac {
         switch node {
         case .application(let pid): return "\(alias) pid=\(pid)"
         case .window(let id): return "window \(id) \(alias)"
+        case .lockedRoot(let id): return "locked-root \(id) \(alias)"
         case .foundation(let id, let node): return "\(node) window \(id) \(alias)"
         case .bar(let group): return "native-bar \(group) \(alias)"
         case .tab(let group, let index): return "tab \(group).\(index) \(alias)"
@@ -65,6 +70,18 @@ extension SimulatedMac {
             guard mac.scheduler.isActive else { return .cannotComplete }
             guard let pid = mac.pid(handle.node), let app = mac.apps[pid], !app.terminated else { return .invalidUIElement }
             if app.hung || app.busyUntil > mac.scheduler.now { return .cannotComplete }
+            if mac.screenLocked {
+                switch handle.node {
+                case .window:
+                    mac.assume(.lockedSessionWindows)
+                    if !readingWindowID { return .invalidUIElement }
+                case .bar, .tab, .foundation:
+                    // No contract has sampled a window's descendants under a lock.
+                    mac.scheduler.failUnmodeled("AccessibilityPort locked-session read of \(handle.name)")
+                    return .cannotComplete
+                case .application, .desktop, .lockedRoot: break
+                }
+            }
             if case .window(let id) = handle.node {
                 guard let window = mac.windows[id] else { return .invalidUIElement }
                 if window.closed && !readingWindowID { return .invalidUIElement }
@@ -146,6 +163,7 @@ extension SimulatedMac {
             guard let handle = handle(element, operation: "windowID") else { return AXResult(.cannotComplete) }
             let result: AXResult<UInt32>
             if let error = unavailable(handle, readingWindowID: true) { result = AXResult(error) }
+            else if mac.locksWindowID(handle.node) { result = AXResult(.other(-25201), 0) }
             else if case .window(let id) = handle.node {
                 if mac.windows[id]?.closed == true {
                     mac.assume(.closedWindowHandles)
@@ -167,6 +185,16 @@ extension SimulatedMac {
             mac.observers.append(WeakObservation(value: observer))
             mac.scheduler.reply("AccessibilityPort.observer reply \(mac.apps[pid]!.alias) success", cost: 1)
             return AXResult(.success, observer)
+        }
+    }
+
+    /// While the screen is locked, a window's handle and the element listed
+    /// in its place both answer illegalArgument with ID 0 for the window ID.
+    func locksWindowID(_ node: Node) -> Bool {
+        switch node {
+        case .lockedRoot: return true
+        case .window: return screenLocked
+        default: return false
         }
     }
 
@@ -198,6 +226,10 @@ extension SimulatedMac {
                 if apps[pid]?.publishesFocus == false {
                     assume(.nativeTabPublication)
                     return AXResult(.noValue)
+                }
+                if screenLocked {
+                    assume(.lockedSessionWindows)
+                    return apps[pid]?.key.map { AXResult(.success, .element(element(.lockedRoot($0)))) } ?? AXResult(.noValue)
                 }
                 return apps[pid]?.key.map { AXResult(.success, .element(element(.window($0)))) } ?? AXResult(.noValue)
             case .frontmost:
@@ -245,6 +277,7 @@ extension SimulatedMac {
                 return AXResult(.success, .elements([]))
             }
         case .foundation(let id, let node): return readFoundation(attribute, window: id, node: node)
+        case .lockedRoot: break
         case .desktop:
             assume(.finderDesktop)
             switch attribute {
@@ -282,6 +315,10 @@ extension SimulatedMac {
             }
         }
         var elements = ids.map { element(.window($0)) }
+        if screenLocked {
+            assume(.lockedSessionWindows)
+            elements = ids.map { element(.lockedRoot($0)) }
+        }
         if pid == 10 { elements.append(element(.desktop)) }
         return AXResult(.success, .elements(elements))
     }

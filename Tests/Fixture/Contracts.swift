@@ -14,6 +14,7 @@ final class FixtureContracts: NSObject {
     private let motionProbe = FixtureMotionProbe()
     private let stage = FixtureStage()
     private let instantRecording = FixtureInstantRecording()
+    private let lockWatch = FixtureLockWatch()
     private var handles: [UInt32: AXUIElement] = [:]
     private var bars: [AXUIElement] = []
     private var captured: [String: CFTypeRef] = [:]
@@ -38,6 +39,7 @@ final class FixtureContracts: NSObject {
         let operation = command["operation"] as? String ?? "snapshot"
         switch operation {
         case "reset":
+            lockWatch.stop()
             motionProbe.reset()
             stage.hideOverlay()
             stopObserving()
@@ -207,6 +209,11 @@ final class FixtureContracts: NSObject {
             let frame = listed.bounds
             return ["windowListing": ["frame": [frame.minX, frame.minY, frame.width, frame.height], "onScreen": listed.onScreen]]
         case "placementGap": return try placementGap(command, application: application, pid: pid)
+        case "lockWatchStart":
+            let window = try retained(command, pid: pid)
+            lockWatch.start(application: application, window: window, id: id(window))
+            return [:]
+        case "lockWatch": return ["lockWatch": lockWatch.facts()]
         case "snapshot": return snapshot(application, pid: pid)
         case "barOwner":
             guard let index = command["bar"] as? Int, bars.indices.contains(index) else { throw FixtureContractError("retain a native bar before reading its owner") }

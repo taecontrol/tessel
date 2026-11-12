@@ -1,7 +1,8 @@
 import AppKit
 
-/// Log-only context. None of these notifications changes Policy or starts work
-/// at rest. AppDelegate retains the observers until termination calls stop().
+/// Log-only context. None of these observers changes Policy or starts work at
+/// rest; SystemSession observes the unlock separately, as a wake-up (#69).
+/// AppDelegate retains the observers until termination calls stop().
 @MainActor
 final class SystemEvents: NSObject {
     private let diagnostics: any DiagnosticsPort

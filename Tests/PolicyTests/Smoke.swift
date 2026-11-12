@@ -16,7 +16,7 @@ import Testing
                                     applications: desktop, ax: ax, screens: desktop, windowOrder: desktop,
                                     scheduler: scheduler, hotkeys: desktop, diagnostics: SilentDiagnostics()) { desktop }
         let catalog = WindowCatalog(workspaces: workspaces, applications: desktop, ax: ax, windowOrder: desktop,
-                                    scheduler: scheduler, diagnostics: SilentDiagnostics())
+                                    session: desktop, scheduler: scheduler, diagnostics: SilentDiagnostics())
         workspaces.catalog = catalog
         #expect(workspaces.status.enabled)
         #expect(rows.windows[101]?.isEmpty == true)
@@ -34,7 +34,10 @@ private final class Rows: WindowPublishing {
 }
 
 @MainActor
-private final class EmptyDesktop: ApplicationPort, ScreenPort, WindowOrderPort, HotkeyInstalling, ClosetPort {
+private final class EmptyDesktop: ApplicationPort, ScreenPort, WindowOrderPort, HotkeyInstalling, ClosetPort, SessionPort {
+    nonisolated func screenLocked() -> Bool { false }
+    func observeUnlock(_ receive: @escaping @MainActor () -> Void) -> any SessionObservation { Unlock() }
+    private final class Unlock: SessionObservation {}
     nonisolated func listings(_ windows: Set<UInt32>) -> [UInt32: WindowListing] { [:] }
     nonisolated func windowLevels(_ windows: Set<UInt32>) -> [UInt32: Int] { [:] }
     let ownPID: Int32 = 100

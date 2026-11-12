@@ -36,7 +36,7 @@ enum Layout: String, CaseIterable, Sendable { case carousel }
                                 fixtureOnly: true, motionPreferences: mac.motionPreferences, stage: mac.stage,
                                 pointerActivity: mac.pointerActivity, map: mac.map, diagnostics: mac.diagnostics) { try makeCloset?() ?? mac.closetPort }
         catalog = WindowCatalog(workspaces: workspaces, applications: mac.applications, ax: mac.ax, windowOrder: mac.windowOrder,
-                                scheduler: mac.scheduler, diagnostics: mac.diagnostics)
+                                session: mac.session, scheduler: mac.scheduler, diagnostics: mac.diagnostics)
         workspaces.catalog = catalog
         configurationPublications.append((mac.scheduler.now, config.status))
         config.onChange = { [weak self] status in
