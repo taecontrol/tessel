@@ -11,9 +11,9 @@ jobs:
   permissions:
     name: Permissions
     runs-on: xcode-27
-    # Measured: 99 s build + 50 s signing journey + 3 s permission steps.
-    # Seven minutes leave setup and runner margin below the ten-minute limit.
-    timeout-minutes: 7
+    # ADR 0011: green runs took 216 to 381 s, and one with every step passed
+    # was cancelled at seven minutes. Nine is the most the ten-minute rule allows.
+    timeout-minutes: 9
     steps:
       - uses: actions/checkout@v4
       - name: Configure ephemeral certificate signing

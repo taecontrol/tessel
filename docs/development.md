@@ -251,11 +251,12 @@ let real app switches produce the traffic.
 
 Pull requests run Policy (bare `swift test`, `tessel-check layers`, and
 `determinism --runs 3`), Simulator evidence, and Permissions. Policy has a fifteen
-minute timeout ([ADR 0010](adr/0010-give-the-policy-job-fifteen-minutes.md)), the evidence job five, and Permissions seven. Permissions signs
+minute timeout ([ADR 0010](adr/0010-give-the-policy-job-fifteen-minutes.md)), the evidence job five, and Permissions nine ([ADR 0011](adr/0011-give-the-permissions-job-nine-minutes.md)). Permissions signs
 and builds once, then selects only `signingAndPermission` and `--permission`:
-signed rebuild, denied Accessibility and permission recovery/restart. Its seven
-minute limit leaves margin over the measured 99 s build, 50 s signing journey
-and 3 s permission steps. There are no scheduled or diagnostic CI runs.
+signed rebuild, denied Accessibility and permission recovery/restart. Its nine
+minute limit leaves margin over the slowest observed run, 436 s, which spent
+174 s building and 235 s in the signing and permission step. There are no
+scheduled or diagnostic CI runs.
 
 Contracts, ordinary journeys, latency and resources run locally. A change under
 `Sources/`, `Tests/Acceptance/`, `Tests/Fixture/`, `Tools/Build/` or `scripts/`
