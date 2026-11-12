@@ -141,8 +141,10 @@ TESSEL_CONTRACT_LOCKED_SESSION=1 scripts/verify lockedSessionWindows
 
 Lock the screen, wait ten seconds and unlock it. The signed observer reads one
 fixture window every 2 ms throughout, asking the session for its lock report
-around each read. Every other run skips this contract. Run it again when its
-assumption changes or on a new macOS version.
+around each read. Its wait for the owner is bounded by a count of polls, about
+ten minutes, instead of the margin below, and judges no elapsed time. Every
+other run skips this contract. Run it again when its assumption changes or on
+a new macOS version.
 
 All real-system state checks use the single generous 5 s `margin` in
 `Tests/Acceptance/Support.swift`, including setup, lifecycle, CLI transport,
@@ -423,8 +425,9 @@ that is not its handle and has no window ID, and a retained handle answers
 illegalArgument with ID 0 for the window ID and invalidUIElement for
 attributes, while WindowServer keeps listing the window (#69). A read made then would retire every window. The catalog therefore asks
 the session whether the screen is locked before each read and again before
-committing it, and changes nothing when either answer is yes. Such a read is
-not a failure: it is not retried and logs nothing. The lock state comes from
+committing it, and changes nothing when either answer is yes. A read skipped
+this way is not a failure and logs nothing. A read the lock interrupts can
+count one failed attempt, whose retry is then skipped. The lock state comes from
 the CG session dictionary, never from `com.apple.screenIsLocked`, which any
 process can post. `com.apple.screenIsUnlocked` only wakes the catalog, which
 then rereads every app, so a window that closed or opened under the lock is

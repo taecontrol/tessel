@@ -18,7 +18,7 @@ final class FixtureLockWatch: NSObject {
         var rootIDError: Int32
         var rootID: UInt32
         var rootRoleError: Int32
-        /// App-level reads, recorded for the simulator's model and not asserted.
+        /// The app's own attributes, which keep answering under a lock.
         var hiddenError: Int32
         var focusedError: Int32
         var focusedIsListed: Bool

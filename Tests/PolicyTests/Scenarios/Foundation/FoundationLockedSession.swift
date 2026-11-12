@@ -69,8 +69,10 @@ import Testing
     enum LockPoint: String, CaseIterable, Sendable {
         /// Before the first answer: the whole read describes closed windows.
         case beforeFirstAnswer
-        /// After the window list and focus were read truthfully.
-        case afterFocusRead
+        /// After a truthful window list: the handles then answer as closed.
+        case afterWindowList
+        /// After the read was committed, before its focus is read for publication.
+        case afterCommit
     }
 
     @Test("#69 E2: a read the lock interrupts changes nothing",
@@ -81,10 +83,16 @@ import Testing
             let rows = membership(f), sizes = widths(f)
             let app = f.apps[0]
             s.after(milliseconds: 0, "click") { f.mac.pointerDown(); f.mac.pointerUp() }
-            let held: RunOutcome
+            let name = "\(app.alias) pid=\(app.pid)"
+            var held: RunOutcome
             switch point {
-            case .beforeFirstAnswer: held = f.mac.pause(after: .call("AccessibilityPort.copy AXWindows \(app.alias) pid=\(app.pid)"))
-            case .afterFocusRead: held = f.mac.pause(after: .read(app))
+            case .beforeFirstAnswer: held = f.mac.pause(after: .call("AccessibilityPort.copy AXWindows \(name)"))
+            case .afterWindowList: held = f.mac.pause(after: .call("AccessibilityPort.copy AXHidden \(name)"))
+            case .afterCommit:
+                // The read asks for the focused window once before committing
+                // and once more to publish.
+                held = f.mac.pause(after: .call("AccessibilityPort.copy AXFocusedWindow \(name)"))
+                if case .paused = held { held = f.mac.pause(after: .call("AccessibilityPort.copy AXFocusedWindow \(name)")) }
             }
             if case .paused = held {} else { s.expect("the read is held at \(point.rawValue): \(held)", false) }
             s.expect("the read began with the session unlocked", !f.mac.isScreenLocked)
