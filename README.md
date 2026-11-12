@@ -162,11 +162,12 @@ Tessel decides with the same rules every time, so the same window always ends
 up in the same place:
 
 - A standard, resizable window goes on a rail.
-- Dialogs, system dialogs, floating panels, and windows that can't be resized
+- Dialogs, floating panels, and windows that can't be resized
   float. Floating panels include inspectors, palettes, and similar utility
   windows.
-- Everything else, such as menus, popovers, notifications, and desktop
-  widgets, is ignored. Tessel doesn't move it.
+- Everything else, such as menus, popovers, notifications, desktop
+  widgets, and panels that appear without taking the keyboard, is ignored.
+  Tessel doesn't move or focus it.
 
 An app's native tabs count as one window.
 

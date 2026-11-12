@@ -25,11 +25,12 @@ window, and can explain every classification (#1, #2). Paneru already handles
 native tabs.
 
 AX roots also include surfaces that should never join a layout. Tessel checks
-CG level before subrole: standard windows, dialogs, system dialogs and floating
+CG level before subrole: standard windows, dialogs and floating
 windows at layer 0 or the floating level 3 are managed, including apps' own
 utility panels, inspectors and palettes. Other surfaces are listed as
 `ignored`, with their level or subrole as the reason (#19). This keeps popups,
-alerts and widgets out of workspace membership and focus history.
+alerts, widgets and panels that never activate their app out of workspace
+membership and focus history.
 
 macOS moves a window that sits entirely off screen onto another display, so
 AeroSpace and Paneru hide windows by leaving a thin sliver of each one visible
