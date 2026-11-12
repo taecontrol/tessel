@@ -166,7 +166,7 @@ up in the same place:
   float. Floating panels include inspectors, palettes, and similar utility
   windows.
 - Everything else, such as menus, popovers, notifications, desktop
-  widgets, and panels that appear without taking the keyboard, is ignored.
+  widgets, and panels that never activate their app, is ignored.
   Tessel doesn't move or focus it.
 
 An app's native tabs count as one window.

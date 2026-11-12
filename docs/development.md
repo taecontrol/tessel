@@ -989,9 +989,9 @@ utility panels, inspectors and palettes. Every other layer is `ignored` with
 reason `window level <n>`, checked before the subrole. Other subroles are
 `ignored` with that subrole as the reason. That includes `AXSystemDialog` and
 `AXSystemFloatingWindow`, which AppKit reports for a panel that never activates
-its app, such as a dictation tool's recorder or a quick-entry field. Its app
-shows it while another app keeps the keyboard, so Tessel never focuses it,
-hides it or adds it to the layer. Ignored records have null `workspace`,
+its app, such as a dictation tool's recorder or a quick-entry field. Focusing
+one would activate an app that means to stay in the background, so Tessel never
+focuses it, hides it or adds it to the layer. Ignored records have null `workspace`,
 `rail` and `slot`; their
 appearance or removal changes neither focus history nor layouts. Native
 fullscreen remains detected through `AXFullScreen`, including a transient
