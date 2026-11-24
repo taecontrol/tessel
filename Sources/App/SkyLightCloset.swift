@@ -83,18 +83,27 @@ final class SkyLightCloset: ClosetPort {
         closet = nil
     }
 
+    /// Space masks for membership queries and for the Spaces a move removes a
+    /// window from. Closets are outside the ordinary mask.
+    private static let ordinarySpaces: UInt32 = 7
+    private static let allSpaces: UInt32 = 0xF
+
     func memberships(_ window: UInt32, scope: SpaceScope) -> [SpaceToken] {
-        let mask: UInt32 = scope == .ordinary ? 7 : 0xF
+        let mask = scope == .ordinary ? Self.ordinarySpaces : Self.allSpaces
         let result = spaces(connection(), mask, [NSNumber(value: window)] as CFArray)?.takeRetainedValue()
         return (result as? [NSNumber] ?? []).map { SpaceToken(adapterValue: $0.uint64Value) }
     }
 
+    /// Leaves each window in exactly `space`. Removing it from ordinary Spaces
+    /// only would keep a shown window in the closet too, and its app's next
+    /// native menu would take the window back into the closet with the menu.
     private func move(_ windows: [UInt32], to space: UInt64) {
         guard !windows.isEmpty, space != 0 else { return }
         let selector = NSSelectorFromString("initWithSpaceID:windows:options:")
         typealias Initialize = @convention(c) (AnyObject, Selector, UInt64, NSArray, UInt64) -> Unmanaged<AnyObject>?
         let initialize = unsafeBitCast(class_getMethodImplementation(moveClass, selector), to: Initialize.self)
-        let operation = initialize(allocate(moveClass), selector, space, windows.map(NSNumber.init(value:)) as NSArray, 7)?.takeRetainedValue() as? NSObject
+        let operation = initialize(allocate(moveClass), selector, space, windows.map(NSNumber.init(value:)) as NSArray,
+                                   UInt64(Self.allSpaces))?.takeRetainedValue() as? NSObject
         _ = operation?.perform(Self.perform)
     }
 

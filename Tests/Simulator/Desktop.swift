@@ -93,7 +93,6 @@ extension SimulatedMac {
     @MainActor struct Closet: ClosetPort {
         let mac: SimulatedMac
         let space: UInt64
-        let retainingShownMembership: Bool
         func start() throws {
             mac.assume(.closetMoves)
             mac.scheduler.call("ClosetPort.start")
@@ -135,13 +134,9 @@ extension SimulatedMac {
             for id in ids {
                 let children = mac.windows.keys.sorted().filter { mac.windows[$0]?.spec.parent == id }
                 for member in mac.groupMembers(id) + children {
-                    guard let window = mac.windows[member] else { continue }
-                    var memberships: Set<UInt64> = [space]
-                    if space == mac.active && retainingShownMembership {
-                        mac.assume(.closetMembership)
-                        memberships.formUnion(window.spaces.filter { $0 >= 2 && $0 < 10_000 })
-                    }
-                    mac.windows[member]?.spaces = memberships
+                    guard mac.windows[member] != nil else { continue }
+                    mac.assume(.closetMembership)
+                    mac.windows[member]?.spaces = [space]
                 }
             }
         }
