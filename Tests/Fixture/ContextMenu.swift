@@ -8,18 +8,21 @@ import Darwin
 /// samples and then ends tracking; AX answering during tracking is unobserved.
 @MainActor
 final class FixtureContextMenu: NSObject {
-    /// The menu stays open this long once it is on screen. A menu that never
-    /// appears ends tracking after `unseen`, far inside the harness margin.
-    private static let interval = 0.05, held = 0.4, unseen = 1.0
+    /// The menu stays open this long once it is on screen.
+    private static let interval = 0.05, held = 0.4
     private let window: NSWindow
+    /// The harness margin for the whole command. A menu that never appears
+    /// ends tracking when it runs out, so the fixture answers later commands.
+    private let margin: Double
     private let spaces: FixtureSpaces
     private let menu = NSMenu()
     private var samples: [[String: Any]] = []
     private var started = 0.0
     private var appeared: Double?
 
-    init(window: NSWindow) throws {
+    init(window: NSWindow, margin: Double) throws {
         self.window = window
+        self.margin = margin
         spaces = try FixtureSpaces()
         super.init()
         for index in 1...3 { menu.addItem(withTitle: "Fixture item \(index)", action: nil, keyEquivalent: "") }
@@ -48,7 +51,7 @@ final class FixtureContextMenu: NSObject {
                         "menuOnScreen": menuOnScreen, "activeSpace": spaces.active,
                         "spaces": spaces.memberships(id, mask: 0xF), "sampledAt": now])
         if appeared == nil, menuOnScreen { appeared = now }
-        if appeared.map({ now - $0 >= Self.held }) ?? (now - started >= Self.unseen) { menu.cancelTracking() }
+        if appeared.map({ now - $0 >= Self.held }) ?? (now - started >= margin) { menu.cancelTracking() }
     }
 
     private static func now() -> Double { Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1e9 }
