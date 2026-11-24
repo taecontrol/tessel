@@ -223,6 +223,44 @@ extension Acceptance {
             }
         }
 
+        @Test("popup journey")
+        func popupAfterCloset() throws {
+            let ids = try desktop.railSetup([1.0, 1.0], duration: 0)
+            // The observer reads Spaces through the window handle a snapshot retains.
+            try harness.observer.command("contract", ["operation": "snapshot", "pid": fixture.pid])
+            func spaces() throws -> NativeContractReply? {
+                try harness.observer.command("contract", ["operation": "spaces", "pid": fixture.pid, "ids": [ids[0]]]).contract
+            }
+            try step("a native menu keeps a window Tessel has shown from the closet on screen in exactly the active Space") {
+                try desktop.post(kVK_ANSI_L)
+                try desktop.expectShown(ids[1])
+                try requireFinalState("the first window rests in a closet, outside every ordinary Space") {
+                    let membership = try spaces()?.memberships?.first
+                    return try !desktop.visible(ids[0]) && membership?.ordinary.isEmpty == true && membership?.all.isEmpty == false
+                }
+                try desktop.post(kVK_ANSI_H)
+                try desktop.expectShown(ids[0])
+                try fixture.requireMenuKeepsWindow(key: "w0")
+                try requireFinalState("the shown window stays on screen and only in the active Space after its menu closes") {
+                    let state = try spaces()
+                    return try desktop.visible(ids[0]) && state?.activeSpace != nil && state?.memberships?.first?.all == state?.activeSpace.map { [$0] }
+                }
+            }
+        }
+
+        @Test("a timed-out fixture command cannot answer the next command")
+        func lateFixtureReply() throws {
+            try step("a reply the fixture sends after its command timed out reaches no later command") {
+                kill(fixture.pid, SIGSTOP)
+                defer { kill(fixture.pid, SIGCONT) }
+                let timedOut = try #require(throws: HarnessError.self) { try fixture.command("reset") }
+                #expect(timedOut.description == "fixture did not answer reset")
+                kill(fixture.pid, SIGCONT)
+                // The resumed fixture answers the queued reset first, with no windows.
+                _ = try fixture.open(key: "afterTimeout")
+            }
+        }
+
         @Test("reload journey")
         func reload() throws {
             let window = try fixture.open()

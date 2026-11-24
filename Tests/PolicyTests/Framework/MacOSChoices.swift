@@ -303,13 +303,13 @@ private final class NativeRootEvents: @unchecked Sendable {
         #expect(mac.settle() == .settled)
     }
 
-    @Test("shown windows may retain closet membership until destruction without remaining hidden", arguments: [false, true])
-    func closetMembership(_ retained: Bool) throws {
+    @Test("a closet move leaves a window and its sheet only in the destination Space")
+    func closetMembership() throws {
         let mac = SimulatedMac()
         defer { mac.shutdown() }
         let app = mac.launch(windows: 1)
         let sheet = app.open(WindowSpec(parent: 1))
-        let closet = mac.closetPort(retainingShownMembership: retained)
+        let closet = mac.closetPort
         try closet.start()
         let active = closet.activeSpace(), hidden = closet.closetSpace
         closet.hide([1])
@@ -321,7 +321,7 @@ private final class NativeRootEvents: @unchecked Sendable {
         closet.show([1])
         for id in [UInt32(1), sheet] {
             #expect(closet.memberships(id, scope: .ordinary) == [active])
-            #expect(Set(closet.memberships(id, scope: .all)) == (retained ? [active, hidden] : [active]))
+            #expect(closet.memberships(id, scope: .all) == [active])
             #expect(mac.isVisible(id) && !mac.isInCloset(id))
         }
         closet.stop(returning: [])

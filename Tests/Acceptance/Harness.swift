@@ -118,6 +118,30 @@ struct FixtureReply: Decodable {
     let minimizeEvents: [String: [MinimizeEvent]]?
     let miniaturized: [String: Bool]?
     let videosReady: [String: Bool]?
+    /// The fixture's own samples while its native context menu tracked.
+    struct MenuSample: Decodable {
+        let windowOnScreen: Bool
+        let menuOnScreen: Bool
+        let activeSpace: UInt64
+        let spaces: [UInt64]
+
+        /// Requires that the menu appeared and stayed on screen in every later
+        /// sample, and that fixture window `key` stayed on screen in exactly
+        /// the active Space in every sample taken while the menu tracked.
+        static func requireMenuKeptWindow(_ samples: [MenuSample], key: String) throws {
+            let described = samples.map { "window \($0.windowOnScreen) menu \($0.menuOnScreen) spaces \($0.spaces)" }
+            guard let appeared = samples.firstIndex(where: \.menuOnScreen) else {
+                throw HarnessError("the context menu never appeared on screen; samples \(described)")
+            }
+            guard samples[appeared...].allSatisfy(\.menuOnScreen) else {
+                throw HarnessError("the context menu left the screen before the fixture dismissed it; samples \(described)")
+            }
+            guard samples.allSatisfy({ $0.windowOnScreen && $0.spaces == [$0.activeSpace] }) else {
+                throw HarnessError("fixture window \(key) left the screen or the active Space while its menu tracked; samples \(described)")
+            }
+        }
+    }
+    let contextMenu: [MenuSample]?
 }
 
 struct Observation: Decodable {
@@ -163,8 +187,12 @@ final class FixtureSession {
     private(set) var pid: pid_t = 0
     private(set) var windowIDs = Set<UInt32>()
     private let path: String
-    private let clientPath: String
-    private let socket: Int32
+    /// The reply address. A request that times out retires it, because its
+    /// reply can still arrive and must reach no later caller.
+    private let clientStem: String
+    private var clientPath = ""
+    private var socket: Int32 = -1
+    private var replyGeneration = 0
 
     private struct Unreachable: Error, CustomStringConvertible {
         let code: Int32
@@ -173,21 +201,9 @@ final class FixtureSession {
 
     init(directory: URL, number: Int, swiftUI: Bool = false, prohibited: Bool = false, accessory: Bool = false) throws {
         path = directory.appending(path: "f\(number).sock").path
-        clientPath = directory.appending(path: "c\(number).sock").path
-        socket = Darwin.socket(AF_UNIX, SOCK_DGRAM, 0)
-        var replyCapacity: Int32 = 65_536
-        guard setsockopt(socket, SOL_SOCKET, SO_RCVBUF, &replyCapacity, socklen_t(MemoryLayout.size(ofValue: replyCapacity))) == 0 else {
-            close(socket)
-            throw HarnessError("cannot reserve the fixture reply buffer")
-        }
+        clientStem = directory.appending(path: "c\(number)").path
         unlink(path)
-        unlink(clientPath)
-        var address = try unixAddress(clientPath)
-        let bound = withUnsafePointer(to: &address) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(socket, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
-        }
-        guard bound == 0 else { throw HarnessError("cannot bind the fixture client socket: errno \(errno)") }
-        setTimeout(socket, seconds: margin)
+        try bindReplyAddress()
         try run(["open", "-n"] + (swiftUI ? [] : ["-g"]) + ["--stdout", "/dev/null", "--stderr", "/dev/null", fixtureBundle.path, "--args", "--socket", path]
                 + (swiftUI ? ["--swiftui"] : []) + (prohibited ? ["--prohibited"] : [])
                 + (accessory ? ["--accessory"] : []), timeout: margin, check: true)
@@ -247,6 +263,7 @@ final class FixtureSession {
         let received = recv(socket, &buffer, buffer.count, flags)
         if received < 0, flags & MSG_DONTWAIT != 0, errno == EWOULDBLOCK { return nil }
         guard received > 0 else {
+            try retireReplyAddress()
             throw HarnessError("fixture did not answer \(action)")
         }
         let reply = Data(buffer.prefix(received))
@@ -259,10 +276,43 @@ final class FixtureSession {
         return decoded
     }
 
+    /// Binds a reply address no earlier request was given.
+    private func bindReplyAddress() throws {
+        clientPath = "\(clientStem)-\(replyGeneration).sock"
+        replyGeneration += 1
+        socket = Darwin.socket(AF_UNIX, SOCK_DGRAM, 0)
+        var replyCapacity: Int32 = 65_536
+        guard setsockopt(socket, SOL_SOCKET, SO_RCVBUF, &replyCapacity, socklen_t(MemoryLayout.size(ofValue: replyCapacity))) == 0 else {
+            close(socket)
+            throw HarnessError("cannot reserve the fixture reply buffer")
+        }
+        unlink(clientPath)
+        var address = try unixAddress(clientPath)
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(socket, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        guard bound == 0 else { throw HarnessError("cannot bind the fixture client socket: errno \(errno)") }
+        setTimeout(socket, seconds: margin)
+    }
+
+    /// The fixture replies to each request's sender, so once the old address
+    /// is gone a late reply fails to send instead of answering a later caller.
+    private func retireReplyAddress() throws {
+        close(socket)
+        unlink(clientPath)
+        try bindReplyAddress()
+    }
+
     func open(kind: String = "standard", key: String = "window", _ options: [String: Any] = [:]) throws -> UInt32 {
         let reply = try command("open", options.merging(["kind": kind, "key": key]) { $1 })
         guard let window = reply.windows[key] else { throw HarnessError("fixture did not open \(key)") }
         return window
+    }
+
+    /// Opens a native context menu in the fixture window `key` and requires
+    /// what `MenuSample.requireMenuKeptWindow` requires of its samples.
+    func requireMenuKeepsWindow(key: String) throws {
+        try FixtureReply.MenuSample.requireMenuKeptWindow(try command("contextMenu", ["key": key]).contextMenu ?? [], key: key)
     }
 
     func stop() {

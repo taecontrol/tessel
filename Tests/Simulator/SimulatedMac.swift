@@ -184,12 +184,9 @@ package final class SimulatedMac: @unchecked Sendable {
     @MainActor package var screens: any ScreenPort { Applications(mac: self) }
     @MainActor package var windowOrder: any WindowOrderPort { Applications(mac: self) }
     @MainActor package var closetPort: any ClosetPort {
-        closetPort(retainingShownMembership: true)
-    }
-    @MainActor package func closetPort(retainingShownMembership: Bool) -> any ClosetPort {
         let space = closet
         closet += 1
-        return Closet(mac: self, space: space, retainingShownMembership: retainingShownMembership)
+        return Closet(mac: self, space: space)
     }
     @MainActor package var focusedWindow: UInt32? { front.flatMap { apps[$0]?.key } }
     @MainActor package var frontmostApp: Int32? { front }

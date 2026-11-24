@@ -29,7 +29,7 @@ extension Acceptance.Contracts {
         }
     }
 
-    @Test("closet-membership: ordinary queries omit the closet while all-Space queries retain it", contract(.closetMembership))
+    @Test("closet-membership: a closet move leaves a window in exactly its destination Space, and a shown window keeps it through a native menu", contract(.closetMembership))
     func closetMembership() throws {
         let id = try fixture.open(key: "hidden")
         _ = try fixture.open(key: "front")
@@ -42,23 +42,23 @@ extension Acceptance.Contracts {
         try #require(closet != 0 && closet != active)
         defer { _ = try? native("closetStop") }
         try native("closetHide", ["ids": [id]])
-        try requireFinalState("all-Space membership retains the invisible closet") {
+        try requireFinalState("a hidden window is only in the closet, which ordinary queries omit") {
             let state = try native("spaces", ["ids": [id]])
             return state.activeSpace == active && state.memberships?.first?.ordinary.isEmpty == true
                 && state.memberships?.first?.all == [closet]
         }
         try native("closetShow", ["ids": [id]])
-        try requireFinalState("shown windows have ordinary active membership and may retain the invisible membership") {
-            let state = try native("spaces", ["ids": [id]])
-            let all = Set(state.memberships?.first?.all ?? [])
-            return state.activeSpace == active && state.memberships?.first?.ordinary == [active]
-                && (all == [active] || all == [active, closet])
-        }
-        try native("closetStop")
-        try requireFinalState("destroying the closet removes its retained membership") {
+        try requireFinalState("a shown window is only in the active Space") {
             let state = try native("spaces", ["ids": [id]])
             return state.activeSpace == active && state.memberships?.first?.ordinary == [active]
                 && state.memberships?.first?.all == [active]
+        }
+        try desktop.activate(key: "hidden")
+        try fixture.requireMenuKeepsWindow(key: "hidden")
+        try requireFinalState("the shown window stays on screen and only in the active Space after its menu closes") {
+            let state = try native("spaces", ["ids": [id]])
+            return try native().visible.contains(id) && state.activeSpace == active
+                && state.memberships?.first?.ordinary == [active] && state.memberships?.first?.all == [active]
         }
     }
 

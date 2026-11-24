@@ -301,6 +301,13 @@ final class Fixture: NSObject, NSApplicationDelegate {
                 if command["retain"] as? Bool == true { retainedClosedWindows.append(window) }
                 window.close()
             }
+        case "contextMenu":
+            guard let window = windows[key] else { return ["error": "a context menu needs a fixture window"] }
+            guard let margin = command["transitionMargin"] as? Double else { return ["error": "a context menu requires the harness margin"] }
+            var reply = snapshot
+            do { reply["contextMenu"] = try FixtureContextMenu(window: window, margin: margin).run() }
+            catch { return ["error": String(describing: error)] }
+            return reply
         case "minimize": windows[key]?.miniaturize(nil)
         case "restore": windows[key]?.deminiaturize(nil)
         case "hide": NSApp.hide(nil)

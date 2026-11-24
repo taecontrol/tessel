@@ -128,10 +128,9 @@ actions keep their requested position. Size constraints remain independent.
 `WindowSpec.offDisplayMembership` chooses whether a window entirely outside
 the display remains in the active Space's CG list (included by default).
 Frame intersection alone does not prove native visibility or occlusion.
-Space membership is a set: showing a window restores ordinary active membership
-and, by default, retains its invisible closet membership until destruction.
-`closetPort(retainingShownMembership:)` also models immediate removal. A shown
-window with both memberships is visible and is no longer in the closet.
+Space membership is a set. A closet move leaves a window and its sheets in
+exactly the destination Space: hiding leaves only the closet, and showing
+leaves only the active Space.
 
 `deferNextActivation(completion:)` accepts the AX request before activation is
 confirmed. Completion can follow a main/raise write (the default), arrive as a

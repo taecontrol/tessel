@@ -56,12 +56,14 @@ final class FixtureSpaces {
         return (spaces as? [NSNumber] ?? []).map(\.uint64Value)
     }
 
+    /// Removes each window from every Space, closets included (mask `0xF`),
+    /// as the app adapter does, so it ends in exactly `space`.
     func move(_ windows: [UInt32], to space: UInt64) {
         guard !windows.isEmpty, space != 0 else { return }
         let selector = NSSelectorFromString("initWithSpaceID:windows:options:")
         typealias Initialize = @convention(c) (AnyObject, Selector, UInt64, NSArray, UInt64) -> Unmanaged<AnyObject>?
         let initialize = unsafeBitCast(class_getMethodImplementation(moveType, selector), to: Initialize.self)
-        let operation = initialize(allocate(moveType), selector, space, windows.map(NSNumber.init(value:)) as NSArray, 7)?.takeRetainedValue() as? NSObject
+        let operation = initialize(allocate(moveType), selector, space, windows.map(NSNumber.init(value:)) as NSArray, 0xF)?.takeRetainedValue() as? NSObject
         _ = operation?.perform(perform)
     }
 
