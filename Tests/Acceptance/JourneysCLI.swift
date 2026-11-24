@@ -133,7 +133,8 @@ extension Acceptance.Journeys {
         for (flags, count) in [(["--last", "30m"], 1), ([], 2)] {
             let document = try diagnosticLog(flags, reports: reports)
             let entries = try document.entries(for: harness.appPID)
-            try #require(!entries.isEmpty, "the window must include this run's entries, at least its start")
+            try #require(entries.contains { $0.category == "lifecycle" && $0.message.hasPrefix("started ") },
+                         "the window must include this run's started entry")
             try #require(Set(document.crashReports.compactMap { $0["path"] as? String }) == Set(paths.prefix(count)),
                          "the report window must match \(flags.isEmpty ? "the one-hour default" : flags.joined(separator: " "))")
             let text = try harness.invoke(["log", "--reports", reports.path] + flags)
