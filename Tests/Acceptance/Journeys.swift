@@ -248,6 +248,19 @@ extension Acceptance {
             }
         }
 
+        @Test("a timed-out fixture command cannot answer the next command")
+        func lateFixtureReply() throws {
+            try step("a reply the fixture sends after its command timed out reaches no later command") {
+                kill(fixture.pid, SIGSTOP)
+                defer { kill(fixture.pid, SIGCONT) }
+                let timedOut = try #require(throws: HarnessError.self) { try fixture.command("reset") }
+                #expect(timedOut.description == "fixture did not answer reset")
+                kill(fixture.pid, SIGCONT)
+                // The resumed fixture answers the queued reset first, with no windows.
+                _ = try fixture.open(key: "afterTimeout")
+            }
+        }
+
         @Test("reload journey")
         func reload() throws {
             let window = try fixture.open()

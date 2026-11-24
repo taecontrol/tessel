@@ -1,3 +1,4 @@
+import FixtureMenuHold
 import Foundation
 import Testing
 
@@ -64,5 +65,32 @@ extension Acceptance.Verification {
         let landed = try immediate.analyze(postedAt: 0.5, pointsWide: 600, arrival: 4,
                                           initialArrival: [0, 0, 300, 200], finalArrival: [300, 0, 300, 200])
         #expect(landed.intermediateFrames == 0 && landed.changedPixels > 0, "a birth first recorded at its final frame is live pixel evidence")
+    }
+}
+
+extension Acceptance.Verification {
+    @Test("a late native menu gets the command's margin, and a menu that never appears ends tracking at that margin")
+    func lateMenuHold() {
+        var late = MenuHold(startedAt: 0, margin: 5)
+        let tracking = [(1.10, false), (1.25, true), (1.50, true), (1.70, true)].map { late.continues(at: $0.0, menuOnScreen: $0.1) }
+        #expect(tracking == [true, true, true, false], "the hold starts at first visibility and lasts 0.4 s")
+        var unseen = MenuHold(startedAt: 0, margin: 3)
+        #expect([2.95, 3.0].map { unseen.continues(at: $0, menuOnScreen: false) } == [true, false])
+    }
+
+    @Test("the shared native menu verdict accepts a menu that stays from its first appearance and rejects a flash")
+    func menuVerdict() {
+        func sample(_ menu: Bool, window: Bool = true, spaces: [UInt64] = [1]) -> FixtureReply.MenuSample {
+            .init(windowOnScreen: window, menuOnScreen: menu, activeSpace: 1, spaces: spaces)
+        }
+        func accepts(_ samples: [FixtureReply.MenuSample]) -> Bool {
+            (try? FixtureReply.MenuSample.requireMenuKeptWindow(samples, key: "w0")) != nil
+        }
+        #expect(accepts([sample(false), sample(true), sample(true)]))
+        let rejected = [("a flash", [sample(true), sample(false)]), ("an empty trace", []),
+                        ("a menu that never appears", [sample(false), sample(false)]),
+                        ("a parent missing before the menu", [sample(false, window: false), sample(true)]),
+                        ("a parent in two Spaces", [sample(true, spaces: [1, 7]), sample(true, spaces: [1, 7])])]
+        for (name, samples) in rejected { #expect(!accepts(samples), "accepted \(name)") }
     }
 }
