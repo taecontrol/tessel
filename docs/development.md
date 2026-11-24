@@ -208,7 +208,8 @@ validation. A journey replaces a fixture's code and checks rejection while its
 PID still lives. No full window listing, title or personal config is printed or
 saved. Fixture replies reserve 64 KiB per socket because twenty-window AX
 observations exceed macOS's default 2 KiB datagram limit; no system socket
-settings change.
+settings change. A fixture command that times out retires its reply address and
+binds a new one, so a reply that arrives late cannot answer a later command.
 
 Application launch and termination come only from KVO on
 `NSWorkspace.runningApplications`, including accessory apps that never activate.

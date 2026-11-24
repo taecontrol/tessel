@@ -171,8 +171,12 @@ final class FixtureSession {
     private(set) var pid: pid_t = 0
     private(set) var windowIDs = Set<UInt32>()
     private let path: String
-    private let clientPath: String
+    /// The reply address. A request that times out retires it, because its
+    /// reply can still arrive and must reach no later caller.
+    private let clientStem: String
+    private var clientPath = ""
     private var socket: Int32 = -1
+    private var replyGeneration = 0
 
     private struct Unreachable: Error, CustomStringConvertible {
         let code: Int32
@@ -181,7 +185,7 @@ final class FixtureSession {
 
     init(directory: URL, number: Int, swiftUI: Bool = false, prohibited: Bool = false, accessory: Bool = false) throws {
         path = directory.appending(path: "f\(number).sock").path
-        clientPath = directory.appending(path: "c\(number).sock").path
+        clientStem = directory.appending(path: "c\(number)").path
         unlink(path)
         try bindReplyAddress()
         try run(["open", "-n"] + (swiftUI ? [] : ["-g"]) + ["--stdout", "/dev/null", "--stderr", "/dev/null", fixtureBundle.path, "--args", "--socket", path]
@@ -243,6 +247,7 @@ final class FixtureSession {
         let received = recv(socket, &buffer, buffer.count, flags)
         if received < 0, flags & MSG_DONTWAIT != 0, errno == EWOULDBLOCK { return nil }
         guard received > 0 else {
+            try retireReplyAddress()
             throw HarnessError("fixture did not answer \(action)")
         }
         let reply = Data(buffer.prefix(received))
@@ -255,7 +260,10 @@ final class FixtureSession {
         return decoded
     }
 
+    /// Binds a reply address no earlier request was given.
     private func bindReplyAddress() throws {
+        clientPath = "\(clientStem)-\(replyGeneration).sock"
+        replyGeneration += 1
         socket = Darwin.socket(AF_UNIX, SOCK_DGRAM, 0)
         var replyCapacity: Int32 = 65_536
         guard setsockopt(socket, SOL_SOCKET, SO_RCVBUF, &replyCapacity, socklen_t(MemoryLayout.size(ofValue: replyCapacity))) == 0 else {
@@ -269,6 +277,14 @@ final class FixtureSession {
         }
         guard bound == 0 else { throw HarnessError("cannot bind the fixture client socket: errno \(errno)") }
         setTimeout(socket, seconds: margin)
+    }
+
+    /// The fixture replies to each request's sender, so once the old address
+    /// is gone a late reply fails to send instead of answering a later caller.
+    private func retireReplyAddress() throws {
+        close(socket)
+        unlink(clientPath)
+        try bindReplyAddress()
     }
 
     func open(kind: String = "standard", key: String = "window", _ options: [String: Any] = [:]) throws -> UInt32 {
