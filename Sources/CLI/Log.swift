@@ -17,13 +17,7 @@ enum Log {
                 switch argument {
                 case "--json": json = true
                 case "--last":
-                    guard let value = arguments.next(), let unit = value.last,
-                          let multiplier = [Character("m"): 60, "h": 3_600, "d": 86_400][unit] else { throw InvalidArguments() }
-                    let digits = value.dropLast()
-                    guard !digits.isEmpty, digits.allSatisfy({ $0 >= "0" && $0 <= "9" }),
-                          let count = Int(digits), count > 0 else { throw InvalidArguments() }
-                    let (seconds, overflow) = count.multipliedReportingOverflow(by: multiplier)
-                    guard !overflow else { throw InvalidArguments() }
+                    guard let value = arguments.next(), let seconds = LogWindow.seconds(value) else { throw InvalidArguments() }
                     last = TimeInterval(seconds)
                 #if TESSEL_DEVELOPMENT
                 case "--reports":

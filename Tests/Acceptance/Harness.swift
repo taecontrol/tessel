@@ -501,7 +501,11 @@ final class Harness {
     }
 
     func invoke(_ arguments: [String]) throws -> ProcessResult {
-        let result = try run([cli.path] + arguments, environment: environment, timeout: margin, recordsReceipt: false)
+        let result = if arguments.first == "log" {
+            try run([cli.path, "log"] + arguments.dropFirst(), environment: environment, timeout: logStoreScan, recordsReceipt: false)
+        } else {
+            try run([cli.path] + arguments, environment: environment, timeout: margin, recordsReceipt: false)
+        }
         // Judge a JSON answer by when tessel produced it; anything else by receipt.
         let json = try? JSONSerialization.jsonObject(with: result.outputData)
         let answer = (json as? [String: Any]) ?? (json as? [[String: Any]])?.first

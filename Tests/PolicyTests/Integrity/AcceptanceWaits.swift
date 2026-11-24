@@ -39,8 +39,12 @@ enum AcceptanceWaits {
             if let call, call.name == "run" {
                 let arguments = (source as NSString).substring(from: call.open + 1)
                 // Compiler and CI permission provisioning process limits do not
-                // judge a real-system state. All app/CLI waits still use margin.
+                // judge a real-system state.
                 if nonStateProcess(arguments) { return nil }
+                // Neither does a `tessel log` call: macOS reads its whole log
+                // store in the window, not Tessel's state (#75). Every other
+                // app, CLI and fixture call uses margin.
+                if spelling == "timeout", expression == "logStoreScan", logStoreRead(arguments) { return nil }
             }
             if spelling != "since", expression == "margin" || expression.range(of: #"^\.now\(\)\s*\+\s*margin$"#, options: .regularExpression) != nil { return nil }
             return Violation(line: line, spelling: spelling + ": " + expression)
@@ -88,6 +92,10 @@ enum AcceptanceWaits {
 
     private static func nonStateProcess(_ arguments: String) -> Bool {
         arguments.range(of: #"^\s*\[\s*(?:buildTool\.path\b|provision\b|"xcrun")"#, options: .regularExpression) != nil
+    }
+
+    private static func logStoreRead(_ arguments: String) -> Bool {
+        arguments.range(of: #"^\s*\[\s*cli\.path\s*,\s*"log"\s*\]"#, options: .regularExpression) != nil
     }
 
     private static func insideWrapper(_ name: String, at location: Int, code: NSString) -> Bool {
@@ -152,13 +160,19 @@ enum AcceptanceWaits {
                        "func run(_ command: [String], timeout: Double = 1) {}",
                        "exited.wait(timeout: .now() + timeout)", "setTimeout(socket, seconds: timeout)",
                        "let margin = 0.5", "let deadline = monotonicSeconds() + 0.5",
-                       "let retryDeadline = monotonicSeconds() + remaining"] {
+                       "let retryDeadline = monotonicSeconds() + remaining",
+                       "run([cli.path, \"log\"] + arguments.dropFirst(), timeout: 30)", "run([cli.path], timeout: logStoreScan)",
+                       "run([cli.path, \"windows\"], timeout: logStoreScan)", "run([cli.path, \"status\"], timeout: logStoreScan)",
+                       "run([cli.path, \"restart\"], timeout: logStoreScan)", "run([appExecutable.path], timeout: logStoreScan)",
+                       "run([fixtureExecutable.path], timeout: logStoreScan)",
+                       "run([cli.path] + arguments, timeout: arguments.first == \"log\" ? logStoreScan : margin)"] {
             #expect(!AcceptanceWaits.violations(in: source).isEmpty, "Accepted \(source)")
         }
         for source in ["eventually(within: margin) { true }", "wait(timeout: .now() + margin)", "setTimeout(socket, seconds: margin)",
                        "finalState { true }", "run([buildTool.path], timeout: 600)", "run([provision], timeout: 30)",
                        "run([\"xcrun\", \"swiftc\"], timeout: 120)", "run([cli.path], timeout: margin)", "try process.run()",
                        "run(commands.map { $0 }, timeout: margin)",
+                       "run([cli.path, \"log\"] + arguments.dropFirst(), environment: environment, timeout: logStoreScan, recordsReceipt: false)",
                        "func run(_ command: [String], timeout: Double = margin) throws -> ProcessResult { exited.wait(timeout: .now() + timeout) }",
                        "init(path: String, timeout: Double) throws { setTimeout(socket, seconds: timeout) }",
                        "let margin = 5.0", "let deadline = monotonicSeconds() + margin",
