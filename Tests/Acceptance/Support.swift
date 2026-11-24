@@ -31,6 +31,11 @@ func monotonicSeconds() -> Double {
 // The generous final-state margin for every real-system state check.
 let margin = 5.0
 
+// A `tessel log` call's process limit. macOS reads every entry the Mac logged
+// in the window, so the time follows system-wide volume; reading the whole
+// store measured 8.9-12.2 s on the owner's Mac (#75).
+let logStoreScan = 30.0
+
 func finalValue<T>(_ predicate: () throws -> T?) rethrows -> T? {
     let deadline = monotonicSeconds() + margin
     while true {
@@ -129,7 +134,8 @@ func run(_ command: [String], environment: [String: String]? = nil, timeout: Dou
         kill(process.processIdentifier, SIGKILL)
         exited.wait()
         _ = reading.wait(timeout: .now() + margin)
-        throw ProcessTimeout(description: "\(URL(fileURLWithPath: command[0]).lastPathComponent) timed out after \(timeout) seconds")
+        let name = ([URL(fileURLWithPath: command[0]).lastPathComponent] + command.dropFirst()).joined(separator: " ")
+        throw ProcessTimeout(description: "\(name) timed out after \(timeout) seconds")
     }
     _ = reading.wait(timeout: .now() + margin)
     if recordsReceipt { SampleClock.record(monotonicSeconds()) }

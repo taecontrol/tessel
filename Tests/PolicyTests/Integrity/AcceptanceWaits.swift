@@ -39,8 +39,12 @@ enum AcceptanceWaits {
             if let call, call.name == "run" {
                 let arguments = (source as NSString).substring(from: call.open + 1)
                 // Compiler and CI permission provisioning process limits do not
-                // judge a real-system state. All app/CLI waits still use margin.
+                // judge a real-system state.
                 if nonStateProcess(arguments) { return nil }
+                // Neither does a `tessel log` call: macOS reads its whole log
+                // store in the window, not Tessel's state (#75). Every other
+                // app, CLI and fixture call uses margin.
+                if spelling == "timeout", expression == "logStoreScan", logStoreRead(arguments) { return nil }
             }
             if spelling != "since", expression == "margin" || expression.range(of: #"^\.now\(\)\s*\+\s*margin$"#, options: .regularExpression) != nil { return nil }
             return Violation(line: line, spelling: spelling + ": " + expression)
@@ -88,6 +92,10 @@ enum AcceptanceWaits {
 
     private static func nonStateProcess(_ arguments: String) -> Bool {
         arguments.range(of: #"^\s*\[\s*(?:buildTool\.path\b|provision\b|"xcrun")"#, options: .regularExpression) != nil
+    }
+
+    private static func logStoreRead(_ arguments: String) -> Bool {
+        arguments.range(of: #"^\s*\[\s*cli\.path\s*,\s*"log"\s*\]"#, options: .regularExpression) != nil
     }
 
     private static func insideWrapper(_ name: String, at location: Int, code: NSString) -> Bool {

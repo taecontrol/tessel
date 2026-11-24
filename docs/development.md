@@ -151,7 +151,10 @@ All real-system state checks use the single generous 5 s `margin` in
 contracts and captures. Their final-state API accepts no per-call deadline.
 Only `Latency.swift` judges elapsed time. Compilation and CI permission
 provisioning have separate process limits; resource observation retains its
-ADR 0003 window and settle. The integrity check rejects shorter state waits and
+ADR 0003 window and settle. A `tessel log` process has its own 30 s limit,
+`logStoreScan`, because macOS reads its whole log store in the window rather
+than Tessel's state (#75); a `log` query inside a final-state wait is still
+judged by `margin`. The integrity check rejects shorter state waits and
 retired `since:` or `within:` APIs outside latency.
 
 ### Signed fixture harness
@@ -300,7 +303,9 @@ the owner's signing identity and never provision the TCC database.
 
 `tessel log` reads this build's macOS unified log, including after Tessel quits.
 It defaults to the last hour; use `--last 30m`, `--last 6h` or `--last 2d` for a
-different window. Text has one `HH:MM:SS level category message` line per entry,
+different window. Its time follows how much the whole Mac logged in the window,
+not Tessel's few entries: about 1–2 s for an hour, up to about 10 s for the whole
+store, which macOS keeps by size. Text has one `HH:MM:SS level category message` line per entry,
 then matching crash-report paths under **Crash reports**. `--json` returns:
 
 ```json
