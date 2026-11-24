@@ -8,22 +8,18 @@ import Darwin
 /// samples and then ends tracking; AX answering during tracking is unobserved.
 @MainActor
 final class FixtureContextMenu: NSObject {
-    /// The menu stays open this long once it is on screen.
-    private static let interval = 0.05, held = 0.4
+    private static let interval = 0.05
     private let window: NSWindow
-    /// The harness margin for the whole command. A menu that never appears
-    /// ends tracking when it runs out, so the fixture answers later commands.
-    private let margin: Double
     private let spaces: FixtureSpaces
     private let menu = NSMenu()
     private var samples: [[String: Any]] = []
-    private var started = 0.0
-    private var appeared: Double?
+    /// Starts with the command and is bounded by the harness margin for all of it.
+    private var hold: MenuHold
 
     init(window: NSWindow, margin: Double) throws {
         self.window = window
-        self.margin = margin
         spaces = try FixtureSpaces()
+        hold = MenuHold(startedAt: Self.now(), margin: margin)
         super.init()
         for index in 1...3 { menu.addItem(withTitle: "Fixture item \(index)", action: nil, keyEquivalent: "") }
     }
@@ -36,7 +32,6 @@ final class FixtureContextMenu: NSObject {
         }
         RunLoop.main.add(timer, forMode: .common)
         defer { timer.invalidate() }
-        started = Self.now()
         menu.popUp(positioning: nil, at: NSPoint(x: 40, y: max(0, view.bounds.height - 40)), in: view)
         return samples
     }
@@ -50,8 +45,7 @@ final class FixtureContextMenu: NSObject {
         samples.append(["windowOnScreen": own.contains { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == id },
                         "menuOnScreen": menuOnScreen, "activeSpace": spaces.active,
                         "spaces": spaces.memberships(id, mask: 0xF), "sampledAt": now])
-        if appeared == nil, menuOnScreen { appeared = now }
-        if appeared.map({ now - $0 >= Self.held }) ?? (now - started >= margin) { menu.cancelTracking() }
+        if !hold.continues(at: now, menuOnScreen: menuOnScreen) { menu.cancelTracking() }
     }
 
     private static func now() -> Double { Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1e9 }

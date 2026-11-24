@@ -28,6 +28,9 @@ let package = Package(
         .testTarget(name: "BuildTests", dependencies: ["Build"], path: "Tests/BuildTests"),
     ]
     + (Context.environment["TESSEL_ACCEPTANCE"] == "1" ? [
-        .testTarget(name: "Acceptance", dependencies: ["Assumptions"], path: "Tests/Acceptance", exclude: ["resource-budget.json"]),
+        // tessel-build compiles every fixture source into the signed fixture;
+        // this target lets Acceptance judge the fixture's menu timing rule.
+        .target(name: "FixtureMenuHold", path: "Tests/Fixture", sources: ["MenuHold.swift"]),
+        .testTarget(name: "Acceptance", dependencies: ["Assumptions", "FixtureMenuHold"], path: "Tests/Acceptance", exclude: ["resource-budget.json"]),
     ] : [])
 )
