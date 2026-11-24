@@ -160,13 +160,19 @@ enum AcceptanceWaits {
                        "func run(_ command: [String], timeout: Double = 1) {}",
                        "exited.wait(timeout: .now() + timeout)", "setTimeout(socket, seconds: timeout)",
                        "let margin = 0.5", "let deadline = monotonicSeconds() + 0.5",
-                       "let retryDeadline = monotonicSeconds() + remaining"] {
+                       "let retryDeadline = monotonicSeconds() + remaining",
+                       "run([cli.path, \"log\"] + arguments.dropFirst(), timeout: 30)", "run([cli.path], timeout: logStoreScan)",
+                       "run([cli.path, \"windows\"], timeout: logStoreScan)", "run([cli.path, \"status\"], timeout: logStoreScan)",
+                       "run([cli.path, \"restart\"], timeout: logStoreScan)", "run([appExecutable.path], timeout: logStoreScan)",
+                       "run([fixtureExecutable.path], timeout: logStoreScan)",
+                       "run([cli.path] + arguments, timeout: arguments.first == \"log\" ? logStoreScan : margin)"] {
             #expect(!AcceptanceWaits.violations(in: source).isEmpty, "Accepted \(source)")
         }
         for source in ["eventually(within: margin) { true }", "wait(timeout: .now() + margin)", "setTimeout(socket, seconds: margin)",
                        "finalState { true }", "run([buildTool.path], timeout: 600)", "run([provision], timeout: 30)",
                        "run([\"xcrun\", \"swiftc\"], timeout: 120)", "run([cli.path], timeout: margin)", "try process.run()",
                        "run(commands.map { $0 }, timeout: margin)",
+                       "run([cli.path, \"log\"] + arguments.dropFirst(), environment: environment, timeout: logStoreScan, recordsReceipt: false)",
                        "func run(_ command: [String], timeout: Double = margin) throws -> ProcessResult { exited.wait(timeout: .now() + timeout) }",
                        "init(path: String, timeout: Double) throws { setTimeout(socket, seconds: timeout) }",
                        "let margin = 5.0", "let deadline = monotonicSeconds() + margin",

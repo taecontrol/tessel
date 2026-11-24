@@ -1225,7 +1225,7 @@ screenshot of a real machine is committed.
 
 ## Acceptance example layers (#24)
 
-This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49, #51, #55, #57, #59, #62, #63, #67 and #69.
+This table is the maintained example-to-layer map for issues #1, #2, #18, #19, #26, #33, #36, #38, #39, #40, #41, #49, #51, #55, #57, #59, #62, #63, #67, #69 and #75.
 Its format is exactly `Example | Layer`, one literal ID per row, with no
 description in either cell. Numbered IDs use `#1 E9`; unnumbered IDs use
 `#1 U-cli-args`. P means deterministic policy, J journey, L latency,
@@ -1603,6 +1603,8 @@ counters. E6 tags the existing three resource scenes with unchanged budgets.
 | #69 E2 | P |
 | #69 E3 | P |
 | #69 E4 | C |
+| #75 E1 | P |
+| #75 E2 | P |
 <!-- Pending capture: #33 E20 -->
 <!-- Pending capture: #36 E8 -->
 <!-- Pending capture: #59 E8 -->
