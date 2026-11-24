@@ -29,7 +29,7 @@ extension Acceptance.Contracts {
         }
     }
 
-    @Test("closet-membership: a closet move leaves a window in exactly its destination Space, which ordinary queries omit when it is the closet", contract(.closetMembership))
+    @Test("closet-membership: a closet move leaves a window in exactly its destination Space, and a shown window keeps it through a native menu", contract(.closetMembership))
     func closetMembership() throws {
         let id = try fixture.open(key: "hidden")
         _ = try fixture.open(key: "front")
@@ -52,6 +52,13 @@ extension Acceptance.Contracts {
             let state = try native("spaces", ["ids": [id]])
             return state.activeSpace == active && state.memberships?.first?.ordinary == [active]
                 && state.memberships?.first?.all == [active]
+        }
+        try desktop.activate(key: "hidden")
+        try fixture.requireMenuKeepsWindow(key: "hidden")
+        try requireFinalState("the shown window stays on screen and only in the active Space after its menu closes") {
+            let state = try native("spaces", ["ids": [id]])
+            return try native().visible.contains(id) && state.activeSpace == active
+                && state.memberships?.first?.ordinary == [active] && state.memberships?.first?.all == [active]
         }
     }
 

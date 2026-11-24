@@ -118,6 +118,14 @@ struct FixtureReply: Decodable {
     let minimizeEvents: [String: [MinimizeEvent]]?
     let miniaturized: [String: Bool]?
     let videosReady: [String: Bool]?
+    /// The fixture's own samples while its native context menu tracked.
+    struct MenuSample: Decodable {
+        let windowOnScreen: Bool
+        let menuOnScreen: Bool
+        let activeSpace: UInt64
+        let spaces: [UInt64]
+    }
+    let contextMenu: [MenuSample]?
 }
 
 struct Observation: Decodable {
@@ -263,6 +271,20 @@ final class FixtureSession {
         let reply = try command("open", options.merging(["kind": kind, "key": key]) { $1 })
         guard let window = reply.windows[key] else { throw HarnessError("fixture did not open \(key)") }
         return window
+    }
+
+    /// Opens a native context menu in the fixture window `key` and requires
+    /// that the menu appeared and that the window stayed on screen in exactly
+    /// the active Space in every sample the fixture took while the menu tracked.
+    func requireMenuKeepsWindow(key: String) throws {
+        let samples = try command("contextMenu", ["key": key]).contextMenu ?? []
+        let described = samples.map { "window \($0.windowOnScreen) menu \($0.menuOnScreen) spaces \($0.spaces)" }
+        guard samples.contains(where: \.menuOnScreen) else {
+            throw HarnessError("the context menu never appeared on screen; samples \(described)")
+        }
+        guard samples.allSatisfy({ $0.windowOnScreen && $0.spaces == [$0.activeSpace] }) else {
+            throw HarnessError("fixture window \(key) left the screen or the active Space while its menu tracked; samples \(described)")
+        }
     }
 
     func stop() {
