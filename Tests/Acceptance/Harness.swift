@@ -172,7 +172,7 @@ final class FixtureSession {
     private(set) var windowIDs = Set<UInt32>()
     private let path: String
     private let clientPath: String
-    private let socket: Int32
+    private var socket: Int32 = -1
 
     private struct Unreachable: Error, CustomStringConvertible {
         let code: Int32
@@ -182,20 +182,8 @@ final class FixtureSession {
     init(directory: URL, number: Int, swiftUI: Bool = false, prohibited: Bool = false, accessory: Bool = false) throws {
         path = directory.appending(path: "f\(number).sock").path
         clientPath = directory.appending(path: "c\(number).sock").path
-        socket = Darwin.socket(AF_UNIX, SOCK_DGRAM, 0)
-        var replyCapacity: Int32 = 65_536
-        guard setsockopt(socket, SOL_SOCKET, SO_RCVBUF, &replyCapacity, socklen_t(MemoryLayout.size(ofValue: replyCapacity))) == 0 else {
-            close(socket)
-            throw HarnessError("cannot reserve the fixture reply buffer")
-        }
         unlink(path)
-        unlink(clientPath)
-        var address = try unixAddress(clientPath)
-        let bound = withUnsafePointer(to: &address) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(socket, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
-        }
-        guard bound == 0 else { throw HarnessError("cannot bind the fixture client socket: errno \(errno)") }
-        setTimeout(socket, seconds: margin)
+        try bindReplyAddress()
         try run(["open", "-n"] + (swiftUI ? [] : ["-g"]) + ["--stdout", "/dev/null", "--stderr", "/dev/null", fixtureBundle.path, "--args", "--socket", path]
                 + (swiftUI ? ["--swiftui"] : []) + (prohibited ? ["--prohibited"] : [])
                 + (accessory ? ["--accessory"] : []), timeout: margin, check: true)
@@ -265,6 +253,22 @@ final class FixtureSession {
         SampleClock.record(decoded.observation?.sampledAt ?? monotonicSeconds())
         windowIDs = Set(decoded.windows.values)
         return decoded
+    }
+
+    private func bindReplyAddress() throws {
+        socket = Darwin.socket(AF_UNIX, SOCK_DGRAM, 0)
+        var replyCapacity: Int32 = 65_536
+        guard setsockopt(socket, SOL_SOCKET, SO_RCVBUF, &replyCapacity, socklen_t(MemoryLayout.size(ofValue: replyCapacity))) == 0 else {
+            close(socket)
+            throw HarnessError("cannot reserve the fixture reply buffer")
+        }
+        unlink(clientPath)
+        var address = try unixAddress(clientPath)
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(socket, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        guard bound == 0 else { throw HarnessError("cannot bind the fixture client socket: errno \(errno)") }
+        setTimeout(socket, seconds: margin)
     }
 
     func open(kind: String = "standard", key: String = "window", _ options: [String: Any] = [:]) throws -> UInt32 {
